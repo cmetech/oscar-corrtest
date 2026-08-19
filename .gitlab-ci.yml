@@ -1,0 +1,65 @@
+stages:
+  - verify
+  - package
+  - release
+
+default:
+  image: golang:1.27.0-bookworm@sha256:d22fb682b72b6ebf58365871c437cf75794131831a6b8e6f6ebc5302c67c1cad
+
+variables:
+  GOTOOLCHAIN: local
+  GOCACHE: $CI_PROJECT_DIR/.cache/go-build
+  GOMODCACHE: $CI_PROJECT_DIR/.cache/go-mod
+
+cache:
+  key:
+    files:
+      # Change this to go.sum in the first commit that adds a dependency.
+      - go.mod
+  paths:
+    - .cache/go-build/
+    - .cache/go-mod/
+
+verify:
+  stage: verify
+  script:
+    - make tools
+    - make ci-core
+
+package:
+  stage: package
+  needs:
+    - job: verify
+  script:
+    - make package
+    - make checksums
+  artifacts:
+    name: oscar-corrtest-$CI_COMMIT_SHA
+    expire_in: 14 days
+    when: always
+    paths:
+      - dist/*.tar.gz
+      - dist/SHA256SUMS
+
+# Operator gate before the first real semantic tag: confirm CI_JOB_TOKEN can
+# upload to the package registry and create release links in the target GitLab
+# project. The equivalent GitHub gate must confirm release permissions and
+# branch protection. Local YAML validation cannot prove either remote setting.
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/cli:v1.109.0@sha256:4dbd09345a1d8b2a14a1e655ce992ad3fb9138c1d4bec75b04232efa0701f456
+  needs:
+    - job: package
+      artifacts: true
+  variables:
+    GITLAB_TOKEN: $CI_JOB_TOKEN
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
+    - when: never
+  script:
+    - >-
+      glab release create "$CI_COMMIT_TAG"
+      --name "OSCAR Correlation Test Harness $CI_COMMIT_TAG"
+      --notes "Automated release $CI_COMMIT_TAG"
+      --use-package-registry
+      dist/*.tar.gz dist/SHA256SUMS
