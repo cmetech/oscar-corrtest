@@ -82,7 +82,7 @@ func generateNonce() (string, error) {
 	if _, err := rand.Read(random); err != nil {
 		return "", err
 	}
-	return base64.RawStdEncoding.EncodeToString(random), nil
+	return base64.RawURLEncoding.EncodeToString(random), nil
 }
 
 // Run serves until the context is canceled or the server fails.

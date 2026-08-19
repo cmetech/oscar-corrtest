@@ -1,5 +1,110 @@
-.page-heading { max-width: 46rem; }
-.eyebrow { color: var(--ct-accent); text-transform: uppercase; }
-.empty-state { margin-top: 3rem; max-width: 42rem; padding: 3rem; background: var(--ct-card); text-align: center; }
-.empty-mark { font-size: 3rem; color: var(--ct-accent); }
-footer { margin-top: 2rem; color: var(--ct-muted); }
+.theme-toggle {
+  display: inline-grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid #4A505D;
+  border-radius: var(--ct-radius-input);
+  background: #272B34;
+  color: #FAFAFA;
+  cursor: pointer;
+  font: inherit;
+  transition: border-color 140ms ease, background-color 140ms ease, transform 140ms ease;
+}
+
+.theme-toggle:hover {
+  border-color: var(--ct-accent);
+  background: #303541;
+}
+
+.theme-toggle:active {
+  transform: translateY(1px);
+}
+
+.theme-toggle__icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.page-heading {
+  max-width: 760px;
+}
+
+.eyebrow {
+  margin: 0 0 var(--ct-space-3);
+  color: var(--ct-activity);
+  font-family: var(--ct-font-mono);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: var(--ct-space-3);
+  font-size: clamp(30px, 4vw, 48px);
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+}
+
+.page-heading > p:last-child {
+  max-width: 620px;
+  color: var(--ct-fg-muted);
+  font-size: 17px;
+}
+
+.empty-state {
+  position: relative;
+  overflow: hidden;
+  max-width: 760px;
+  margin-top: var(--ct-space-8);
+  padding: clamp(var(--ct-space-8), 7vw, 64px);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-card);
+  background: var(--ct-card);
+  text-align: center;
+}
+
+.empty-state::before {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: var(--ct-accent);
+  content: "";
+}
+
+.empty-state h2 {
+  margin-bottom: var(--ct-space-2);
+  font-size: 22px;
+}
+
+.empty-state p {
+  margin-bottom: 0;
+  color: var(--ct-fg-muted);
+}
+
+.empty-mark {
+  display: grid;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto var(--ct-space-6);
+  place-items: center;
+  border: 1px dashed var(--ct-border);
+  border-radius: 50%;
+  color: var(--ct-accent);
+  font-family: var(--ct-font-mono);
+  font-size: 30px;
+}
+
+.page-footer {
+  margin-top: var(--ct-space-8);
+  color: var(--ct-fg-muted);
+  font-family: var(--ct-font-mono);
+  font-size: 11px;
+}

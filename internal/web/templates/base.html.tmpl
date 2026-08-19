@@ -12,11 +12,19 @@
 </head>
 <body>
   <header class="app-header">
-    <a class="brand" href="/" aria-label="OSCAR Correlation Test Harness home">OSCAR <span>Correlation Test Harness</span></a>
-    <span class="build">{{.Version.Version}} · {{.Version.Commit}}</span>
+    <div class="brand-lockup">
+      <span class="brand-mark" aria-hidden="true">OC</span>
+      <a class="brand" href="/" aria-label="OSCAR Correlation Test Harness home">OSCAR <span>Correlation Test Harness</span></a>
+    </div>
+    <div class="header-tools">
+      <span class="build">{{.Version.Version}} · {{.Version.Commit}}</span>
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Light theme" aria-pressed="false" title="Switch to light theme">
+        <span class="theme-toggle__icon" data-theme-icon aria-hidden="true">☾</span>
+      </button>
+    </div>
   </header>
   <div class="app-shell">
-    <nav aria-label="Primary">
+    <nav class="primary-nav" aria-label="Primary">
       <a href="/" aria-current="page">Dashboard</a>
       <a href="#" aria-disabled="true">Run test</a>
       <a href="#" aria-disabled="true">Runs</a>
