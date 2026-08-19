@@ -2,12 +2,19 @@
 
 > Give everything below this line to a fresh capable model or agent that did not
 > author the design or implementation plan. Give it read-only access to
-> `/Users/coreyellis/code/github.com/cmetech/oscar_app`. This is a hostile,
+> `/Users/coreyellis/code/github.com/cmetech/oscar_app` and
+> `/Users/coreyellis/code/github.com/cmetech/otto_app/otto-gateway`, with write
+> access only to the required review-output file named below. This is a hostile,
 > evidence-driven pre-implementation review. The reviewer may run read-only
-> searches and non-mutating validation commands, but must not create the
-> `oscar-corrtest` repository, edit either reviewed document, modify OSCAR or
-> OTTO, commit, push, create a remote repository, start or restart services,
-> send alerts, create rules, or contact a live OSCAR deployment.
+> searches, non-mutating validation commands, and disposable experiments under
+> a newly created temporary directory outside both workspaces. It must not edit
+> either reviewed document, modify OSCAR or OTTO, add implementation to
+> `oscar-corrtest`, commit, push, create a remote repository, start or restart
+> services, send alerts, create rules, or contact a live OSCAR deployment.
+>
+> Recommended orchestration: run this prompt twice with independent reviewers,
+> preserve both raw reviews, and compare their invariant matrices without showing
+> either reviewer the other's conclusions.
 
 ---
 
@@ -47,15 +54,32 @@ Workspace:        /Users/coreyellis/code/github.com/cmetech/oscar_app
 Existing OSCAR:   /Users/coreyellis/code/github.com/cmetech/oscar_app/oscar
 Proposed repo:    /Users/coreyellis/code/github.com/cmetech/oscar_app/oscar-corrtest
 Proposed module:  github.com/cmetech/oscar-corrtest
+Review date:      2026-08-19
+Initial docs-only commit: 74adce897694313918136fda23fb386b782e0a78
 ```
 
-At review time, `oscar-corrtest` is intentionally absent. This is a plan review,
-not a code review. Confirm its absence, but do not create it.
+At review time, `oscar-corrtest` is a docs-only repository containing this
+prompt under `docs/reviews/`. Confirm that no implementation source, `go.mod`,
+`Makefile`, CI workflow, or packaging file exists. Do not add any.
+
+All relative paths in this document are relative to the Workspace root shown
+above, not to the `oscar-corrtest` repository.
 
 Review these two authored artifacts completely:
 
 1. `docs/superpowers/specs/2026-08-19-oscar-correlation-test-harness-design.md`
 2. `docs/superpowers/plans/2026-08-19-oscar-corrtest-repository-foundation.md`
+
+Verify their bytes before reviewing. Accept `shasum -a 256` or `sha256sum`:
+
+```text
+c401e5587a13c0aa9edc2474f2a5e291a8545481cd75e8da0cf34cf282022908  docs/superpowers/specs/2026-08-19-oscar-correlation-test-harness-design.md
+6ec8194f450a4e5b28100dc07fac94735842cf87d7b24e1947f41d87064e9dc7  docs/superpowers/plans/2026-08-19-oscar-corrtest-repository-foundation.md
+```
+
+Stop with a scope error if either digest differs. Record the actual
+`oscar-corrtest` HEAD in the review; it may be a descendant of the initial
+docs-only commit because this prompt can receive review-driven corrections.
 
 The design is the proposed product contract. The implementation plan is only
 Plan 1 of a stated seven-plan series. Treat the absence of Plans 2–7 as a risk
@@ -99,6 +123,10 @@ comparison—not an OSCAR harness requirement:
 /Users/coreyellis/code/github.com/cmetech/otto_app/otto-gateway/internal/admin/static/css/admin.css
 ```
 
+If the OTTO checkout is not readable in the reviewer's sandbox, mark only the
+OTTO comparison claims `UNPROVEN`; do not silently skip them and do not treat
+their unavailability as a defect in the harness plan.
+
 Use targeted searches to follow relevant routes and behavior beyond this list.
 Do not broaden into an unbounded whole-OSCAR code review. Cite file and line
 evidence for every claim about current behavior.
@@ -116,7 +144,7 @@ heading, task name, example, comment, or test name as proof.
 
 For each finding provide:
 
-1. stable ID (`BLOCK-`, `HIGH-`, `MED-`, or `LOW-`);
+1. stable ID (`BLOCKER-`, `HIGH-`, `MED-`, or `LOW-`);
 2. classification: `CONFIRMED`, `UNPROVEN`, or `PREFERENCE`;
 3. exact evidence with file and line references;
 4. a concrete failure scenario;
@@ -138,10 +166,21 @@ Severity meanings:
 Do not inflate severity. A preference without a concrete failure scenario is
 not a finding.
 
+The executive verdict answers one question only: **may implementation of Plan 1
+begin from the currently reviewed plan?** A later-slice defect blocks Plan 1
+only if Plan 1 freezes an incompatible boundary or makes that defect materially
+harder to correct. Otherwise classify it against the affected later plan or
+release gate.
+
 ## Locked invariants to falsify
 
 Produce a `PASS / FAIL / UNPROVEN / DEFERRED-WITH-GATE / DEFERRED-WITHOUT-GATE`
 matrix for every invariant below.
+
+Prioritize invariants 1–8, 10, 20, 24, and 25 when determining the Plan 1
+verdict. Invariants 9, 11–19, and 21–23 may be `DEFERRED-WITH-GATE` when the
+design names a concrete follow-on owner and acceptance gate; deferral without
+both remains a finding.
 
 1. `oscar-corrtest` is a genuinely standalone repository. A clean checkout
    builds and tests with `GOWORK=off`, no readable sibling OSCAR tree, no copied
@@ -292,7 +331,12 @@ did not create is BLOCKER.
 
 ## Attack campaign 6 — repository, build, and dual CI
 
-- Execute or statically validate every Plan 1 command in its stated order.
+- Audit every Plan 1 command in its stated order. Commands that create files or
+  repositories may be exercised only in one newly allocated temporary directory
+  outside both workspaces, with `GOCACHE`, `GOMODCACHE`, and `GOBIN` redirected
+  beneath that directory. Remove only that validated temporary directory when
+  finished. Never execute publication, remote-repository, or live-service
+  commands; validate those statically.
 - Verify `go.mod` syntax, `gofmt` discovery, module-tidy cleanliness, race-test
   CGO posture, linker paths, cross-build output naming, tar modes, and checksum
   portability on macOS and Linux.
@@ -306,6 +350,11 @@ did not create is BLOCKER.
   hide real source references.
 - Check systemd hardening against present and future SQLite/config paths and
   trusted certificate needs.
+
+Network access is not guaranteed. When available, use it only for read-only
+verification of action SHAs, image manifests/digests, released tool versions,
+and platform availability. When unavailable or denied, mark the affected facts
+`UNPROVEN`; never infer PASS from a plausible version string or digest.
 
 ## Attack campaign 7 — UI and local security
 
@@ -322,11 +371,19 @@ did not create is BLOCKER.
 
 ## Required output
 
-Write one markdown review with these sections:
+Write the complete review to this one permitted workspace output:
+
+```text
+/Users/coreyellis/code/github.com/cmetech/oscar_app/oscar-corrtest/docs/reviews/2026-08-19-oscar-corrtest-adversarial-plan-review.md
+```
+
+Do not modify any other workspace file. Also return a concise executive summary
+to the caller after the file is safely written. The markdown review must contain
+these sections:
 
 1. **Scope and evidence inspected**
-2. **Executive verdict** — exactly one of `READY`, `READY WITH REQUIRED
-   CHANGES`, or `BLOCK IMPLEMENTATION`
+2. **Executive verdict for beginning Plan 1** — exactly one of `READY`, `READY
+   WITH REQUIRED CHANGES`, or `BLOCK PLAN 1 IMPLEMENTATION`
 3. **Blocking findings**
 4. **High-severity findings**
 5. **Medium- and low-severity findings**
