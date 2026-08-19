@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 
+	"github.com/cmetech/oscar-corrtest/internal/config"
+	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/version"
 	"github.com/cmetech/oscar-corrtest/internal/web"
 )
@@ -14,23 +17,46 @@ import (
 // ServeFunc starts the embedded web application.
 type ServeFunc func(context.Context, web.Options) error
 
+// ApplicationRuntime is the secret-safe durable service surface used by CLI commands.
+type ApplicationRuntime interface {
+	CreateTarget(context.Context, domain.TargetInput) (domain.Target, error)
+	ListTargets(context.Context) ([]domain.Target, error)
+	ListRuns(context.Context, domain.RunFilter) ([]domain.Run, error)
+	GetRun(context.Context, string) (domain.Run, error)
+	Backup(context.Context, string) error
+	Close() error
+}
+
+// OpenRuntimeFunc initializes durable services from effective configuration.
+type OpenRuntimeFunc func(context.Context, config.Settings) (ApplicationRuntime, error)
+
 // App is the oscar-corrtest command-line application.
 type App struct {
 	stdout io.Writer
 	stderr io.Writer
 	info   version.Info
 	serve  ServeFunc
+	open   OpenRuntimeFunc
+	getenv func(string) string
 }
 
 // New constructs an application using the supplied output streams and build metadata.
 func New(stdout, stderr io.Writer, info version.Info, serve ServeFunc) *App {
-	return &App{stdout: stdout, stderr: stderr, info: info, serve: serve}
+	return &App{stdout: stdout, stderr: stderr, info: info, serve: serve, getenv: os.Getenv}
+}
+
+// NewConfigured constructs the complete CLI with durable runtime initialization.
+func NewConfigured(stdout, stderr io.Writer, info version.Info, serve ServeFunc, open OpenRuntimeFunc, getenv func(string) string) *App {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	return &App{stdout: stdout, stderr: stderr, info: info, serve: serve, open: open, getenv: getenv}
 }
 
 // Run executes a command and returns its process exit code.
 func (a *App) Run(ctx context.Context, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(a.stderr, "usage: oscar-corrtest <version|serve>")
+		fmt.Fprintln(a.stderr, "usage: oscar-corrtest <version|serve|target|runs|backup>")
 		return 2
 	}
 
@@ -40,8 +66,14 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return 0
 	case "serve":
 		return a.runServe(ctx, args[1:])
+	case "target":
+		return a.runTarget(ctx, args[1:])
+	case "runs":
+		return a.runRuns(ctx, args[1:])
+	case "backup":
+		return a.runBackup(ctx, args[1:])
 	default:
-		fmt.Fprintf(a.stderr, "unknown command %q\nusage: oscar-corrtest <version|serve>\n", args[0])
+		fmt.Fprintf(a.stderr, "unknown command %q\nusage: oscar-corrtest <version|serve|target|runs|backup>\n", args[0])
 		return 2
 	}
 }
@@ -49,7 +81,9 @@ func (a *App) Run(ctx context.Context, args []string) int {
 func (a *App) runServe(ctx context.Context, args []string) int {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.SetOutput(a.stderr)
-	listen := flags.String("listen", "127.0.0.1:8787", "literal loopback listen address")
+	listen := flags.String("listen", "", "literal loopback listen address")
+	configPath := flags.String("config", "", "configuration file")
+	dataDir := flags.String("data-dir", "", "local state directory")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -57,7 +91,12 @@ func (a *App) runServe(ctx context.Context, args []string) int {
 		fmt.Fprintln(a.stderr, "serve does not accept positional arguments")
 		return 2
 	}
-	if err := validateLoopback(*listen); err != nil {
+	settings, err := config.Load(a.getenv, config.Overrides{ConfigPath: *configPath, DataDir: *dataDir, ListenAddress: *listen})
+	if err != nil {
+		fmt.Fprintf(a.stderr, "serve: %v\n", err)
+		return 2
+	}
+	if err := validateLoopback(settings.ListenAddress); err != nil {
 		fmt.Fprintf(a.stderr, "%v; authenticated remote serving is not implemented\n", err)
 		return 2
 	}
@@ -65,8 +104,17 @@ func (a *App) runServe(ctx context.Context, args []string) int {
 		fmt.Fprintln(a.stderr, "serve is unavailable")
 		return 1
 	}
-	fmt.Fprintf(a.stdout, "listening on http://%s\n", *listen)
-	if err := a.serve(ctx, web.Options{ListenAddress: *listen, Version: a.info}); err != nil {
+	var application ApplicationRuntime
+	if a.open != nil {
+		application, err = a.open(ctx, settings)
+		if err != nil {
+			fmt.Fprintf(a.stderr, "serve: %v\n", err)
+			return 1
+		}
+		defer application.Close()
+	}
+	fmt.Fprintf(a.stdout, "listening on http://%s\n", settings.ListenAddress)
+	if err := a.serve(ctx, web.Options{ListenAddress: settings.ListenAddress, Version: a.info}); err != nil {
 		fmt.Fprintf(a.stderr, "serve: %v\n", err)
 		return 1
 	}

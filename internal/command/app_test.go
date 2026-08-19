@@ -6,7 +6,10 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/config"
+	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/version"
 	"github.com/cmetech/oscar-corrtest/internal/web"
 )
@@ -20,6 +23,111 @@ func TestVersionCommand(t *testing.T) {
 	if got := stdout.String(); got != "oscar-corrtest v1.2.3 commit=abc built=now\n" {
 		t.Fatalf("stdout=%q", got)
 	}
+}
+
+func TestTargetAddUsesConfiguredRuntimeAndPrintsJSON(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	fake := &fakeRuntime{}
+	var settings config.Settings
+	open := func(_ context.Context, got config.Settings) (ApplicationRuntime, error) {
+		settings = got
+		return fake, nil
+	}
+	app := NewConfigured(&stdout, &stderr, version.Info{Version: "test"}, nil, open, func(key string) string {
+		if key == "HOME" {
+			return "/tmp/corrtest-home"
+		}
+		return ""
+	})
+	code := app.Run(context.Background(), []string{
+		"target", "add", "--data-dir", "/tmp/corrtest-state", "--name", "Lab A", "--url", "https://oscar.example",
+		"--credential-env", "OSCAR_API_TOKEN", "--output", "json",
+	})
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+	}
+	if settings.DataDir != "/tmp/corrtest-state" || fake.createdTarget.DisplayName != "Lab A" || fake.createdTarget.Credential.Reference != "OSCAR_API_TOKEN" {
+		t.Fatalf("settings=%+v input=%+v", settings, fake.createdTarget)
+	}
+	if !strings.Contains(stdout.String(), `"apiVersion":"corrtest.oscar/v1alpha1"`) || !strings.Contains(stdout.String(), `"displayName":"Lab A"`) {
+		t.Fatalf("stdout=%q", stdout.String())
+	}
+	if !fake.closed {
+		t.Fatal("runtime not closed")
+	}
+}
+
+func TestRunsListShowAndBackupCommands(t *testing.T) {
+	now := time.Date(2026, 8, 19, 20, 0, 0, 0, time.UTC)
+	run := domain.Run{
+		ID: "crt_00000000000000000000000000", ShortToken: "00000000", Status: domain.RunCompleted,
+		Verdict: domain.VerdictFail, CleanupStatus: domain.CleanupClean, HarnessVersion: "test", CreatedAt: now, UpdatedAt: now,
+	}
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"list", []string{"runs", "list", "--verdict", "FAIL", "--output", "json"}, run.ID},
+		{"show", []string{"runs", "show", "--output", "json", run.ID}, `"status":"COMPLETED"`},
+		{"backup", []string{"backup", "--output", "/tmp/corrtest-backup.db"}, "Backup written"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			fake := &fakeRuntime{runs: []domain.Run{run}}
+			open := func(context.Context, config.Settings) (ApplicationRuntime, error) { return fake, nil }
+			app := NewConfigured(&stdout, &stderr, version.Info{}, nil, open, testGetenv)
+			if code := app.Run(context.Background(), test.args); code != 0 {
+				t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+			}
+			if !strings.Contains(stdout.String(), test.want) {
+				t.Fatalf("stdout=%q missing %q", stdout.String(), test.want)
+			}
+			if test.name == "list" && fake.lastFilter.Verdict != domain.VerdictFail {
+				t.Fatalf("filter=%+v", fake.lastFilter)
+			}
+			if test.name == "backup" && fake.backupPath != "/tmp/corrtest-backup.db" {
+				t.Fatalf("backup path=%q", fake.backupPath)
+			}
+		})
+	}
+}
+
+type fakeRuntime struct {
+	createdTarget domain.TargetInput
+	targets       []domain.Target
+	runs          []domain.Run
+	lastFilter    domain.RunFilter
+	backupPath    string
+	closed        bool
+}
+
+func (f *fakeRuntime) CreateTarget(_ context.Context, input domain.TargetInput) (domain.Target, error) {
+	f.createdTarget = input
+	return domain.Target{ID: "tgt_test", DisplayName: input.DisplayName, BaseURL: input.BaseURL, APIProfile: "public-v1", TLS: input.TLS, Credential: input.Credential}, nil
+}
+func (f *fakeRuntime) ListTargets(context.Context) ([]domain.Target, error) { return f.targets, nil }
+func (f *fakeRuntime) ListRuns(_ context.Context, filter domain.RunFilter) ([]domain.Run, error) {
+	f.lastFilter = filter
+	return f.runs, nil
+}
+func (f *fakeRuntime) GetRun(_ context.Context, id string) (domain.Run, error) {
+	for _, run := range f.runs {
+		if run.ID == id {
+			return run, nil
+		}
+	}
+	return domain.Run{}, errors.New("not found")
+}
+func (f *fakeRuntime) Backup(_ context.Context, path string) error { f.backupPath = path; return nil }
+func (f *fakeRuntime) Close() error                                { f.closed = true; return nil }
+
+func testGetenv(key string) string {
+	if key == "HOME" {
+		return "/tmp/corrtest-home"
+	}
+	return ""
 }
 
 func TestUnknownCommand(t *testing.T) {
