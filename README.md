@@ -21,6 +21,7 @@ The application has no frontend build and no runtime dependency on Python, Node,
 ```bash
 make test
 make ci-core
+make standalone-check
 make package checksums
 ```
 
@@ -36,3 +37,9 @@ The next delivery slices add:
 - imported custom scenarios and authenticated operational deployment.
 
 The approved architecture and naming contracts are maintained under `docs/superpowers/`.
+
+## Linux service example
+
+`packaging/oscar-corrtest.service` is a hardened systemd example that keeps the foundation listener on `127.0.0.1`. Provision the `oscar-corrtest` system user and group before installing the unit. A writable state directory is intentionally absent until the SQLite persistence plan defines its ownership, backup, and recovery contract.
+
+Plan 1 refuses wildcard and non-loopback listeners. A future remote mode must add authentication or be explicitly deployed behind an authenticated reverse proxy.

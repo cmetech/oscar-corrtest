@@ -16,7 +16,7 @@ GOVULNCHECK_VERSION := v1.6.0
 
 .DEFAULT_GOAL := build
 
-.PHONY: tools fmt-check mod-check vet security test test-race build cross package checksums ci-core ci clean
+.PHONY: tools fmt-check mod-check archive-mod-check vet security test test-race build cross package checksums standalone-check ci-core ci clean
 
 tools:
 	mkdir -p "$(TOOLS_DIR)"
@@ -32,6 +32,10 @@ mod-check:
 	go mod verify
 	go mod tidy
 	git diff --exit-code -- go.mod go.sum
+
+archive-mod-check:
+	go mod verify
+	go mod tidy -diff
 
 vet:
 	go vet ./...
@@ -71,6 +75,9 @@ checksums:
 		for file in $$files; do shasum -a 256 "$$file"; done > SHA256SUMS; \
 	fi
 
+standalone-check:
+	bash scripts/test-standalone.sh
+
 ci-core:
 	$(MAKE) fmt-check
 	$(MAKE) mod-check
@@ -83,6 +90,7 @@ ci-core:
 ci:
 	$(MAKE) tools
 	$(MAKE) ci-core
+	$(MAKE) standalone-check
 	$(MAKE) package
 	$(MAKE) checksums
 

@@ -27,8 +27,10 @@ No Python, Node, Docker, frontend toolchain, OSCAR source checkout, or CGO is re
 | `cross` | Build CGO-free Linux AMD64 and ARM64 executables |
 | `package` | Produce deterministic Linux archives using GNU tar and `gzip -n` |
 | `checksums` | Write a deterministically ordered `dist/SHA256SUMS` |
+| `archive-mod-check` | Verify and check module tidiness without requiring Git metadata |
+| `standalone-check` | Build and test from `git archive` with isolated caches and no parent source dependency |
 | `ci-core` | Run formatting, module, vet, security, test, race, and host-build gates |
-| `ci` | Install tools, run all core gates, package, and checksum sequentially |
+| `ci` | Install tools, run core and standalone gates, package, and checksum sequentially |
 | `clean` | Remove generated files beneath `bin/` and `dist/` |
 
 Both GitHub Actions and GitLab CI/CD call these Make targets rather than duplicating Go commands in YAML.
@@ -51,3 +53,9 @@ make build
 ```
 
 Only literal IPv4 or IPv6 loopback addresses are accepted in the foundation. Hostnames, wildcard listeners, unspecified addresses, empty hosts, and non-loopback addresses are rejected because authenticated remote serving is not implemented yet.
+
+## Service and release gates
+
+The example `packaging/oscar-corrtest.service` requires operators to provision an `oscar-corrtest` system user and group. Its loopback listener is deliberate. The SQLite plan will add and document the writable state directory; do not weaken `ProtectSystem=strict` to invent one in this foundation.
+
+Before creating the first real semantic tag on either remote, confirm GitHub release permissions and branch protection, then confirm the GitLab `CI_JOB_TOKEN` can upload package-registry assets and create release links. Local workflow validation cannot prove those remote settings.

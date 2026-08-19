@@ -1,0 +1,24 @@
+[Unit]
+Description=OSCAR Correlation Test Harness
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=oscar-corrtest
+Group=oscar-corrtest
+ExecStart=/usr/local/bin/oscar-corrtest serve --listen 127.0.0.1:8787
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

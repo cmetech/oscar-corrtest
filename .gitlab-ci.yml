@@ -25,6 +25,7 @@ verify:
   script:
     - make tools
     - make ci-core
+    - make standalone-check
 
 package:
   stage: package
