@@ -1,0 +1,9 @@
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--ct-bg); color: var(--ct-fg); font-family: sans-serif; }
+.app-header { padding: 1rem 2rem; background: #1e2128; display: flex; justify-content: space-between; }
+.brand { color: #fff; text-decoration: none; }
+.brand span { color: var(--ct-accent); }
+.app-shell { display: grid; grid-template-columns: 14rem 1fr; min-height: calc(100vh - 3.5rem); }
+nav { display: grid; align-content: start; gap: .5rem; padding: 1.5rem; }
+nav a { color: inherit; padding: .75rem; text-decoration: none; }
+main { padding: 3rem; }

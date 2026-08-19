@@ -1,0 +1,30 @@
+{{define "base"}}<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OSCAR Correlation Test Harness</title>
+  <script nonce="{{.Nonce}}">(function(){try{var k='corrtest-theme';var s=localStorage.getItem(k);var t=(s==='light'||s==='dark')?s:(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t;}catch(e){document.documentElement.dataset.theme='dark';}})();</script>
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+  <script defer src="/static/js/theme.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <a class="brand" href="/" aria-label="OSCAR Correlation Test Harness home">OSCAR <span>Correlation Test Harness</span></a>
+    <span class="build">{{.Version.Version}} · {{.Version.Commit}}</span>
+  </header>
+  <div class="app-shell">
+    <nav aria-label="Primary">
+      <a href="/" aria-current="page">Dashboard</a>
+      <a href="#" aria-disabled="true">Run test</a>
+      <a href="#" aria-disabled="true">Runs</a>
+      <a href="#" aria-disabled="true">Scenarios</a>
+      <a href="#" aria-disabled="true">Targets</a>
+      <a href="#" aria-disabled="true">Settings</a>
+    </nav>
+    <main>{{template "dashboard" .}}</main>
+  </div>
+</body>
+</html>{{end}}

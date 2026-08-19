@@ -1,0 +1,5 @@
+.page-heading { max-width: 46rem; }
+.eyebrow { color: var(--ct-accent); text-transform: uppercase; }
+.empty-state { margin-top: 3rem; max-width: 42rem; padding: 3rem; background: var(--ct-card); text-align: center; }
+.empty-mark { font-size: 3rem; color: var(--ct-accent); }
+footer { margin-top: 2rem; color: var(--ct-muted); }
