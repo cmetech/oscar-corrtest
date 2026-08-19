@@ -18,6 +18,7 @@ cleanup() {
     case "$archive_dir" in
       "$tmp_base"/oscar-corrtest-standalone.*)
         if [ -d "$archive_dir" ]; then
+          chmod -R u+w "$archive_dir"
           find "$archive_dir" -mindepth 1 -delete
           rmdir "$archive_dir"
         fi
