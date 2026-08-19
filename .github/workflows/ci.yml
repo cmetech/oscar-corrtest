@@ -24,7 +24,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-          cache-dependency-path: go.mod
+          cache-dependency-path: go.sum
 
       - name: Verify immutable action pins
         shell: bash

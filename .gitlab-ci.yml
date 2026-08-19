@@ -14,8 +14,7 @@ variables:
 cache:
   key:
     files:
-      # Change this to go.sum in the first commit that adds a dependency.
-      - go.mod
+      - go.sum
   paths:
     - .cache/go-build/
     - .cache/go-mod/

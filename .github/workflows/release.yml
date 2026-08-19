@@ -22,7 +22,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-          cache-dependency-path: go.mod
+          cache-dependency-path: go.sum
 
       - name: Verify semantic version tag
         shell: bash
