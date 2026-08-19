@@ -1,0 +1,91 @@
+SHELL := /bin/sh
+
+BINARY := oscar-corrtest
+PKG := ./cmd/oscar-corrtest
+BUILD_DIR := bin
+DIST_DIR := dist
+TOOLS_DIR := $(CURDIR)/.tools
+VERSION ?= $(shell git describe --tags --always --dirty --match='v[0-9]*' 2>/dev/null || echo 0.0.0-dev)
+COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
+BUILD_DATE ?= $(shell git show -s --format=%cI HEAD 2>/dev/null || echo unknown)
+SOURCE_DATE_EPOCH ?= $(shell git show -s --format=%ct HEAD 2>/dev/null || echo 0)
+LDFLAGS := -s -w -X github.com/cmetech/oscar-corrtest/internal/version.Version=$(VERSION) -X github.com/cmetech/oscar-corrtest/internal/version.Commit=$(COMMIT) -X github.com/cmetech/oscar-corrtest/internal/version.BuildDate=$(BUILD_DATE)
+GO_BUILD := GOWORK=off CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="$(LDFLAGS)"
+GOSEC_VERSION := v2.28.0
+GOVULNCHECK_VERSION := v1.6.0
+
+.DEFAULT_GOAL := build
+
+.PHONY: tools fmt-check mod-check vet security test test-race build cross package checksums ci-core ci clean
+
+tools:
+	mkdir -p "$(TOOLS_DIR)"
+	GOBIN="$(TOOLS_DIR)" go install github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION)
+	GOBIN="$(TOOLS_DIR)" go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
+
+fmt-check:
+	@files="$$(find . -type f -name '*.go' -not -path './.tools/*')"; \
+	unformatted="$$(gofmt -l $$files)"; \
+	test -z "$$unformatted" || { printf '%s\n' "$$unformatted"; exit 1; }
+
+mod-check:
+	go mod verify
+	go mod tidy
+	git diff --exit-code -- go.mod go.sum
+
+vet:
+	go vet ./...
+
+security:
+	"$(TOOLS_DIR)/gosec" ./...
+	"$(TOOLS_DIR)/govulncheck" ./...
+
+test:
+	go test -count=1 ./...
+
+test-race:
+	CGO_ENABLED=1 go test -race -count=1 ./...
+
+build:
+	mkdir -p "$(BUILD_DIR)"
+	$(GO_BUILD) -o "$(BUILD_DIR)/$(BINARY)" $(PKG)
+
+cross:
+	mkdir -p "$(BUILD_DIR)/linux_amd64" "$(BUILD_DIR)/linux_arm64"
+	GOOS=linux GOARCH=amd64 $(GO_BUILD) -o "$(BUILD_DIR)/linux_amd64/$(BINARY)" $(PKG)
+	GOOS=linux GOARCH=arm64 $(GO_BUILD) -o "$(BUILD_DIR)/linux_arm64/$(BINARY)" $(PKG)
+
+package: cross
+	mkdir -p "$(DIST_DIR)"
+	./scripts/package.sh "$(VERSION)" amd64 "$(BUILD_DIR)/linux_amd64/$(BINARY)" "$(SOURCE_DATE_EPOCH)"
+	./scripts/package.sh "$(VERSION)" arm64 "$(BUILD_DIR)/linux_arm64/$(BINARY)" "$(SOURCE_DATE_EPOCH)"
+
+checksums:
+	@set -eu; \
+	files="$$(find "$(DIST_DIR)" -maxdepth 1 -type f -name '*.tar.gz' -exec basename {} \; | LC_ALL=C sort)"; \
+	test -n "$$files"; \
+	cd "$(DIST_DIR)"; \
+	if command -v sha256sum >/dev/null 2>&1; then \
+		for file in $$files; do sha256sum "$$file"; done > SHA256SUMS; \
+	else \
+		for file in $$files; do shasum -a 256 "$$file"; done > SHA256SUMS; \
+	fi
+
+ci-core:
+	$(MAKE) fmt-check
+	$(MAKE) mod-check
+	$(MAKE) vet
+	$(MAKE) security
+	$(MAKE) test
+	$(MAKE) test-race
+	$(MAKE) build
+
+ci:
+	$(MAKE) tools
+	$(MAKE) ci-core
+	$(MAKE) package
+	$(MAKE) checksums
+
+clean:
+	if test -d "$(BUILD_DIR)"; then find "$(BUILD_DIR)" -mindepth 1 -delete; fi
+	if test -d "$(DIST_DIR)"; then find "$(DIST_DIR)" -mindepth 1 -delete; fi
