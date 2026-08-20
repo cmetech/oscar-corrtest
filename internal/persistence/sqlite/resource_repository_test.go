@@ -58,3 +58,22 @@ func TestResourceCannotBeReownedOrBlindlyAdopted(t *testing.T) {
 		t.Fatal("duplicate external name accepted")
 	}
 }
+
+func TestUnknownResourceCanBeAdoptedAfterExactRecoveryProof(t *testing.T) {
+	database := openRepositoryDatabase(t)
+	run := testRun("crt_00000000000000000000000044", time.Now().UTC())
+	if err := database.CreateRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	resource := domain.Resource{ID: "res_unknown", RunID: run.ID, Kind: "correlation_rule", ExternalName: "owned-rule", OwnershipToken: run.ID, LifecycleState: domain.ResourceUnknown}
+	if err := database.CreateResource(context.Background(), resource); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.AdoptResource(context.Background(), resource.ID, "71", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	items, err := database.ListResources(context.Background(), run.ID)
+	if err != nil || len(items) != 1 || items[0].LifecycleState != domain.ResourceCreated || items[0].ExternalID != "71" {
+		t.Fatalf("resources=%+v err=%v", items, err)
+	}
+}

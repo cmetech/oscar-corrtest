@@ -15,6 +15,71 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 )
 
+func TestCompleteRunAtomicallyTransitionsFromCleaningUp(t *testing.T) {
+	database := openRepositoryDatabase(t)
+	run := testRun("crt_00000000000000000000000000", time.Date(2026, 8, 20, 4, 0, 0, 0, time.UTC))
+	if err := database.CreateRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	transitionRunToCleaningUp(t, database, run)
+	completed := run.CreatedAt.Add(8 * time.Second)
+	if err := database.CompleteRun(context.Background(), run.ID, domain.VerdictPass, domain.CleanupClean, []byte(`{"ok":true}`), "", completed); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := database.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != domain.RunCompleted || stored.Verdict != domain.VerdictPass || stored.CleanupStatus != domain.CleanupClean || stored.EndedAt == nil {
+		t.Fatalf("stored=%+v", stored)
+	}
+	events, err := database.ListRunEvents(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if events[len(events)-1].Summary != "Run completed" {
+		t.Fatalf("events=%+v", events)
+	}
+}
+
+func TestRecoveryCapturesLegacyCompletedRunWithoutVerdict(t *testing.T) {
+	database := openRepositoryDatabase(t)
+	run := testRun("crt_00000000000000000000000000", time.Date(2026, 8, 20, 5, 0, 0, 0, time.UTC))
+	run.Status = domain.RunCompleted
+	if err := database.CreateRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.CreateResource(context.Background(), domain.Resource{ID: "res_legacy", RunID: run.ID, Kind: "correlation_rule", ExternalName: "owned", OwnershipToken: run.ID, LifecycleState: domain.ResourceUnknown}); err != nil {
+		t.Fatal(err)
+	}
+	count, err := database.RecoverInterruptedRuns(context.Background(), run.CreatedAt.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("recovered=%d", count)
+	}
+	stored, err := database.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != domain.RunInterrupted || stored.CleanupStatus != domain.CleanupUnknown {
+		t.Fatalf("stored=%+v", stored)
+	}
+}
+
+func TestDeleteRejectsCompletedRunWithoutVerdict(t *testing.T) {
+	database := openRepositoryDatabase(t)
+	run := testRun("crt_00000000000000000000000000", time.Date(2026, 8, 20, 6, 0, 0, 0, time.UTC))
+	run.Status = domain.RunCompleted
+	if err := database.CreateRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.DeleteTerminalRun(context.Background(), run.ID); err == nil {
+		t.Fatal("verdict-less completed run was deletable")
+	}
+}
+
 func TestRunRepositoryListsFiltersAndPersistsEvents(t *testing.T) {
 	database := openRepositoryDatabase(t)
 	older := testRun("crt_00000000000000000000000000", time.Date(2026, 8, 19, 19, 0, 0, 0, time.UTC))
@@ -231,5 +296,15 @@ func testRun(id string, created time.Time) domain.Run {
 		HarnessVersion: "test",
 		CreatedAt:      created,
 		UpdatedAt:      created,
+	}
+}
+
+func transitionRunToCleaningUp(t *testing.T, database *Database, run domain.Run) {
+	t.Helper()
+	states := []domain.RunStatus{domain.RunPreflight, domain.RunSettingUp, domain.RunInjecting, domain.RunObserving, domain.RunAsserting, domain.RunCleaningUp}
+	for index, state := range states {
+		if err := database.TransitionRun(context.Background(), run.ID, state, run.CreatedAt.Add(time.Duration(index+1)*time.Second), "advance"); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

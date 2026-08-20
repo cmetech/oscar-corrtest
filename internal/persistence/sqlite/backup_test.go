@@ -76,7 +76,7 @@ func TestBackupProducesConsistentSnapshotDuringWALWrites(t *testing.T) {
 	if err := backup.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&migrations); err != nil {
 		t.Fatal(err)
 	}
-	if events < 1 || events > committed.Load() || migrations != 1 {
+	if events < 1 || events > committed.Load() || migrations != 2 {
 		t.Fatalf("backup events=%d committed=%d migrations=%d", events, committed.Load(), migrations)
 	}
 }

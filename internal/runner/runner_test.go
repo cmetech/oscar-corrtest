@@ -19,6 +19,7 @@ import (
 	storage "github.com/cmetech/oscar-corrtest/internal/persistence/sqlite"
 	"github.com/cmetech/oscar-corrtest/internal/runner"
 	"github.com/cmetech/oscar-corrtest/internal/scenario"
+	"github.com/cmetech/oscar-corrtest/internal/testoscar"
 )
 
 func TestRunnerExecutesFloodCasesAndCleansOwnedRules(t *testing.T) {
@@ -57,6 +58,12 @@ func TestRunnerExecutesFloodCasesAndCleansOwnedRules(t *testing.T) {
 	}
 	if len(api.deleted) != 2 || api.imported || api.updated {
 		t.Fatalf("unsafe API lifecycle: %+v", api)
+	}
+	if len(api.resolved) == 0 {
+		t.Fatal("observed run-owned alert residue was not resolved during cleanup")
+	}
+	if !strings.Contains(string(stored.CanonicalReportJSON), `"resolutions":[`) {
+		t.Fatalf("cleanup classifications missing from report: %s", stored.CanonicalReportJSON)
 	}
 	filtered, err := database.ListRuns(context.Background(), domain.RunFilter{Pattern: "flood"})
 	if err != nil || len(filtered) != 1 || filtered[0].ID != run.ID {
@@ -276,8 +283,8 @@ func TestRunnerExecutesEveryBuiltinPatternThroughOneCoordinator(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			api := &fakeAPI{runID: run.ID}
-			engine := runner.New(database, api, runner.Options{PollInterval: time.Millisecond, ObservationWindow: time.Millisecond, Stabilization: time.Millisecond, Sleep: func(context.Context, time.Duration) error { return nil }})
+			api := testoscar.NewModel(time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC))
+			engine := runner.New(database, api, runner.Options{PollInterval: time.Second, Stabilization: time.Second, Now: api.Now, Sleep: api.Sleep})
 			if err := engine.Execute(context.Background(), run, plan, runner.CapabilitySnapshot{PipelineMode: "phase_b_dispatch", Ready: true, LabelsSurvived: true}); err != nil {
 				t.Fatal(err)
 			}
@@ -306,6 +313,7 @@ type fakeAPI struct {
 	reconciled               oscar.Rule
 	hideReconciled           bool
 	hideHistory              bool
+	resolved                 []oscar.HistoryRecord
 }
 
 func (f *fakeAPI) ValidateRule(context.Context, compiler.RulePlan) error { return nil }
@@ -342,6 +350,12 @@ func (f *fakeAPI) Inject(_ context.Context, alert compiler.AlertPlan) (oscar.Inj
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.injected = append(f.injected, alert)
+	return oscar.InjectionResult{Class: oscar.InjectionAccepted, StatusCode: 200}, nil
+}
+func (f *fakeAPI) ResolveHistory(_ context.Context, record oscar.HistoryRecord) (oscar.InjectionResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resolved = append(f.resolved, record)
 	return oscar.InjectionResult{Class: oscar.InjectionAccepted, StatusCode: 200}, nil
 }
 func (f *fakeAPI) FindHistory(_ context.Context, query oscar.HistoryQuery) ([]oscar.HistoryRecord, error) {

@@ -114,6 +114,44 @@ func TestInjectClassifiesResponseAndKeepsTransportFingerprintNonAuthoritative(t 
 	}
 }
 
+func TestResolveHistoryUsesExactOwnedServerFingerprint(t *testing.T) {
+	server := testoscar.New(t)
+	server.Enqueue(testoscar.Response{Status: 200, Body: `{"status":"accepted","task_id":"cleanup-1"}`})
+	client := newClient(t, server.URL())
+	record := oscar.HistoryRecord{AlertName: "CORRTEST_FLOOD_P01_SOURCE_7Q9K2M4A", Fingerprint: "server-fingerprint", Status: "firing",
+		Labels: map[string]string{"alertname": "CORRTEST_FLOOD_P01_SOURCE_7Q9K2M4A", "oscar_test_run_id": "crt_abc"}, Annotations: map[string]string{"summary": "source"}}
+	result, err := client.ResolveHistory(context.Background(), record)
+	if err != nil || result.Class != oscar.InjectionAccepted {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	var body struct {
+		Status string `json:"status"`
+		Alerts []struct {
+			Fingerprint string            `json:"fingerPrint"`
+			Status      string            `json:"status"`
+			Labels      map[string]string `json:"labels"`
+		} `json:"alerts"`
+	}
+	if err := json.Unmarshal([]byte(server.Requests()[0].Body), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Status != "resolved" || len(body.Alerts) != 1 || body.Alerts[0].Status != "resolved" || body.Alerts[0].Labels["oscar_fingerprint"] != record.Fingerprint || body.Alerts[0].Fingerprint == record.Fingerprint {
+		t.Fatalf("cleanup payload=%+v", body)
+	}
+}
+
+func TestResolveHistoryRejectsUnownedOrUnidentifiedRecord(t *testing.T) {
+	client := newClient(t, "http://127.0.0.1:1")
+	for _, record := range []oscar.HistoryRecord{
+		{AlertName: "A", Fingerprint: "server-fingerprint", Labels: map[string]string{"alertname": "A"}},
+		{AlertName: "A", Labels: map[string]string{"alertname": "A", "oscar_test_run_id": "crt_abc"}},
+	} {
+		if _, err := client.ResolveHistory(context.Background(), record); err == nil {
+			t.Fatalf("unsafe cleanup record accepted: %+v", record)
+		}
+	}
+}
+
 func TestInjectRecognizesCurrentOscarAsyncResponse(t *testing.T) {
 	server := testoscar.New(t)
 	server.Enqueue(testoscar.Response{Status: 200, Body: `{"id":"11111111-1111-1111-1111-111111111111","status":"Alert group processing initiated in async mode"}`})

@@ -148,7 +148,7 @@ func (r *Runtime) ExecuteBuiltin(ctx context.Context, targetID, pattern, pipelin
 		return run, err
 	}
 	diagnostic := r.diagnose(ctx, client, target, run, plan, pipelineMode)
-	engine := runner.New(r.database, client, runner.Options{})
+	engine := runner.New(r.database, client, runner.Options{EvidenceWriter: r.evidenceWriter()})
 	executeErr := engine.Execute(ctx, run, plan, diagnostic.snapshot())
 	stored, getErr := r.GetRun(context.Background(), run.ID)
 	if getErr != nil {
@@ -178,7 +178,7 @@ func (r *Runtime) ExecuteScenario(ctx context.Context, targetID string, document
 		return run, err
 	}
 	diagnostic := r.diagnose(ctx, client, target, run, plan, pipelineMode)
-	executeErr := runner.New(r.database, client, runner.Options{}).Execute(ctx, run, plan, diagnostic.snapshot())
+	executeErr := runner.New(r.database, client, runner.Options{EvidenceWriter: r.evidenceWriter()}).Execute(ctx, run, plan, diagnostic.snapshot())
 	stored, getErr := r.GetRun(context.Background(), run.ID)
 	if getErr != nil {
 		return run, getErr
@@ -224,7 +224,7 @@ func (r *Runtime) StartBuiltin(ctx context.Context, targetID, pattern, pipelineM
 		r.runMu.Lock()
 		defer r.runMu.Unlock()
 		diagnostic := r.diagnose(executionCtx, client, target, run, plan, pipelineMode)
-		engine := runner.New(r.database, client, runner.Options{})
+		engine := runner.New(r.database, client, runner.Options{EvidenceWriter: r.evidenceWriter()})
 		_ = engine.Execute(executionCtx, run, plan, diagnostic.snapshot())
 	}()
 	return run, nil
@@ -408,7 +408,30 @@ func (r *Runtime) ExportRun(ctx context.Context, runID, destination string) (evi
 	if err != nil {
 		return evidence.Result{}, err
 	}
-	return evidence.Write(ctx, destination, run, events)
+	records, err := r.database.ListArtifacts(ctx, runID)
+	if err != nil {
+		return evidence.Result{}, err
+	}
+	attachments := make([]evidence.Attachment, 0, len(records))
+	for index, record := range records {
+		if record.Availability != domain.ArtifactAvailable {
+			return evidence.Result{}, fmt.Errorf("artifact %q is not available for export", record.RelativePath)
+		}
+		integrity, verifyErr := r.artifacts.Verify(ctx, artifact.Manifest{RelativePath: record.RelativePath, MIMEType: record.MIMEType, SHA256: record.SHA256, ByteSize: record.ByteSize})
+		if verifyErr != nil || integrity != artifact.IntegrityValid {
+			return evidence.Result{}, fmt.Errorf("artifact %q failed export verification", record.RelativePath)
+		}
+		content, readErr := os.ReadFile(filepath.Join(r.settings.DataDir, filepath.FromSlash(record.RelativePath)))
+		if readErr != nil {
+			return evidence.Result{}, fmt.Errorf("read verified artifact: %w", readErr)
+		}
+		name := fmt.Sprintf("artifact-%02d-%s", index+1, filepath.Base(record.RelativePath))
+		if record.Kind == "normalized-oscar-evidence" {
+			name = "normalized-evidence.json"
+		}
+		attachments = append(attachments, evidence.Attachment{Name: name, Content: content, SHA256: record.SHA256, ByteSize: record.ByteSize})
+	}
+	return evidence.WriteWithArtifacts(ctx, destination, run, events, attachments)
 }
 
 // VerifyBundle validates an exported bundle without trusting its filenames or manifest.

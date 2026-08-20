@@ -208,3 +208,30 @@ func TestTimerStimulusScheduleIsDurableBeforeWaiting(t *testing.T) {
 		t.Fatalf("run=%+v", stored)
 	}
 }
+
+func TestPlanMaxDurationStopsInjectionAndRunsDetachedCleanup(t *testing.T) {
+	database := openDatabase(t)
+	run := newRun()
+	if err := database.CreateRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := compiler.Compile(run, scenario.Builtin("flood"), compiler.Capabilities{PipelineMode: "phase_b_dispatch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.MaxDuration = 2 * time.Second
+	plan.Cases[0].Alerts[0].Delay = 3 * time.Second
+	now := time.Date(2026, 8, 20, 2, 0, 0, 0, time.UTC)
+	clockNow := func() time.Time { return now }
+	sleep := func(_ context.Context, duration time.Duration) error { now = now.Add(duration); return nil }
+	api := &fakeAPI{runID: run.ID}
+	err = runner.New(database, api, runner.Options{Now: clockNow, Sleep: sleep, PollInterval: time.Second, CleanupTimeout: time.Second}).Execute(
+		context.Background(), run, plan, runner.CapabilitySnapshot{PipelineMode: "phase_b_dispatch", Ready: true, LabelsSurvived: true})
+	if err == nil || !strings.Contains(err.Error(), "maximum duration") {
+		t.Fatalf("duration overrun err=%v", err)
+	}
+	stored, getErr := database.GetRun(context.Background(), run.ID)
+	if getErr != nil || stored.Verdict != domain.VerdictError || stored.CleanupStatus != domain.CleanupClean || len(api.deleted) != 2 {
+		t.Fatalf("stored=%+v deleted=%v getErr=%v", stored, api.deleted, getErr)
+	}
+}

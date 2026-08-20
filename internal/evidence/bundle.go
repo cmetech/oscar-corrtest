@@ -29,6 +29,15 @@ type Result struct {
 	ByteSize int64  `json:"byteSize"`
 }
 
+// Attachment is a previously manifested immutable run artifact. The bundle
+// writer re-verifies hash and size before copying its bytes.
+type Attachment struct {
+	Name     string
+	Content  []byte
+	SHA256   string
+	ByteSize int64
+}
+
 type manifest struct {
 	APIVersion string          `json:"apiVersion"`
 	RunID      string          `json:"runId"`
@@ -73,6 +82,12 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:.5rem 1rem}dt{font-wei
 
 // Write atomically creates a portable ZIP. Existing destinations are never overwritten.
 func Write(ctx context.Context, destination string, run domain.Run, events []domain.RunEvent) (Result, error) {
+	return WriteWithArtifacts(ctx, destination, run, events, nil)
+}
+
+// WriteWithArtifacts atomically creates a portable ZIP including verified
+// normalized evidence attachments.
+func WriteWithArtifacts(ctx context.Context, destination string, run domain.Run, events []domain.RunEvent, attachments []Attachment) (Result, error) {
 	if run.ID == "" || run.Status != domain.RunCompleted || !run.Verdict.Valid() {
 		return Result{}, fmt.Errorf("run is not eligible for export")
 	}
@@ -118,6 +133,16 @@ func Write(ctx context.Context, destination string, run domain.Run, events []dom
 	files := map[string][]byte{
 		"events.json": append(eventsJSON, '\n'), "junit.xml": junit,
 		"plan.json": planJSON, "report.html": html.Bytes(), "report.json": reportJSON,
+	}
+	for _, item := range attachments {
+		if item.Name == "" || filepath.Base(item.Name) != item.Name || item.Name == "manifest.json" || files[item.Name] != nil || len(item.Content) > 16<<20 {
+			return Result{}, fmt.Errorf("unsafe evidence attachment %q", item.Name)
+		}
+		digest := sha256.Sum256(item.Content)
+		if item.ByteSize != int64(len(item.Content)) || item.SHA256 != hex.EncodeToString(digest[:]) {
+			return Result{}, fmt.Errorf("evidence attachment %q differs from its manifest", item.Name)
+		}
+		files[item.Name] = append([]byte(nil), item.Content...)
 	}
 	names := make([]string, 0, len(files))
 	for name := range files {

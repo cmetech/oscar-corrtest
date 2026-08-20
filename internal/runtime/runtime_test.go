@@ -182,7 +182,7 @@ func TestRetryCleanupRequiresReadBackOwnershipBeforeDelete(t *testing.T) {
 	}
 	ownedRunID = run.ID
 	now := time.Now().UTC()
-	for _, state := range []domain.RunStatus{domain.RunPreflight, domain.RunSettingUp, domain.RunInjecting, domain.RunObserving, domain.RunAsserting, domain.RunCleaningUp, domain.RunCompleted} {
+	for _, state := range []domain.RunStatus{domain.RunPreflight, domain.RunSettingUp, domain.RunInjecting, domain.RunObserving, domain.RunAsserting, domain.RunCleaningUp} {
 		if err := runtime.database.TransitionRun(context.Background(), run.ID, state, now, "test transition"); err != nil {
 			t.Fatal(err)
 		}
@@ -267,7 +267,7 @@ func TestRetentionDeletesOnlyTerminalCleanupSafeRuns(t *testing.T) {
 func completeTestRun(t *testing.T, runtime *Runtime, runID string, cleanup domain.CleanupStatus) {
 	t.Helper()
 	now := time.Now().UTC()
-	for _, state := range []domain.RunStatus{domain.RunPreflight, domain.RunSettingUp, domain.RunInjecting, domain.RunObserving, domain.RunAsserting, domain.RunCleaningUp, domain.RunCompleted} {
+	for _, state := range []domain.RunStatus{domain.RunPreflight, domain.RunSettingUp, domain.RunInjecting, domain.RunObserving, domain.RunAsserting, domain.RunCleaningUp} {
 		if err := runtime.database.TransitionRun(context.Background(), runID, state, now, "test transition"); err != nil {
 			t.Fatal(err)
 		}

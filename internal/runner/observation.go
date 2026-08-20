@@ -61,7 +61,7 @@ func (r *Runner) observeCase(ctx context.Context, run domain.Run, item compiler.
 					return caseResult{Name: item.Name, Code: item.Code}, evalErr
 				}
 				if assertionsPass(stableAssertions) {
-					return buildCaseResult(item, stable, stableAssertions, domain.VerdictPass, "declared assertions remained satisfied through stabilization"), nil
+					return buildCaseResult(item, stable, stableAssertions, domain.VerdictPass, "declared assertions remained satisfied through stabilization", injectedAt, r.opts.Now().UTC()), nil
 				}
 				last = stable
 			}
@@ -83,12 +83,12 @@ func (r *Runner) observeCase(ctx context.Context, run domain.Run, item compiler.
 		return caseResult{Name: item.Name, Code: item.Code}, err
 	}
 	if !last.SourceReady || !last.AuditReady {
-		return buildCaseResult(item, last, assertions, domain.VerdictInconclusive, "source history or correlation-audit eligibility was not proven by the deadline"), nil
+		return buildCaseResult(item, last, assertions, domain.VerdictInconclusive, "source history or correlation-audit eligibility was not proven by the deadline", injectedAt, r.opts.Now().UTC()), nil
 	}
 	if assertionsPass(assertions) {
-		return buildCaseResult(item, last, assertions, domain.VerdictPass, "declared assertions matched the final bounded observation"), nil
+		return buildCaseResult(item, last, assertions, domain.VerdictPass, "declared assertions matched the final bounded observation", injectedAt, r.opts.Now().UTC()), nil
 	}
-	return buildCaseResult(item, last, assertions, domain.VerdictFail, "one or more declared assertions differed from the final bounded observation"), nil
+	return buildCaseResult(item, last, assertions, domain.VerdictFail, "one or more declared assertions differed from the final bounded observation", injectedAt, r.opts.Now().UTC()), nil
 }
 
 func (r *Runner) readSnapshot(ctx context.Context, run domain.Run, item compiler.CasePlan, started, deadline time.Time) (observationSnapshot, error) {
@@ -207,8 +207,8 @@ func auditValues(input map[int]oscar.AuditRecord) []oscar.AuditRecord {
 	return result
 }
 
-func buildCaseResult(item compiler.CasePlan, snapshot observationSnapshot, assertions []assertionResult, verdict domain.Verdict, explanation string) caseResult {
-	result := caseResult{Name: item.Name, Code: item.Code, Verdict: string(verdict), SyntheticCount: len(snapshot.Parents), ObservationComplete: true, Explanation: explanation, Assertions: assertions, SourceHistory: snapshot.Sources, SyntheticHistory: snapshot.Parents, Audits: snapshot.Audits, Notifications: snapshot.Notifications}
+func buildCaseResult(item compiler.CasePlan, snapshot observationSnapshot, assertions []assertionResult, verdict domain.Verdict, explanation string, startedAt, endedAt time.Time) caseResult {
+	result := caseResult{Name: item.Name, Code: item.Code, Verdict: string(verdict), SyntheticCount: len(snapshot.Parents), ObservationComplete: true, Explanation: explanation, Assertions: assertions, SourceHistory: snapshot.Sources, SyntheticHistory: snapshot.Parents, Audits: snapshot.Audits, Notifications: snapshot.Notifications, StartedAt: startedAt, EndedAt: endedAt}
 	for _, source := range snapshot.Sources {
 		result.SourceFingerprints = append(result.SourceFingerprints, source.Fingerprint)
 	}

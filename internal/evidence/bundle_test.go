@@ -3,6 +3,8 @@ package evidence
 import (
 	"archive/zip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -59,6 +61,29 @@ func TestWriteAndVerifyBundle(t *testing.T) {
 
 	if _, err := Write(context.Background(), destination, run, events); err == nil {
 		t.Fatal("expected overwrite refusal")
+	}
+}
+
+func TestWriteWithArtifactsIncludesOnlyHashVerifiedEvidence(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	run := domain.Run{ID: "crt_01K00000000000000000000000", ShortToken: "01K00000", Status: domain.RunCompleted,
+		Verdict: domain.VerdictPass, CleanupStatus: domain.CleanupClean, CompiledPlanJSON: json.RawMessage(`{"pattern":"flood"}`),
+		CanonicalReportJSON: json.RawMessage(`{"verdict":"PASS"}`), CreatedAt: now, UpdatedAt: now}
+	content := []byte(`{"sourceHistory":[{"fingerprint":"server-fp"}]}`)
+	digest := sha256.Sum256(content)
+	attachment := Attachment{Name: "normalized-evidence.json", Content: content, SHA256: hex.EncodeToString(digest[:]), ByteSize: int64(len(content))}
+	destination := filepath.Join(dir, "with-artifact.zip")
+	if _, err := WriteWithArtifacts(context.Background(), destination, run, nil, []Attachment{attachment}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Verify(context.Background(), destination); err != nil {
+		t.Fatal(err)
+	}
+	attachment.Content = append([]byte(nil), content...)
+	attachment.Content[0] = '['
+	if _, err := WriteWithArtifacts(context.Background(), filepath.Join(dir, "tampered-input.zip"), run, nil, []Attachment{attachment}); err == nil {
+		t.Fatal("artifact content that differed from its durable manifest was exported")
 	}
 }
 

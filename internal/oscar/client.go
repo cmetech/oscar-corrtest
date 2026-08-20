@@ -197,6 +197,38 @@ func (c *Client) Inject(ctx context.Context, alert compiler.AlertPlan) (Injectio
 		"groupLabels": map[string]string{"alertname": alert.Name}, "commonLabels": alert.Labels,
 		"commonAnnotations": alert.Annotations, "alerts": []any{map[string]any{"fingerPrint": transportFingerprint, "status": alert.Status, "labels": alert.Labels, "annotations": alert.Annotations}},
 	}
+	return c.sendAlert(ctx, payload)
+}
+
+// ResolveHistory emits one cleanup-only resolved alert using the authoritative
+// OSCAR history fingerprint. User-authored plans cannot access this override.
+func (c *Client) ResolveHistory(ctx context.Context, record HistoryRecord) (InjectionResult, error) {
+	runID := strings.TrimSpace(record.Labels["oscar_test_run_id"])
+	if record.AlertName == "" || runID == "" || strings.TrimSpace(record.Fingerprint) == "" {
+		return InjectionResult{}, fmt.Errorf("history record lacks exact corrtest ownership or server fingerprint")
+	}
+	labels := make(map[string]string, len(record.Labels)+1)
+	for key, value := range record.Labels {
+		labels[key] = value
+	}
+	labels["alertname"] = record.AlertName
+	labels["oscar_fingerprint"] = record.Fingerprint
+	annotations := make(map[string]string, len(record.Annotations)+1)
+	for key, value := range record.Annotations {
+		annotations[key] = value
+	}
+	annotations["oscar_test_cleanup"] = "resolved by oscar-corrtest after exact history read-back"
+	hash := sha256.Sum256([]byte("corrtest-resolve\x00" + record.Fingerprint))
+	transportFingerprint := hex.EncodeToString(hash[:])[:16]
+	payload := map[string]any{
+		"receiver": "oscar-corrtest", "status": "resolved", "groupKey": runID + ":cleanup:" + record.AlertName,
+		"groupLabels": map[string]string{"alertname": record.AlertName}, "commonLabels": labels,
+		"commonAnnotations": annotations, "alerts": []any{map[string]any{"fingerPrint": transportFingerprint, "status": "resolved", "labels": labels, "annotations": annotations}},
+	}
+	return c.sendAlert(ctx, payload)
+}
+
+func (c *Client) sendAlert(ctx context.Context, payload map[string]any) (InjectionResult, error) {
 	status, raw, err := c.do(ctx, http.MethodPost, "/api/v1/alerts", nil, payload)
 	if err != nil {
 		return InjectionResult{}, err

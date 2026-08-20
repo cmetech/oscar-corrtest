@@ -264,22 +264,9 @@ func (d *Database) SetRunExecutionDocuments(ctx context.Context, id string, capa
 	return nil
 }
 
-// CompleteRun stores verdict, cleanup, and the canonical report after the
-// lifecycle has already entered COMPLETED.
+// CompleteRun is retained for callers without normalized execution facts.
 func (d *Database) CompleteRun(ctx context.Context, id string, verdict domain.Verdict, cleanup domain.CleanupStatus, report json.RawMessage, terminalError string, at time.Time) error {
-	if !verdict.Valid() || !cleanup.Valid() || !json.Valid(report) || at.IsZero() {
-		return fmt.Errorf("run completion metadata is invalid")
-	}
-	result, err := d.db.ExecContext(ctx, `UPDATE runs SET verdict=?, cleanup_status=?, canonical_report_json=?, terminal_error=?, ended_at=?, updated_at=?
-		WHERE id=? AND status='COMPLETED'`, string(verdict), string(cleanup), string(report), nullable(terminalError), formatTime(at), formatTime(at), id)
-	if err != nil {
-		return fmt.Errorf("complete run: %w", err)
-	}
-	count, err := result.RowsAffected()
-	if err != nil || count != 1 {
-		return fmt.Errorf("run is not eligible for completion")
-	}
-	return nil
+	return d.FinalizeRun(ctx, id, domain.ExecutionFacts{}, verdict, cleanup, report, terminalError, at)
 }
 
 // SetTerminalRunCleanup updates only the independent cleanup dimension and appends evidence.
@@ -317,7 +304,9 @@ func (d *Database) RecoverInterruptedRuns(ctx context.Context, at time.Time) (in
 	if err != nil {
 		return 0, fmt.Errorf("begin interrupted-run recovery: %w", err)
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT id, status FROM runs WHERE status NOT IN ('INTERRUPTED','COMPLETED') ORDER BY id`)
+	rows, err := tx.QueryContext(ctx, `SELECT id, status FROM runs
+		WHERE status NOT IN ('INTERRUPTED','COMPLETED') OR (status='COMPLETED' AND verdict IS NULL)
+		ORDER BY id`)
 	if err != nil {
 		_ = tx.Rollback()
 		return 0, fmt.Errorf("list active runs: %w", err)
@@ -380,14 +369,15 @@ func (d *Database) DeleteTerminalRun(ctx context.Context, id string) error {
 	}
 	var status domain.RunStatus
 	var cleanup domain.CleanupStatus
-	if err := tx.QueryRowContext(ctx, `SELECT status,cleanup_status FROM runs WHERE id=?`, id).Scan(&status, &cleanup); err != nil {
+	var verdict domain.Verdict
+	if err := tx.QueryRowContext(ctx, `SELECT status,cleanup_status,COALESCE(verdict,'') FROM runs WHERE id=?`, id).Scan(&status, &cleanup, &verdict); err != nil {
 		_ = tx.Rollback()
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNotFound
 		}
 		return err
 	}
-	if (status != domain.RunCompleted && status != domain.RunInterrupted) || (cleanup != domain.CleanupClean && cleanup != domain.CleanupNotRequired) {
+	if (status != domain.RunCompleted && status != domain.RunInterrupted) || !verdict.Valid() || (cleanup != domain.CleanupClean && cleanup != domain.CleanupNotRequired) {
 		_ = tx.Rollback()
 		return fmt.Errorf("run is active or cleanup is not proven safe")
 	}

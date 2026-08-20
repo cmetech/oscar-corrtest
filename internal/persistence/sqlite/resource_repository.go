@@ -35,7 +35,7 @@ func (d *Database) AdoptResource(ctx context.Context, id, externalID string, at 
 		return fmt.Errorf("external creation evidence is incomplete")
 	}
 	result, err := d.db.ExecContext(ctx, `UPDATE resources SET external_id=?, lifecycle_state='CREATED', created_at=?, cleanup_error=NULL
-		WHERE id=? AND lifecycle_state='PROPOSED' AND external_id IS NULL`, externalID, formatTime(at), id)
+		WHERE id=? AND lifecycle_state IN ('PROPOSED','UNKNOWN') AND external_id IS NULL`, externalID, formatTime(at), id)
 	if err != nil {
 		return fmt.Errorf("adopt resource: %w", err)
 	}
