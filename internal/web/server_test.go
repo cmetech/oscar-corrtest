@@ -808,7 +808,7 @@ func TestDashboardSecurityHeadersAndNonce(t *testing.T) {
 	if got := res.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Fatalf("X-Content-Type-Options=%q", got)
 	}
-	if got := res.Header().Get("Referrer-Policy"); got != "no-referrer" {
+	if got := res.Header().Get("Referrer-Policy"); got != "same-origin" {
 		t.Fatalf("Referrer-Policy=%q", got)
 	}
 	if got := res.Header().Get("Cache-Control"); got != "no-store" {
