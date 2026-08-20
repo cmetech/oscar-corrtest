@@ -560,3 +560,33 @@ The work is planned and executed in this dependency order:
 Each slice is independently testable. The Operations UI depends on the path,
 service, and logging foundations; it must not create alternate implementations
 of those behaviors in the web package.
+
+## 19. Implementation status (2026-08-20)
+
+All seven slices are implemented on `feature/operator-experience`. The shipped
+surface includes managed user paths and `.env`, global-key fallback, Linux,
+macOS, and Windows user-service adapters, bounded redacted logs, page-level and
+full reference guidance, canonical scenario inspection and cloning, the
+Operations workspace, user-scoped inert installers, and five cross-compiled
+release archives.
+
+Verification completed against commit `7d67b14`:
+
+- `go test -race -count=20 ./internal/integration ./internal/web ./internal/runtime`
+- `make clean release-gate`, including format/module/vet/security/vulnerability
+  checks, the full unit and race suites, standalone archive validation,
+  installer smoke, exact archive manifests, checksums, and reproducibility
+- Linux amd64/arm64, macOS amd64/arm64, and Windows amd64 compilation and
+  packaging
+
+Composition regressions prove that the write-only UI-managed key reaches a new
+OSCAR client only as `X-API-Key`, canonical flood P01/N01 executes through the
+independent semantic oracle with clean resource teardown, generated service
+definitions use the packaged binary, and Operations log streaming preserves
+ordered redacted backfill/live records. The final gate also caught and closed
+a Windows Task Scheduler XML encoding mismatch and unbounded detached service
+actions.
+
+No live OSCAR qualification is claimed by these fake-server or semantic-model
+tests. A controlled run against the intended disposable Phase-B OSCAR target
+remains the target-specific release qualification step.
