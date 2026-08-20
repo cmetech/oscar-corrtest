@@ -25,6 +25,16 @@ type Case struct {
 	GroupBy    []string          `json:"groupBy" yaml:"groupBy"`
 	Labels     map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
 	Assertions []Assertion       `json:"assertions" yaml:"assertions"`
+	Events     []Event           `json:"events,omitempty" yaml:"events,omitempty"`
+}
+
+// Event is one deterministic alert occurrence. Varying labels are explicit
+// because they intentionally affect OSCAR fingerprints.
+type Event struct {
+	Role   string            `json:"role" yaml:"role"`
+	Status string            `json:"status" yaml:"status"`
+	Labels map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
+	Delay  time.Duration     `json:"delay,omitempty" yaml:"delay,omitempty"`
 }
 
 // Assertion is intentionally non-executable and closed by kind.
