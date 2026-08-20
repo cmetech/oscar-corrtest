@@ -88,3 +88,24 @@ func TestWriteZipRejectsSymlinks(t *testing.T) {
 		t.Fatalf("error=%v", err)
 	}
 }
+
+func TestWriteZipCreatesPrivateOutputDirectory(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "stage")
+	if err := os.Mkdir(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("release\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outputDirectory := filepath.Join(t.TempDir(), "new-dist")
+	if err := WriteZip(filepath.Join(outputDirectory, "release.zip"), root, time.Unix(1_787_180_400, 0).UTC()); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(outputDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o750 {
+		t.Fatalf("output directory mode=%#o want=0750", info.Mode().Perm())
+	}
+}

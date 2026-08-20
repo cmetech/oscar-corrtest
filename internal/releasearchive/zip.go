@@ -64,7 +64,7 @@ func WriteZip(outputPath, rootDir string, epoch time.Time) (returnErr error) {
 	sort.Slice(entries, func(i, j int) bool { return entries[i].name < entries[j].name })
 
 	outputDir := filepath.Dir(outputPath)
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+	if err := os.MkdirAll(outputDir, 0o750); err != nil {
 		return fmt.Errorf("create output directory: %w", err)
 	}
 	temporary, err := os.CreateTemp(outputDir, "."+filepath.Base(outputPath)+".tmp-")
