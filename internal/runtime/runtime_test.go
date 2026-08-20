@@ -190,6 +190,12 @@ func TestRetryCleanupRequiresReadBackOwnershipBeforeDelete(t *testing.T) {
 	if err != nil || updated.CleanupStatus != domain.CleanupClean || deletes != 1 {
 		t.Fatalf("updated=%+v deletes=%d err=%v", updated, deletes, err)
 	}
+	if err := runtime.DeleteRun(context.Background(), run.ID); err != nil {
+		t.Fatalf("delete clean run: %v", err)
+	}
+	if _, err := runtime.GetRun(context.Background(), run.ID); err == nil {
+		t.Fatal("deleted run remained in history")
+	}
 }
 
 func TestImportScenarioPersistsOriginalSourceOnceByDigest(t *testing.T) {

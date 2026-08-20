@@ -303,6 +303,38 @@ func (d *Database) RecoverInterruptedRuns(ctx context.Context, at time.Time) (in
 	return len(active), nil
 }
 
+// DeleteTerminalRun removes one exact, cleanup-safe run and its dependent ledger rows.
+func (d *Database) DeleteTerminalRun(ctx context.Context, id string) error {
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	var status domain.RunStatus
+	var cleanup domain.CleanupStatus
+	if err := tx.QueryRowContext(ctx, `SELECT status,cleanup_status FROM runs WHERE id=?`, id).Scan(&status, &cleanup); err != nil {
+		_ = tx.Rollback()
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if (status != domain.RunCompleted && status != domain.RunInterrupted) || (cleanup != domain.CleanupClean && cleanup != domain.CleanupNotRequired) {
+		_ = tx.Rollback()
+		return fmt.Errorf("run is active or cleanup is not proven safe")
+	}
+	statements := []string{
+		`DELETE FROM assertions WHERE run_id=?`, `DELETE FROM alert_attempts WHERE run_id=?`, `DELETE FROM artifacts WHERE run_id=?`,
+		`DELETE FROM run_events WHERE run_id=?`, `DELETE FROM run_cases WHERE run_id=?`, `DELETE FROM resources WHERE run_id=?`, `DELETE FROM runs WHERE id=?`,
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement, id); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("delete terminal run: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
 const runSelect = `SELECT id, short_token, target_id, scenario_id, status, verdict, cleanup_status,
     harness_version, capability_snapshot_json, compiled_plan_json, canonical_report_json,
     started_at, ended_at, created_at, updated_at, terminal_error FROM runs`

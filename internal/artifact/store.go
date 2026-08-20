@@ -37,6 +37,12 @@ type Manifest struct {
 // Store owns one local application data directory.
 type Store struct{ root string }
 
+// StagedDeletion is a recoverable rename performed before deleting database rows.
+type StagedDeletion struct {
+	original string
+	staged   string
+}
+
 // New opens an artifact store rooted at an absolute local directory.
 func New(root string) (*Store, error) {
 	if !filepath.IsAbs(root) {
@@ -164,6 +170,77 @@ func (s *Store) Verify(ctx context.Context, manifest Manifest) (Integrity, error
 		return IntegrityHashMismatch, nil
 	}
 	return IntegrityValid, nil
+}
+
+// StageRunDeletion verifies every manifest, rejects untracked files, then atomically renames the run directory.
+func (s *Store) StageRunDeletion(ctx context.Context, runID string, manifests []Manifest) (*StagedDeletion, error) {
+	if !runIDPattern.MatchString(runID) {
+		return nil, fmt.Errorf("invalid run ID %q", runID)
+	}
+	declared := make(map[string]bool, len(manifests))
+	for _, item := range manifests {
+		integrity, err := s.Verify(ctx, item)
+		if err != nil || integrity != IntegrityValid {
+			return nil, fmt.Errorf("artifact %q is not verified", item.RelativePath)
+		}
+		declared[strings.TrimPrefix(item.RelativePath, "runs/"+runID+"/")] = true
+	}
+	original := filepath.Join(s.root, "runs", runID)
+	info, err := os.Lstat(original)
+	if errors.Is(err, os.ErrNotExist) {
+		if len(manifests) != 0 {
+			return nil, fmt.Errorf("run artifact directory is missing")
+		}
+		return &StagedDeletion{}, nil
+	}
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("run artifact directory is unsafe")
+	}
+	if err := filepath.WalkDir(original, func(current string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if current == original {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symlink %q prevents deletion", entry.Name())
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(original, current)
+		if err != nil || !declared[filepath.ToSlash(relative)] {
+			return fmt.Errorf("unverified artifact %q prevents deletion", entry.Name())
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	staged := filepath.Join(s.root, ".delete-"+runID)
+	if _, err := os.Lstat(staged); !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("staged deletion already exists")
+	}
+	if err := os.Rename(original, staged); err != nil {
+		return nil, fmt.Errorf("stage artifact deletion: %w", err)
+	}
+	return &StagedDeletion{original: original, staged: staged}, nil
+}
+
+// Rollback restores staged evidence if database deletion fails.
+func (deletion *StagedDeletion) Rollback() error {
+	if deletion == nil || deletion.staged == "" {
+		return nil
+	}
+	return os.Rename(deletion.staged, deletion.original)
+}
+
+// Finalize removes the staged exact run directory after database commit.
+func (deletion *StagedDeletion) Finalize() error {
+	if deletion == nil || deletion.staged == "" {
+		return nil
+	}
+	return os.RemoveAll(deletion.staged)
 }
 
 func validateRelative(value string) error {

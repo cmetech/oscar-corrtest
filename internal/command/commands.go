@@ -171,7 +171,7 @@ func (a *App) runTargetList(ctx context.Context, args []string) int {
 
 func (a *App) runRuns(ctx context.Context, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(a.stderr, "usage: oscar-corrtest runs <list|show>")
+		fmt.Fprintln(a.stderr, "usage: oscar-corrtest runs <list|show|delete>")
 		return 2
 	}
 	switch args[0] {
@@ -179,10 +179,46 @@ func (a *App) runRuns(ctx context.Context, args []string) int {
 		return a.runRunsList(ctx, args[1:])
 	case "show":
 		return a.runRunsShow(ctx, args[1:])
+	case "delete":
+		return a.runRunsDelete(ctx, args[1:])
 	default:
 		fmt.Fprintf(a.stderr, "unknown runs command %q\n", args[0])
 		return 2
 	}
+}
+
+type runDeletionRuntime interface {
+	DeleteRun(context.Context, string) error
+}
+
+func (a *App) runRunsDelete(ctx context.Context, args []string) int {
+	flags := flag.NewFlagSet("runs delete", flag.ContinueOnError)
+	flags.SetOutput(a.stderr)
+	configPath, dataDir := commonConfigFlags(flags)
+	yes := flags.Bool("yes", false, "confirm exact run deletion")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 1 || !*yes {
+		fmt.Fprintln(a.stderr, "usage: oscar-corrtest runs delete <exact-run-id> --yes")
+		return 2
+	}
+	runtime, code := a.openRuntime(ctx, config.Overrides{ConfigPath: *configPath, DataDir: *dataDir})
+	if code != 0 {
+		return code
+	}
+	defer runtime.Close()
+	deletion, ok := runtime.(runDeletionRuntime)
+	if !ok {
+		fmt.Fprintln(a.stderr, "run deletion is unavailable")
+		return 1
+	}
+	if err := deletion.DeleteRun(ctx, flags.Arg(0)); err != nil {
+		fmt.Fprintf(a.stderr, "runs delete: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(a.stdout, "Deleted run %s and its verified local evidence\n", flags.Arg(0))
+	return 0
 }
 
 func (a *App) runRunsList(ctx context.Context, args []string) int {

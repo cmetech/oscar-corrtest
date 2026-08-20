@@ -496,6 +496,42 @@ func (r *Runtime) ListScenarios(ctx context.Context) ([]domain.ScenarioRecord, e
 	return r.database.ListScenarios(ctx)
 }
 
+// DeleteRun removes one exact terminal, cleanup-safe run after artifact verification.
+func (r *Runtime) DeleteRun(ctx context.Context, runID string) error {
+	run, err := r.GetRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if (run.Status != domain.RunCompleted && run.Status != domain.RunInterrupted) || (run.CleanupStatus != domain.CleanupClean && run.CleanupStatus != domain.CleanupNotRequired) {
+		return fmt.Errorf("run is active or cleanup is not proven safe")
+	}
+	records, err := r.database.ListArtifacts(ctx, runID)
+	if err != nil {
+		return err
+	}
+	manifests := make([]artifact.Manifest, 0, len(records))
+	for _, record := range records {
+		if record.Availability != domain.ArtifactAvailable {
+			return fmt.Errorf("pending artifact %q prevents run deletion", record.RelativePath)
+		}
+		manifests = append(manifests, artifact.Manifest{RelativePath: record.RelativePath, MIMEType: record.MIMEType, SHA256: record.SHA256, ByteSize: record.ByteSize})
+	}
+	staged, err := r.artifacts.StageRunDeletion(ctx, runID, manifests)
+	if err != nil {
+		return err
+	}
+	if err := r.database.DeleteTerminalRun(ctx, runID); err != nil {
+		if rollbackErr := staged.Rollback(); rollbackErr != nil {
+			return fmt.Errorf("delete run: %v; restore evidence: %w", err, rollbackErr)
+		}
+		return err
+	}
+	if err := staged.Finalize(); err != nil {
+		return fmt.Errorf("run metadata deleted but staged evidence removal failed: %w", err)
+	}
+	return nil
+}
+
 func ownedRule(rule oscar.Rule, resource domain.Resource, runID string) bool {
 	return rule.ID > 0 && rule.Name == resource.ExternalName && strings.Contains(rule.Description, "run="+runID)
 }
