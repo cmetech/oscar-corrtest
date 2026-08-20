@@ -153,6 +153,10 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 		var elapsed time.Duration
 		for _, alert := range item.Alerts {
 			if alert.Delay > elapsed {
+				detail, _ := json.Marshal(map[string]string{"alertName": alert.Name, "status": alert.Status, "delay": alert.Delay.String()})
+				if _, err := r.store.AppendRunEvent(ctx, domain.RunEvent{RunID: run.ID, Type: "alert.scheduled", Level: "info", OccurredAt: r.opts.Now().UTC(), Summary: "Delayed alert stimulus scheduled", DetailJSON: string(detail)}); err != nil {
+					return r.failAndCleanup(ctx, run, plan, capabilities, resources, err)
+				}
 				if err := r.opts.Sleep(ctx, alert.Delay-elapsed); err != nil {
 					return r.failAndCleanup(ctx, run, plan, capabilities, resources, err)
 				}
