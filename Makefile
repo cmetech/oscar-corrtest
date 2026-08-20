@@ -16,7 +16,7 @@ GOVULNCHECK_VERSION := v1.6.0
 
 .DEFAULT_GOAL := build
 
-.PHONY: tools fmt-check mod-check archive-mod-check vet security test test-race plan2-gate plan3-gate plan4-gate plan5-gate plan6-gate plan7-gate container-check release-contract-check package-content-check reproducible-check release-gate live-qualification build cross package checksums standalone-check ci-core ci clean
+.PHONY: tools fmt-check mod-check archive-mod-check vet security test test-race plan2-gate plan3-gate plan4-gate plan5-gate plan6-gate plan7-gate container-check release-contract-check package-content-check reproducible-check installer-posix-check release-gate live-qualification build cross package checksums standalone-check ci-core ci clean
 
 tools:
 	mkdir -p "$(TOOLS_DIR)"
@@ -112,6 +112,10 @@ package-content-check: package
 
 reproducible-check:
 	./scripts/check-reproducible.sh
+
+installer-posix-check:
+	$(MAKE) clean package checksums VERSION=v0.0.0
+	sh scripts/test-install-posix.sh v0.0.0
 
 standalone-check:
 	bash scripts/test-standalone.sh
