@@ -15,4 +15,4 @@ OSCAR CorrTest is a dense engineering console for technical OSCAR operators. It 
 |---|------|-----------------|--------|------|
 | 001 | Console structure and guidance | How should navigation and technical page guidance coexist in a dense console? | C — Documentation drawer | layout, navigation, documentation, dark-light |
 | 002 | Scenario workbench | How should examples, source authoring, validation, and compiled preview coexist? | A — Three-pane workbench | scenarios, editor, workflow |
-| 003 | Operations surfaces | How should API-key settings, service status, and live logs be presented? | — | settings, logs, operations |
+| 003 | Operations surfaces | How should API-key settings, service status, and live logs be presented? | B — Unified operations | settings, logs, operations |
