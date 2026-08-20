@@ -67,12 +67,7 @@ func (m *manager) Start(ctx context.Context) error {
 	case "linux":
 		_, err = m.options.Runner.Run(ctx, "systemctl", "--user", "start", "oscar-corrtest.service")
 	case "darwin":
-		domain := "gui/" + currentUserID()
-		_, bootstrapErr := m.options.Runner.Run(ctx, "launchctl", "bootstrap", domain, m.DefinitionPath())
-		if bootstrapErr != nil && !isAlreadyLoaded(bootstrapErr.Error()) {
-			return fmt.Errorf("load launch agent: %w", bootstrapErr)
-		}
-		_, err = m.options.Runner.Run(ctx, "launchctl", "kickstart", "-k", domain+"/io.cmetech.oscar-corrtest")
+		return m.startDarwin(ctx)
 	case "windows":
 		_, err = m.options.Runner.Run(ctx, "schtasks.exe", "/Run", "/TN", "OSCAR CorrTest")
 	}
@@ -108,10 +103,59 @@ func (m *manager) Restart(ctx context.Context) error {
 		}
 		return nil
 	}
+	if m.options.GOOS == "darwin" {
+		if err := m.startDarwin(ctx); err != nil {
+			return fmt.Errorf("restart user service: %w", err)
+		}
+		return nil
+	}
 	if err := m.Stop(ctx); err != nil {
 		return err
 	}
 	return m.Start(ctx)
+}
+
+func (m *manager) startDarwin(ctx context.Context) error {
+	domain := "gui/" + currentUserID()
+	job := domain + "/io.cmetech.oscar-corrtest"
+	output, err := m.options.Runner.Run(ctx, "launchctl", "kickstart", "-k", job)
+	if err != nil {
+		if !isNotFound(string(output) + " " + err.Error()) {
+			return fmt.Errorf("kickstart launch agent: %w: %s", err, strings.TrimSpace(string(output)))
+		}
+		output, err = m.options.Runner.Run(ctx, "launchctl", "bootstrap", domain, m.DefinitionPath())
+		if err != nil {
+			return fmt.Errorf("load launch agent: %w: %s", err, strings.TrimSpace(string(output)))
+		}
+		output, err = m.options.Runner.Run(ctx, "launchctl", "kickstart", "-k", job)
+		if err != nil {
+			return fmt.Errorf("kickstart launch agent: %w: %s", err, strings.TrimSpace(string(output)))
+		}
+	}
+	return m.waitForDarwinRunning(ctx)
+}
+
+func (m *manager) waitForDarwinRunning(ctx context.Context) error {
+	transition, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+	var last State
+	for {
+		status, err := m.Status(transition)
+		if err == nil {
+			last = status.State
+			if status.State == StateRunning {
+				return nil
+			}
+		}
+		select {
+		case <-transition.Done():
+			return fmt.Errorf("launch agent did not reach running state (last state %s): %w", last, transition.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func (m *manager) Status(ctx context.Context) (Status, error) {
@@ -285,9 +329,4 @@ func writeTail(path string, output io.Writer, count int) (int64, error) {
 func isNotFound(value string) bool {
 	lower := strings.ToLower(value)
 	return strings.Contains(lower, "not found") || strings.Contains(lower, "could not be found") || strings.Contains(lower, "could not find service") || strings.Contains(lower, "no such process") || strings.Contains(lower, "does not exist")
-}
-
-func isAlreadyLoaded(value string) bool {
-	lower := strings.ToLower(value)
-	return strings.Contains(lower, "already loaded") || strings.Contains(lower, "service already loaded")
 }
