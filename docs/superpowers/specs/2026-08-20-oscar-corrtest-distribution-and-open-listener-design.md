@@ -4,6 +4,12 @@
 **Status:** Approved in conversation; implementation contract  
 **Supersedes:** The loopback-only default and unauthenticated non-loopback prohibition in `2026-08-19-oscar-correlation-test-harness-design.md`
 
+**Operator-experience extension:**
+`2026-08-20-oscar-corrtest-operator-experience-and-service-design.md`
+adds an explicit post-install user-service command and managed `.env` workflow.
+The installers in this document remain binary-only and never install or start
+that service themselves.
+
 ## 1. Goal
 
 Make `oscar-corrtest` simple to publish and install as a user-scoped,

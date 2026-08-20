@@ -12,6 +12,11 @@
 supersedes this document's original Linux-only distribution scope and its
 loopback-only/no-unauthenticated-remote clauses in §§17, 19.2, 23.1, and 24.
 
+**Operator-experience/service amendment (2026-08-20):**
+`2026-08-20-oscar-corrtest-operator-experience-and-service-design.md`
+extends this document with a managed global API key, explicit user-level
+service lifecycle, embedded page reference, scenario workbench, and live logs.
+
 ## 1. Decision summary
 
 Build a standalone Go application named **OSCAR Correlation Test Harness**. It
