@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -46,6 +47,7 @@ type App struct {
 	open    OpenRuntimeFunc
 	getenv  func(string) string
 	service func() (service.Manager, error)
+	logger  *slog.Logger
 }
 
 // Dependencies contains process-owned integrations used by commands.
@@ -54,6 +56,7 @@ type Dependencies struct {
 	Open    OpenRuntimeFunc
 	Getenv  func(string) string
 	Service func() (service.Manager, error)
+	Logger  *slog.Logger
 }
 
 // NewApplication constructs the complete CLI from explicit dependencies.
@@ -62,7 +65,7 @@ func NewApplication(stdout, stderr io.Writer, info version.Info, dependencies De
 	if getenv == nil {
 		getenv = os.Getenv
 	}
-	return &App{stdout: stdout, stderr: stderr, info: info, serve: dependencies.Serve, open: dependencies.Open, getenv: getenv, service: dependencies.Service}
+	return &App{stdout: stdout, stderr: stderr, info: info, serve: dependencies.Serve, open: dependencies.Open, getenv: getenv, service: dependencies.Service, logger: dependencies.Logger}
 }
 
 // New constructs an application using the supplied output streams and build metadata.
@@ -174,7 +177,7 @@ func (a *App) runServe(ctx context.Context, args []string) int {
 		scheme = "https"
 	}
 	fmt.Fprintf(a.stdout, "listening on %s://%s\n", scheme, settings.ListenAddress)
-	if err := a.serve(ctx, web.Options{ListenAddress: settings.ListenAddress, Version: a.info, Data: application, Security: security, TLSCertFile: *tlsCert, TLSKeyFile: *tlsKey}); err != nil {
+	if err := a.serve(ctx, web.Options{ListenAddress: settings.ListenAddress, Version: a.info, Data: application, Security: security, TLSCertFile: *tlsCert, TLSKeyFile: *tlsKey, Logger: a.logger}); err != nil {
 		fmt.Fprintf(a.stderr, "serve: %v\n", err)
 		return 1
 	}

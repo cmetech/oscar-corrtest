@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"syscall"
 
+	"github.com/cmetech/oscar-corrtest/internal/applog"
 	"github.com/cmetech/oscar-corrtest/internal/command"
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/envfile"
@@ -32,8 +33,14 @@ func main() {
 		_, _ = os.Stderr.WriteString("oscar-corrtest: open managed environment: " + err.Error() + "\n")
 		os.Exit(1)
 	}
+	logs, logErr := applog.Open(paths.LogDir, os.Stderr, applog.Options{})
+	if logErr != nil {
+		_, _ = os.Stderr.WriteString("oscar-corrtest: structured log unavailable; using stderr only\n")
+		logs = applog.StderrOnly(os.Stderr)
+	}
+	logger := logs.Logger("main")
 	open := func(ctx context.Context, settings config.Settings) (command.ApplicationRuntime, error) {
-		return appruntime.OpenWithOptions(ctx, settings, info, appruntime.Options{Environment: environment})
+		return appruntime.OpenWithOptions(ctx, settings, info, appruntime.Options{Environment: environment, Logs: logs, Logger: logs.Logger("runtime")})
 	}
 	serviceFactory := func() (service.Manager, error) {
 		executable, executableErr := os.Executable()
@@ -42,6 +49,8 @@ func main() {
 		}
 		return service.NewManager(service.Options{GOOS: runtime.GOOS, Executable: executable, Paths: paths, Runner: service.ExecRunner{}, Stdout: os.Stdout, Stderr: os.Stderr})
 	}
-	app := command.NewApplication(os.Stdout, os.Stderr, info, command.Dependencies{Serve: web.Run, Open: open, Getenv: environment.Getenv, Service: serviceFactory})
-	os.Exit(app.Run(ctx, os.Args[1:]))
+	app := command.NewApplication(os.Stdout, os.Stderr, info, command.Dependencies{Serve: web.Run, Open: open, Getenv: environment.Getenv, Service: serviceFactory, Logger: logger})
+	exitCode := app.Run(ctx, os.Args[1:])
+	_ = logs.Close()
+	os.Exit(exitCode)
 }

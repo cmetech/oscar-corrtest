@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/applog"
 	"github.com/cmetech/oscar-corrtest/internal/artifact"
 	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/config"
@@ -58,6 +61,8 @@ type Runtime struct {
 	readiness Readiness
 	version   string
 	getenv    func(string) string
+	logger    *slog.Logger
+	logs      *applog.System
 	runMu     sync.Mutex
 	activeMu  sync.Mutex
 	active    map[string]context.CancelFunc
@@ -68,6 +73,8 @@ type Runtime struct {
 // Options supplies process-scoped application dependencies.
 type Options struct {
 	Environment *envfile.Store
+	Logger      *slog.Logger
+	Logs        *applog.System
 }
 
 // Open initializes local state, migrations, artifact storage, and interrupted-run recovery.
@@ -102,9 +109,13 @@ func OpenWithOptions(ctx context.Context, settings config.Settings, info version
 	if options.Environment != nil {
 		getenv = options.Environment.Getenv
 	}
+	logger := options.Logger
+	if logger == nil {
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
 	result := &Runtime{
 		settings: settings, database: database, history: service, artifacts: artifacts,
-		readiness: Readiness{Ready: database.Ready() == nil, DatabasePath: databasePath}, version: info.Version, getenv: getenv, rootCtx: ctx,
+		readiness: Readiness{Ready: database.Ready() == nil, DatabasePath: databasePath}, version: info.Version, getenv: getenv, logger: logger, logs: options.Logs, rootCtx: ctx,
 		active: make(map[string]context.CancelFunc),
 	}
 	if readyErr := database.Ready(); readyErr != nil {
@@ -115,11 +126,21 @@ func OpenWithOptions(ctx context.Context, settings config.Settings, info version
 		_ = database.Close()
 		return nil, fmt.Errorf("recover interrupted runs: %w", err)
 	}
+	result.logger.InfoContext(ctx, "runtime opened", "ready", result.readiness.Ready, "database_path", databasePath)
 	return result, nil
 }
 
+// LogSystem returns the process-owned redacted log system when configured.
+func (r *Runtime) LogSystem() *applog.System { return r.logs }
+
 func (r *Runtime) newOSCARClient(target domain.Target) (*oscar.Client, error) {
-	return oscar.New(target, oscar.Options{HarnessVersion: r.version, Getenv: r.getenv})
+	client, err := oscar.New(target, oscar.Options{HarnessVersion: r.version, Getenv: r.getenv})
+	if err != nil {
+		r.logger.Warn("OSCAR client initialization failed", "target_id", target.ID, "error", err)
+		return nil, err
+	}
+	r.logger.Debug("OSCAR client initialized", "target_id", target.ID, "api_profile", target.APIProfile)
+	return client, nil
 }
 
 // PreviewBuiltin compiles an isolated plan without creating a durable run or contacting OSCAR.

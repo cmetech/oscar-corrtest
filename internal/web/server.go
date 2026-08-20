@@ -11,6 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -18,6 +20,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/compiler"
@@ -48,6 +51,7 @@ type Options struct {
 	Security      Security
 	TLSCertFile   string
 	TLSKeyFile    string
+	Logger        *slog.Logger
 }
 
 type pageData struct {
@@ -644,6 +648,9 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	handler = hostGuardForListener(handler, listener.Addr().String(), opts.Security)
+	if opts.Logger != nil {
+		handler = requestLogger(handler, opts.Logger)
+	}
 	server := &http.Server{
 		Handler: handler, ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,
@@ -675,3 +682,71 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 }
+
+var requestSequence atomic.Uint64
+
+type loggingResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *loggingResponseWriter) WriteHeader(status int) {
+	if w.status == 0 {
+		w.status = status
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *loggingResponseWriter) Write(data []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(data)
+}
+
+func (w *loggingResponseWriter) Flush() {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (w *loggingResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func requestLogger(next http.Handler, logger *slog.Logger) http.Handler {
+	if logger == nil {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		wrapped := &loggingResponseWriter{ResponseWriter: w}
+		next.ServeHTTP(wrapped, r)
+		status := wrapped.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		route := r.Pattern
+		if route == "" {
+			route = r.URL.Path
+		} else {
+			route = strings.TrimPrefix(route, r.Method+" ")
+		}
+		remote := r.RemoteAddr
+		if host, _, err := net.SplitHostPort(remote); err == nil {
+			remote = host
+		}
+		logger.InfoContext(r.Context(), "http request",
+			"request_id", strconv.FormatUint(requestSequence.Add(1), 36),
+			"method", r.Method,
+			"route", route,
+			"status", status,
+			"duration_ms", time.Since(started).Milliseconds(),
+			"remote_ip", remote,
+		)
+	})
+}
+
+var _ http.Flusher = (*loggingResponseWriter)(nil)
+var _ io.Writer = (*loggingResponseWriter)(nil)

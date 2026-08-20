@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/applog"
 	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
@@ -20,6 +21,23 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/version"
 )
+
+func TestOpenEmitsStructuredLifecycleLog(t *testing.T) {
+	logs, err := applog.Open(t.TempDir(), nil, applog.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer logs.Close()
+	runtime, err := OpenWithOptions(context.Background(), config.Settings{DataDir: t.TempDir(), ListenAddress: "127.0.0.1:8787"}, version.Info{Version: "test"}, Options{Logs: logs, Logger: logs.Logger("runtime")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	records := logs.Recent(10)
+	if len(records) == 0 || records[0].Message != "runtime opened" || records[0].Attributes["ready"] != "true" {
+		t.Fatalf("records=%+v", records)
+	}
+}
 
 func TestNewOSCARClientUsesManagedEnvironmentReplacement(t *testing.T) {
 	var received []string

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/applog"
 	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
@@ -21,6 +22,33 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/version"
 )
+
+func TestRequestLogExcludesSecretsAndQuery(t *testing.T) {
+	logs, err := applog.Open(t.TempDir(), nil, applog.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer logs.Close()
+	handler := requestLogger(NewHandler(version.Info{}), logs.Logger("web"))
+	request := httptest.NewRequest(http.MethodGet, "/settings?api_key=query-secret", nil)
+	request.Header.Set("Cookie", "corrtest_session=cookie-secret")
+	request.Header.Set("X-API-Key", "header-secret")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	records := logs.Recent(10)
+	if len(records) != 1 || records[0].Attributes["method"] != "GET" || records[0].Attributes["route"] != "/settings" || records[0].Attributes["status"] != "200" {
+		t.Fatalf("records=%+v", records)
+	}
+	encoded := records[0].Message
+	for key, value := range records[0].Attributes {
+		encoded += key + value
+	}
+	for _, secret := range []string{"query-secret", "cookie-secret", "header-secret"} {
+		if strings.Contains(encoded, secret) {
+			t.Fatalf("request log leaked %q: %+v", secret, records[0])
+		}
+	}
+}
 
 const webScenarioSource = `apiVersion: corrtest.oscar/v1alpha1
 kind: CorrelationScenario
