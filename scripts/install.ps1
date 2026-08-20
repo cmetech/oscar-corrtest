@@ -22,7 +22,7 @@ $releaseApiUrl = if ($env:OSCAR_CORRTEST_RELEASE_API_URL) { $env:OSCAR_CORRTEST_
 if (-not $env:LOCALAPPDATA) {
     Stop-Install 'LOCALAPPDATA is required for a user-scoped installation'
 }
-$installDirectory = if ($env:OSCAR_CORRTEST_INSTALL_DIR) { $env:OSCAR_CORRTEST_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'oscar-corrtest\bin' }
+$installDirectory = if ($env:OSCAR_CORRTEST_INSTALL_DIR) { $env:OSCAR_CORRTEST_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\oscar-corrtest' }
 if ($installDirectory -notmatch '^(?:[A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+)') {
     Stop-Install 'OSCAR_CORRTEST_INSTALL_DIR must be an absolute path'
 }
@@ -142,9 +142,13 @@ try {
     Write-Output "`nThe installer did not start a service or change corrtest data."
     Write-Output "Start the UI explicitly:`n  & '$destination' serve"
     Write-Output "Then open:`n  http://<server-ip>:8787"
-    Write-Output "`nTo run OSCAR tests, provide only an external API key reference:"
-    Write-Output "  `$env:OSCAR_API_KEY = '<your-api-key>'"
-    Write-Output "  & '$destination' target add --name lab-a --url https://oscar.example/ext/mw --credential-env OSCAR_API_KEY"
+    $managedEnvironment = Join-Path $env:LOCALAPPDATA 'oscar-corrtest\.env'
+    Write-Output "`nManaged OSCAR API key file (created only when you save a key):`n  $managedEnvironment"
+    Write-Output "Configure the key from http://<server-ip>:8787/operations or set OSCAR_API_KEY in that file."
+    Write-Output "`nOptional user background service (both commands are explicit):"
+    Write-Output "  & '$destination' service install"
+    Write-Output "  & '$destination' service start"
+    Write-Output "Check it with:`n  & '$destination' service status"
 } finally {
     if ($installTemporary -and (Test-Path -LiteralPath $installTemporary)) {
         Remove-Item -LiteralPath $installTemporary -Force -ErrorAction SilentlyContinue

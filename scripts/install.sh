@@ -34,7 +34,13 @@ esac
 if [ -z "${HOME:-}" ]; then
   fail 'HOME is required for a user-scoped installation'
 fi
-install_dir=${OSCAR_CORRTEST_INSTALL_DIR:-$HOME/.local/bin}
+if [ -n "${OSCAR_CORRTEST_INSTALL_DIR:-}" ]; then
+  install_dir=$OSCAR_CORRTEST_INSTALL_DIR
+elif [ -n "${XDG_BIN_HOME:-}" ]; then
+  install_dir=$XDG_BIN_HOME
+else
+  install_dir=$HOME/.local/bin
+fi
 case "$install_dir" in
   /*) ;;
   *) fail 'OSCAR_CORRTEST_INSTALL_DIR must be an absolute path' ;;
@@ -133,6 +139,10 @@ esac
 printf '\nThe installer did not start a service or change corrtest data.\n'
 printf 'Start the UI explicitly:\n  %s/oscar-corrtest serve\n' "$install_dir"
 printf 'Then open:\n  http://<server-ip>:8787\n'
-printf '\nTo run OSCAR tests, provide only an external API key reference:\n'
-printf "  export OSCAR_API_KEY='<your-api-key>'\n"
-printf '  %s/oscar-corrtest target add --name lab-a --url https://oscar.example/ext/mw --credential-env OSCAR_API_KEY\n' "$install_dir"
+config_root=${XDG_CONFIG_HOME:-$HOME/.config}/oscar-corrtest
+printf '\nManaged OSCAR API key file (created only when you save a key):\n  %s/.env\n' "$config_root"
+printf 'Configure the key from http://<server-ip>:8787/operations or set OSCAR_API_KEY in that file.\n'
+printf '\nOptional user background service (both commands are explicit):\n'
+printf '  %s/oscar-corrtest service install\n' "$install_dir"
+printf '  %s/oscar-corrtest service start\n' "$install_dir"
+printf 'Check it with:\n  %s/oscar-corrtest service status\n' "$install_dir"
