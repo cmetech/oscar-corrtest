@@ -31,22 +31,22 @@ type wireCase struct {
 	Name                 string            `yaml:"name"`
 	Code                 string            `yaml:"code"`
 	Polarity             string            `yaml:"polarity"`
-	Role                 string            `yaml:"role"`
-	Repeat               int               `yaml:"repeat"`
+	Role                 string            `yaml:"role,omitempty"`
+	Repeat               int               `yaml:"repeat,omitempty"`
 	Window               string            `yaml:"window"`
 	GroupBy              []string          `yaml:"groupBy"`
-	Labels               map[string]string `yaml:"labels"`
-	SuppressForNotifiers []string          `yaml:"suppressForNotifiers"`
-	TagForNotifiers      []string          `yaml:"tagForNotifiers"`
+	Labels               map[string]string `yaml:"labels,omitempty"`
+	SuppressForNotifiers []string          `yaml:"suppressForNotifiers,omitempty"`
+	TagForNotifiers      []string          `yaml:"tagForNotifiers,omitempty"`
 	Assertions           []Assertion       `yaml:"assertions"`
-	Events               []wireEvent       `yaml:"events"`
+	Events               []wireEvent       `yaml:"events,omitempty"`
 }
 
 type wireEvent struct {
 	Role   string            `yaml:"role"`
 	Status string            `yaml:"status"`
-	Labels map[string]string `yaml:"labels"`
-	Delay  string            `yaml:"delay"`
+	Labels map[string]string `yaml:"labels,omitempty"`
+	Delay  string            `yaml:"delay,omitempty"`
 }
 
 // Decode accepts exactly one strict YAML or JSON document with no aliases.
