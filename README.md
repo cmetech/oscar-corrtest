@@ -1,37 +1,102 @@
 # OSCAR Correlation Test Harness
 
-`oscar-corrtest` is a standalone Go application for proving OSCAR alarm-correlation behavior with reproducible evidence. The current durable-foundation release provides configuration, secret-safe target metadata, SQLite-backed run history, hashed artifact storage, canonical report JSON, online database backup, CLI history commands, and an embedded light/dark web UI. OSCAR rule orchestration and simulated alert injection begin in Plan 3.
+`oscar-corrtest` is a standalone Go application for black-box testing all eight OSCAR alarm-correlation patterns. It creates isolated temporary rules through OSCAR's public API, sends deterministic alerts, resolves authoritative fingerprints from alert history, collects audit/notifier evidence, cleans up owned rules, and preserves run reports in SQLite. The same executable provides a CLI and an embedded light/dark web UI.
 
 ## Quick start
 
-Go 1.27.0 or newer is required.
+Go 1.27.0 or newer is required to build. Released Linux binaries are CGO-free and need no Go, Python, Node, external database, or OSCAR source checkout.
 
 ```bash
 make build
-./bin/oscar-corrtest version
-./bin/oscar-corrtest target add --name lab-a --url https://oscar.example --credential-env OSCAR_API_TOKEN
+export OSCAR_API_TOKEN='...'
+./bin/oscar-corrtest target add \
+  --name lab-a --url https://oscar.example \
+  --credential-env OSCAR_API_TOKEN --output json
+
+./bin/oscar-corrtest doctor \
+  --target <target-id> --pipeline-mode phase_b_dispatch
+
+./bin/oscar-corrtest plan builtin:flood \
+  --target <target-id> --pipeline-mode phase_b_dispatch
+
+./bin/oscar-corrtest run builtin:flood \
+  --target <target-id> --pipeline-mode phase_b_dispatch
+
 ./bin/oscar-corrtest serve
 ```
 
-Open <http://127.0.0.1:8787>. The foundation accepts literal loopback listeners only. Remote serving will not be enabled until it has authentication or is explicitly deployed behind an authenticated reverse proxy.
+Open <http://127.0.0.1:8787>. Runs started from the browser continue if the browser disconnects; reconnecting replays persisted events.
 
-## Build and package
+## What is tested
 
-The application has no frontend build and no runtime dependency on Python, Node, Docker, CGO, OSCAR source, or an external database. SQLite, templates, CSS, and JavaScript are embedded in the executable.
+Built-in positive and negative cases cover:
+
+- `flood`, `co_occurrence`, `sequence`, and `threshold` window/order/cardinality behavior;
+- `persistence` and `absence` timer behavior;
+- `cross_source` distinct-source behavior;
+- `parent_child` linkage and per-notifier suppression evidence.
+
+Physical alert names use `CORRTEST_<PATTERN_CODE>_<CASE_CODE>_<ROLE>_<RUN_SHORT>`. Every source and expected synthetic alert carries `category=corrtest_<pattern>`, the full `oscar_test_run_id`, scenario, pattern, case, polarity, class, role, and temporary-rule labels. These values are included in the compiled plan, run UI's “Inspect in OSCAR” panel, canonical report, and evidence bundle.
+
+See [docs/builtins.md](docs/builtins.md) for the case catalog and [docs/operator.md](docs/operator.md) for deployment and recovery.
+
+## Safety and proof model
+
+- The harness uses correlation rule validate/create/read/delete only. It never calls rule import/upsert or update for temporary resources.
+- Rule creation is recorded before the network call. Lost responses are reconciled by exact run-owned name and description before adoption.
+- Alert injection uses `POST /api/v1/alerts`. Its required Alertmanager transport fingerprint is never used as OSCAR evidence; the server-assigned fingerprint read back from history is authoritative.
+- Target doctor and every run automatically validate a rule and prove reserved-label survival before creating rules.
+- Unknown pipeline mode, Phase A side-effect gating, missing labels, ambiguous history, incomplete negative windows, or unavailable evidence cannot produce `PASS`.
+- Behavioral verdict and cleanup status are independent. Cleanup retry reads back exact ownership before deleting anything.
+- Only one mutation run executes at a time.
+
+Pipeline mode is currently operator-declared because OSCAR does not expose it publicly. Use `phase_b_dispatch` only after verifying correlator publication and dispatch are enabled on the target.
+
+## History, custom scenarios, and evidence
+
+```bash
+oscar-corrtest scenario list
+oscar-corrtest scenario validate ./scenario.yaml
+oscar-corrtest scenario import ./scenario.yaml
+oscar-corrtest runs list --pattern flood --verdict PASS --output json
+oscar-corrtest runs show <run-id> --output json
+oscar-corrtest cleanup retry <run-id>
+oscar-corrtest export <run-id> --output ./run-evidence.zip
+oscar-corrtest verify-bundle ./run-evidence.zip
+oscar-corrtest backup --output ./corrtest-backup.db
+```
+
+Custom YAML/JSON is strict and bounded: unknown/duplicate keys, aliases, multiple documents, reserved-label overrides, unsafe durations, and oversized inputs are rejected. The release archive includes the JSON Schema at `docs/schema/correlation-scenario.schema.json`.
+
+Evidence ZIPs are atomic and non-overwriting. They contain the canonical JSON report, immutable plan, timeline, offline HTML, JUnit XML, and a SHA-256 manifest. Run deletion requires an exact ID, `--yes`, a terminal clean/not-required cleanup state, and verified local artifacts.
+
+SQLite uses WAL, foreign keys, a busy timeout, and full synchronous writes. Keep the data directory on a local filesystem. The online database backup does not include separate run artifact directories; preserve the whole state directory or export the required runs.
+
+## Serving securely
+
+Default serving accepts only literal loopback IPs. Direct non-loopback bearer mode requires TLS and an environment/file/systemd credential reference. Trusted-proxy mode requires explicit proxy CIDRs plus an exact identity header/value and rejects direct or spoofed requests.
+
+```bash
+oscar-corrtest serve --listen 0.0.0.0:8787 \
+  --remote-mode bearer --auth-token-file /run/credentials/corrtest-ui-token \
+  --tls-cert /etc/oscar-corrtest/tls.crt --tls-key /etc/oscar-corrtest/tls.key
+```
+
+## Build, test, and package
+
+The Makefile is the only build interface used by developers, GitHub Actions, and GitLab CI.
 
 ```bash
 make test
-make plan2-gate
-make ci-core
-make standalone-check
-make package checksums
+make test-race
+make plan7-gate
+make ci
+make release-gate
 ```
 
-Linux AMD64 and ARM64 archives are written to `dist/`. Packaging requires GNU tar; macOS developers can install it as `gtar` with Homebrew. A clean checkout builds with `GOWORK=off` and `CGO_ENABLED=0`.
+`make package checksums` writes deterministic Linux AMD64 and ARM64 archives to `dist/`. Archives include the executable, operator docs, scenario schema, systemd unit, and scratch-based `Containerfile`. Both CI systems use immutable action/image pins and publish packaged archives rather than raw binaries.
 
-## Durable configuration and history
-
-Configuration precedence is command flags, `OSCAR_CORRTEST_*` environment variables, a versioned JSON file, then defaults. Interactive defaults follow XDG config/state paths. The systemd unit explicitly uses `/etc/oscar-corrtest/config.json` and `/var/lib/oscar-corrtest`.
+Configuration precedence is flags, `OSCAR_CORRTEST_*` environment variables, a versioned JSON file, then XDG defaults:
 
 ```json
 {
@@ -41,33 +106,4 @@ Configuration precedence is command flags, `OSCAR_CORRTEST_*` environment variab
 }
 ```
 
-Targets store only an `env`, `file`, or `systemd` credential reference. Credential values are resolved only by future OSCAR requests and are never stored in SQLite, logs, reports, HTML, or artifacts. TLS verification is the default; insecure mode is explicit per target.
-
-Useful durable commands:
-
-```bash
-oscar-corrtest target list --output json
-oscar-corrtest runs list --verdict FAIL --output json
-oscar-corrtest runs show <run-id> --output json
-oscar-corrtest backup --output ./corrtest-backup.db
-```
-
-The SQLite database must remain on a local filesystem, not NFS or another network filesystem. It runs in WAL mode with full synchronous writes, foreign keys, and startup migration/integrity checks. A failed check leaves `/healthz` alive and `/readyz` unavailable for diagnostic inspection.
-
-The backup command creates a coordinated SQLite snapshot and refuses overwrite. It does not include `runs/` evidence files; preserve those directories separately until portable per-run evidence bundles arrive in Plan 3.
-
-## Delivery scope
-
-The next delivery slices add:
-
-- safe OSCAR rule lifecycle, simulated alert injection, and flood-pattern evidence;
-- window, ordering, timer, parent-child, and notifier correlation scenarios;
-- imported custom scenarios and authenticated operational deployment.
-
-The approved architecture and naming contracts are maintained under `docs/superpowers/`.
-
-## Linux service example
-
-`packaging/oscar-corrtest.service` is a hardened systemd example that keeps the listener on `127.0.0.1`. Provision the `oscar-corrtest` system user and group before installing the unit; systemd creates the restricted configuration and state directories.
-
-Plan 1 refuses wildcard and non-loopback listeners. A future remote mode must add authentication or be explicitly deployed behind an authenticated reverse proxy.
+Targets persist credential references only. Secret values are resolved in memory for a request and are excluded from SQLite, reports, HTML, SSE, and evidence bundles.

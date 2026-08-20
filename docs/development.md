@@ -24,6 +24,7 @@ No Python, Node, Docker, frontend toolchain, OSCAR source checkout, or CGO is re
 | `test` | Run the complete test suite without cached results |
 | `test-race` | Run the complete suite with the race detector |
 | `plan2-gate` | Run focused configuration, migration/WAL/recovery, artifact/report, backup, runtime, and UI tests |
+| `plan3-gate` … `plan7-gate` | Run focused qualification for each correlation delivery plan |
 | `build` | Build the host binary in `bin/` with linker metadata |
 | `cross` | Build CGO-free Linux AMD64 and ARM64 executables |
 | `package` | Produce deterministic Linux archives using GNU tar and `gzip -n` |
@@ -32,6 +33,7 @@ No Python, Node, Docker, frontend toolchain, OSCAR source checkout, or CGO is re
 | `standalone-check` | Build and test from `git archive` with isolated caches and no parent source dependency |
 | `ci-core` | Run formatting, module, vet, security, test, race, and host-build gates |
 | `ci` | Install tools, run core and standalone gates, package, and checksum sequentially |
+| `release-gate` | Run CI plus every plan gate, archive-content checks, and package reproducibility |
 | `clean` | Remove generated files beneath `bin/` and `dist/` |
 
 Both GitHub Actions and GitLab CI/CD call these Make targets rather than duplicating Go commands in YAML.
@@ -53,7 +55,7 @@ make build
 ./bin/oscar-corrtest serve --listen 127.0.0.1:8787 --data-dir /tmp/oscar-corrtest-state
 ```
 
-Only literal IPv4 or IPv6 loopback addresses are accepted. Hostnames, wildcard listeners, unspecified addresses, empty hosts, and non-loopback addresses are rejected because authenticated remote serving is not implemented yet.
+Literal IPv4 or IPv6 loopback is the no-auth default. Non-loopback serving requires either TLS-protected bearer/session authentication or an explicit trusted-proxy policy with restricted peer CIDRs and an exact identity header/value. See `docs/operator.md`.
 
 ## SQLite and evidence development
 
@@ -71,9 +73,9 @@ data-dir/
 
 SQLite uses WAL, `foreign_keys=ON`, `busy_timeout=5000`, and `synchronous=FULL`. Keep it on a local filesystem. Migrations are embedded, ordered, transactionally applied, and checksum-verified. Do not edit an applied migration; add the next numbered file.
 
-Artifact paths are application-generated, relative, traversal-checked, atomically published, and SHA-256 verified. Missing, pending, or changed files remain visible as integrity warnings. Canonical report JSON is durable now; standalone HTML, JUnit, and ZIP projections belong to Plan 3.
+Artifact paths are application-generated, relative, traversal-checked, atomically published, and SHA-256 verified. Missing, pending, or changed files remain visible as integrity warnings. Portable exports contain canonical JSON, the immutable plan, events, offline HTML, JUnit, and a SHA-256 manifest.
 
-At process startup, any active run is marked `INTERRUPTED` and receives one recovery event. Alert injection is never silently resumed. Plan 2 does not yet create OSCAR rules or send alerts.
+At process startup, any active run is marked `INTERRUPTED` and receives one recovery event. Alert injection is never silently resumed. Cleanup retry reads a rule back by its returned ID and verifies the exact run-owned name/description before deletion.
 
 The supported online backup command coordinates with WAL and refuses overwrite:
 
@@ -81,7 +83,7 @@ The supported online backup command coordinates with WAL and refuses overwrite:
 ./bin/oscar-corrtest backup --data-dir /tmp/oscar-corrtest-state --output /tmp/corrtest-backup.db
 ```
 
-The database backup excludes evidence directories. Back up those separately until per-run portable bundles are implemented.
+The database backup excludes evidence directories. Back up the complete state directory or export the terminal runs that must remain portable.
 
 ## Service and release gates
 

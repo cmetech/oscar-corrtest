@@ -72,9 +72,14 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 package_root="$stage/oscar-corrtest"
-mkdir -p "$package_root/bin" "$root_dir/dist"
+mkdir -p "$package_root/bin" "$package_root/docs/schema" "$package_root/packaging" "$root_dir/dist"
 install -m 0755 "$binary" "$package_root/bin/oscar-corrtest"
 install -m 0644 "$root_dir/README.md" "$package_root/README.md"
+install -m 0644 "$root_dir/docs/operator.md" "$package_root/docs/operator.md"
+install -m 0644 "$root_dir/docs/builtins.md" "$package_root/docs/builtins.md"
+install -m 0644 "$root_dir/docs/schema/correlation-scenario.schema.json" "$package_root/docs/schema/correlation-scenario.schema.json"
+install -m 0644 "$root_dir/packaging/oscar-corrtest.service" "$package_root/packaging/oscar-corrtest.service"
+install -m 0644 "$root_dir/Containerfile" "$package_root/Containerfile"
 
 archive="$root_dir/dist/oscar-corrtest_${version}_linux_${arch}.tar.gz"
 archive_tmp="$archive.tmp"

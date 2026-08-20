@@ -58,6 +58,7 @@ scan_root() {
   append_tree "$root/scripts"
   append_tree "$root/.github/workflows"
   append_tree "$root/packaging"
+  if [ -f "$root/Containerfile" ]; then printf '%s\n' "$root/Containerfile" >> "$scan_list"; fi
   append_tree "$root/internal/web/templates"
   append_tree "$root/internal/web/static"
   LC_ALL=C sort -u "$scan_list" -o "$scan_list"

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/cmetech/oscar-corrtest/docs/schema/correlation-scenario.schema.json",
+  "title": "OSCAR Correlation Scenario",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "name", "suite", "pattern", "maxDuration", "cases"],
+  "properties": {
+    "apiVersion": {"const": "corrtest.oscar/v1alpha1"},
+    "kind": {"const": "CorrelationScenario"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 100},
+    "suite": {"type": "string", "minLength": 1, "maxLength": 100},
+    "pattern": {"enum": ["flood", "co_occurrence", "sequence", "persistence", "absence", "parent_child", "cross_source", "threshold"]},
+    "maxDuration": {"type": "string", "pattern": "^[1-9][0-9]*(ms|s|m)$"},
+    "cases": {
+      "type": "array", "minItems": 2, "maxItems": 2,
+      "items": {"$ref": "#/$defs/case"}
+    }
+  },
+  "$defs": {
+    "case": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "code", "polarity", "window", "assertions"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 120},
+        "code": {"enum": ["P01", "N01"]},
+        "polarity": {"enum": ["positive", "negative"]},
+        "role": {"type": "string", "maxLength": 100},
+        "repeat": {"type": "integer", "minimum": 0, "maximum": 100},
+        "window": {"type": "string", "pattern": "^[1-9][0-9]*(ms|s|m)$"},
+        "groupBy": {"type": "array", "maxItems": 16, "items": {"type": "string", "minLength": 1, "maxLength": 100}, "uniqueItems": true},
+        "labels": {"type": "object", "maxProperties": 64, "additionalProperties": {"type": "string", "maxLength": 500}},
+        "assertions": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "#/$defs/assertion"}},
+        "events": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"$ref": "#/$defs/event"}}
+      }
+    },
+    "event": {
+      "type": "object", "additionalProperties": false, "required": ["role", "status"],
+      "properties": {
+        "role": {"type": "string", "minLength": 1, "maxLength": 100},
+        "status": {"enum": ["firing", "resolved"]},
+        "labels": {"type": "object", "maxProperties": 64, "additionalProperties": {"type": "string", "maxLength": 500}},
+        "delay": {"type": "string", "pattern": "^[0-9]+(ms|s|m)$"}
+      }
+    },
+    "assertion": {
+      "type": "object", "additionalProperties": false, "required": ["kind", "equals"],
+      "properties": {
+        "kind": {"enum": ["synthetic-alert-count", "audit-count", "parent-link-count"]},
+        "outcome": {"type": "string", "maxLength": 100},
+        "equals": {"type": "integer", "minimum": 0, "maximum": 100}
+      }
+    }
+  }
+}

@@ -16,7 +16,7 @@ GOVULNCHECK_VERSION := v1.6.0
 
 .DEFAULT_GOAL := build
 
-.PHONY: tools fmt-check mod-check archive-mod-check vet security test test-race plan2-gate build cross package checksums standalone-check ci-core ci clean
+.PHONY: tools fmt-check mod-check archive-mod-check vet security test test-race plan2-gate plan3-gate plan4-gate plan5-gate plan6-gate plan7-gate container-check package-content-check reproducible-check release-gate build cross package checksums standalone-check ci-core ci clean
 
 tools:
 	mkdir -p "$(TOOLS_DIR)"
@@ -53,6 +53,25 @@ test-race:
 plan2-gate:
 	go test -count=1 ./internal/config ./internal/domain ./internal/persistence/sqlite ./internal/artifact ./internal/report ./internal/runtime ./internal/web
 
+plan3-gate:
+	go test -count=1 ./internal/compiler ./internal/oscar ./internal/runner ./internal/runtime ./internal/evidence ./internal/web
+
+plan4-gate:
+	go test -count=1 ./internal/scenario ./internal/compiler ./internal/runner
+
+plan5-gate:
+	go test -count=1 ./internal/scenario ./internal/compiler ./internal/runner -run 'Persistence|Absence|Timer|Timing|Builtin'
+
+plan6-gate:
+	go test -count=1 ./internal/compiler ./internal/oscar ./internal/runner -run 'Parent|Notification|Builtin'
+
+plan7-gate:
+	go test -count=1 ./internal/scenario ./internal/evidence ./internal/artifact ./internal/runtime ./internal/command ./internal/web
+
+container-check:
+	grep -q '^FROM scratch$$' Containerfile
+	! grep -Eq '(^|:)latest([[:space:]]|$$)' Containerfile
+
 build:
 	mkdir -p "$(BUILD_DIR)"
 	$(GO_BUILD) -o "$(BUILD_DIR)/$(BINARY)" $(PKG)
@@ -78,6 +97,12 @@ checksums:
 		for file in $$files; do shasum -a 256 "$$file"; done > SHA256SUMS; \
 	fi
 
+package-content-check: package
+	./scripts/check-package.sh "$(DIST_DIR)"
+
+reproducible-check:
+	./scripts/check-reproducible.sh
+
 standalone-check:
 	bash scripts/test-standalone.sh
 
@@ -97,6 +122,10 @@ ci:
 	$(MAKE) standalone-check
 	$(MAKE) package
 	$(MAKE) checksums
+
+release-gate: ci
+	$(MAKE) plan3-gate plan4-gate plan5-gate plan6-gate plan7-gate
+	$(MAKE) container-check package-content-check reproducible-check
 
 clean:
 	if test -d "$(BUILD_DIR)"; then find "$(BUILD_DIR)" -mindepth 1 -delete; fi
