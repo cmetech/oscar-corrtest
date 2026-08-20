@@ -91,3 +91,8 @@ The database backup excludes evidence directories. Back up the complete state di
 The example `packaging/oscar-corrtest.service` requires operators to provision an `oscar-corrtest` system user and group. Its loopback listener is deliberate. `StateDirectory=` and `ConfigurationDirectory=` provide the only writable service locations while `ProtectSystem=strict` remains enabled.
 
 Before creating the first real semantic tag on either remote, confirm GitHub release permissions and branch protection, then confirm the GitLab `CI_JOB_TOKEN` can upload package-registry assets and create release links. Local workflow validation cannot prove those remote settings.
+
+Both publish-capable workflows run `make clean release-gate`; GitLab packaging
+consumes the verified job's archives instead of rebuilding through a weaker
+lane. The live qualification target is intentionally absent from both workflow
+graphs.

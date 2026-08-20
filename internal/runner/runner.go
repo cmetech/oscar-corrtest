@@ -394,7 +394,7 @@ func (r *Runner) finishWithoutMutation(ctx context.Context, run domain.Run, plan
 
 func (r *Runner) complete(ctx context.Context, run domain.Run, plan compiler.Plan, capabilities CapabilitySnapshot, results []caseResult, attempts []domain.AlertAttemptFact, resolutions []domain.AlertResolutionFact, verdict domain.Verdict, cleanup domain.CleanupStatus, terminal string) error {
 	completed := r.opts.Now().UTC()
-	facts, err := normalizedFacts(plan, results, attempts, completed)
+	facts, err := normalizedFacts(plan, results, attempts)
 	if err != nil {
 		return err
 	}
@@ -419,7 +419,7 @@ func (r *Runner) complete(ctx context.Context, run domain.Run, plan compiler.Pla
 	return r.store.FinalizeRun(ctx, run.ID, facts, verdict, cleanup, report, terminal, completed)
 }
 
-func normalizedFacts(plan compiler.Plan, results []caseResult, attempts []domain.AlertAttemptFact, completed time.Time) (domain.ExecutionFacts, error) {
+func normalizedFacts(plan compiler.Plan, results []caseResult, attempts []domain.AlertAttemptFact) (domain.ExecutionFacts, error) {
 	facts := domain.ExecutionFacts{Attempts: append([]domain.AlertAttemptFact(nil), attempts...)}
 	fingerprints := map[string]string{}
 	for _, result := range results {
@@ -432,7 +432,16 @@ func normalizedFacts(plan compiler.Plan, results []caseResult, attempts []domain
 		}
 		item := domain.CaseFact{StableKey: result.Code, Verdict: domain.Verdict(result.Verdict), StartedAt: result.StartedAt, EndedAt: result.EndedAt, Evidence: evidence}
 		for index, assertion := range result.Assertions {
-			expected, _ := json.Marshal(map[string]int{"equals": assertion.Expected})
+			var expected json.RawMessage
+			for _, planned := range plan.Cases {
+				if planned.Code == result.Code && index < len(planned.Assertions) {
+					expected, _ = json.Marshal(planned.Assertions[index])
+					break
+				}
+			}
+			if len(expected) == 0 {
+				expected, _ = json.Marshal(map[string]any{"kind": assertion.Kind, "outcome": assertion.Outcome, "equals": assertion.Expected})
+			}
 			observed, _ := json.Marshal(map[string]int{"count": assertion.Observed})
 			item.Assertions = append(item.Assertions, domain.AssertionFact{StableKey: assertion.Kind + ":" + strconv.Itoa(index+1), Kind: assertion.Kind,
 				ExpectedJSON: expected, ObservedJSON: observed, Verdict: assertion.Verdict, Explanation: assertion.Explanation,

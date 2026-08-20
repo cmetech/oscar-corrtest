@@ -73,6 +73,20 @@ oscar-corrtest serve --listen 0.0.0.0:8787 --remote-mode trusted-proxy \
 
 Never expose trusted-proxy mode directly to untrusted networks. Firewall the listener so only the declared proxy networks can connect.
 
+The scratch container defaults to `help` so it never starts an unreachable or
+unauthenticated service implicitly. Its `/var/lib/oscar-corrtest` directory is
+owned by UID/GID 65532. On a Linux host, either keep loopback semantics with
+host networking:
+
+```bash
+docker run --rm --network host -v corrtest-data:/var/lib/oscar-corrtest \
+  oscar-corrtest serve --listen 127.0.0.1:8787 --data-dir /var/lib/oscar-corrtest
+```
+
+or bind non-loopback only with the same bearer/TLS or restricted trusted-proxy
+policy required by the native binary. Do not publish a loopback-bound container
+port and assume it is reachable through Docker's port forwarding.
+
 ## systemd credentials
 
 The included unit runs loopback-only by default. For bearer mode, provision a credential without placing its value in the unit or environment:

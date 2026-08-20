@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 // SecurityMode is the explicit remote-serving authentication boundary.
@@ -54,9 +57,21 @@ func (security Security) validate() error {
 type authHandler struct {
 	next     http.Handler
 	security Security
+	now      func() time.Time
+	mu       sync.Mutex
+	revoked  map[string]time.Time
 }
 
-func (handler authHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+const sessionLifetime = 8 * time.Hour
+
+func newAuthHandler(next http.Handler, security Security, now func() time.Time) *authHandler {
+	if now == nil {
+		now = time.Now
+	}
+	return &authHandler{next: next, security: security, now: now, revoked: map[string]time.Time{}}
+}
+
+func (handler *authHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if handler.security.Mode == SecurityBearer && r.URL.Path == "/login" {
 		handler.login(w, r)
 		return
@@ -74,7 +89,7 @@ func (handler authHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "authentication required", http.StatusUnauthorized)
 }
 
-func (handler authHandler) authorized(r *http.Request) bool {
+func (handler *authHandler) authorized(r *http.Request) bool {
 	switch handler.security.Mode {
 	case SecurityNone:
 		return true
@@ -103,7 +118,7 @@ func (handler authHandler) authorized(r *http.Request) bool {
 	}
 }
 
-func (handler authHandler) login(w http.ResponseWriter, r *http.Request) {
+func (handler *authHandler) login(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
@@ -127,34 +142,73 @@ func (handler authHandler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nonce := base64.RawURLEncoding.EncodeToString(random)
+	issued := handler.now().UTC().Unix()
+	payload := nonce + "." + strconv.FormatInt(issued, 10)
 	mac := hmac.New(sha256.New, handler.security.BearerToken)
-	_, _ = mac.Write([]byte(nonce))
-	value := nonce + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-	http.SetCookie(w, &http.Cookie{Name: "corrtest_session", Value: value, Path: "/", MaxAge: 8 * 60 * 60, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
+	_, _ = mac.Write([]byte(payload))
+	value := payload + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	http.SetCookie(w, &http.Cookie{Name: "corrtest_session", Value: value, Path: "/", MaxAge: int(sessionLifetime.Seconds()), HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-func (handler authHandler) logout(w http.ResponseWriter, r *http.Request) {
+func (handler *authHandler) logout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost || !sameOrigin(r) {
 		http.Error(w, "invalid logout request", http.StatusForbidden)
 		return
+	}
+	if cookie, err := r.Cookie("corrtest_session"); err == nil {
+		if id, expires, ok := handler.session(cookie.Value); ok {
+			handler.mu.Lock()
+			handler.revoked[id] = expires
+			handler.mu.Unlock()
+		}
 	}
 	http.SetCookie(w, &http.Cookie{Name: "corrtest_session", Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
-func (handler authHandler) validSession(value string) bool {
-	nonce, signature, ok := strings.Cut(value, ".")
-	if !ok || nonce == "" || signature == "" {
+func (handler *authHandler) validSession(value string) bool {
+	id, _, ok := handler.session(value)
+	if !ok {
 		return false
 	}
-	provided, err := base64.RawURLEncoding.DecodeString(signature)
+	now := handler.now().UTC()
+	handler.mu.Lock()
+	defer handler.mu.Unlock()
+	for revokedID, expires := range handler.revoked {
+		if !expires.After(now) {
+			delete(handler.revoked, revokedID)
+		}
+	}
+	_, revoked := handler.revoked[id]
+	return !revoked
+}
+
+func (handler *authHandler) session(value string) (string, time.Time, bool) {
+	parts := strings.Split(value, ".")
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return "", time.Time{}, false
+	}
+	issuedUnix, err := strconv.ParseInt(parts[1], 10, 64)
 	if err != nil {
-		return false
+		return "", time.Time{}, false
+	}
+	issued := time.Unix(issuedUnix, 0).UTC()
+	expires := issued.Add(sessionLifetime)
+	now := handler.now().UTC()
+	if issued.After(now.Add(time.Minute)) || !expires.After(now) {
+		return "", time.Time{}, false
+	}
+	provided, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		return "", time.Time{}, false
 	}
 	mac := hmac.New(sha256.New, handler.security.BearerToken)
-	_, _ = mac.Write([]byte(nonce))
-	return hmac.Equal(provided, mac.Sum(nil))
+	_, _ = mac.Write([]byte(parts[0] + "." + parts[1]))
+	if !hmac.Equal(provided, mac.Sum(nil)) {
+		return "", time.Time{}, false
+	}
+	return parts[0], expires, true
 }
 
 func secureEqual(left, right []byte) bool {

@@ -122,7 +122,7 @@ func NewHandlerWithOptions(info version.Info, data DataSource, security Security
 	if security.Mode == SecurityNone {
 		return base, nil
 	}
-	return authHandler{next: base, security: security}, nil
+	return newAuthHandler(base, security, time.Now), nil
 }
 
 func newHandler(info version.Info, tmpl *template.Template, static http.Handler, nonce nonceFunc) http.Handler {
@@ -588,6 +588,24 @@ func noCache(next http.Handler) http.Handler {
 	})
 }
 
+func loopbackHostGuard(next http.Handler, listenerAddress string) http.Handler {
+	_, listenerPort, err := net.SplitHostPort(listenerAddress)
+	if err != nil || listenerPort == "" {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "listener host policy is unavailable", http.StatusServiceUnavailable)
+		})
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, port, splitErr := net.SplitHostPort(r.Host)
+		ip := net.ParseIP(host)
+		if splitErr != nil || port != listenerPort || ip == nil || !ip.IsLoopback() {
+			http.Error(w, "request host is not the loopback listener", http.StatusMisdirectedRequest)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func generateNonce() (string, error) {
 	random := make([]byte, 18)
 	if _, err := rand.Read(random); err != nil {
@@ -609,6 +627,9 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		_ = listener.Close()
 		return err
+	}
+	if opts.Security.Mode == SecurityNone {
+		handler = loopbackHostGuard(handler, listener.Addr().String())
 	}
 	server := &http.Server{
 		Handler: handler, ReadHeaderTimeout: 5 * time.Second,

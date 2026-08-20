@@ -384,6 +384,61 @@ func TestBearerLoginCreatesSecureSessionWithoutReflectingSecret(t *testing.T) {
 	}
 }
 
+func TestBearerSessionExpiresAndLogoutRevokesReplay(t *testing.T) {
+	now := time.Date(2026, 8, 20, 14, 0, 0, 0, time.UTC)
+	base := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	handler := newAuthHandler(base, Security{Mode: SecurityBearer, BearerToken: []byte("correct horse battery staple"), SecureCookies: true}, func() time.Time { return now })
+	login := func() *http.Cookie {
+		values := url.Values{"token": {"correct horse battery staple"}}
+		request := httptest.NewRequest(http.MethodPost, "https://corrtest.example/login", strings.NewReader(values.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Origin", "https://corrtest.example")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response.Result().Cookies()[0]
+	}
+	cookie := login()
+	now = now.Add(8*time.Hour + time.Second)
+	expired := httptest.NewRequest(http.MethodGet, "https://corrtest.example/", nil)
+	expired.AddCookie(cookie)
+	expiredResponse := httptest.NewRecorder()
+	handler.ServeHTTP(expiredResponse, expired)
+	if expiredResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("expired session status=%d", expiredResponse.Code)
+	}
+
+	now = now.Add(-time.Hour)
+	cookie = login()
+	logout := httptest.NewRequest(http.MethodPost, "https://corrtest.example/logout", nil)
+	logout.Header.Set("Origin", "https://corrtest.example")
+	logout.AddCookie(cookie)
+	logoutResponse := httptest.NewRecorder()
+	handler.ServeHTTP(logoutResponse, logout)
+	replay := httptest.NewRequest(http.MethodGet, "https://corrtest.example/", nil)
+	replay.AddCookie(cookie)
+	replayResponse := httptest.NewRecorder()
+	handler.ServeHTTP(replayResponse, replay)
+	if replayResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("logged-out session replay status=%d", replayResponse.Code)
+	}
+}
+
+func TestLoopbackHostGuardRejectsDNSRebindingHost(t *testing.T) {
+	handler := loopbackHostGuard(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }), "127.0.0.1:8787")
+	for _, test := range []struct {
+		host string
+		want int
+	}{{"127.0.0.1:8787", http.StatusOK}, {"[::1]:8787", http.StatusOK}, {"attacker.example:8787", http.StatusMisdirectedRequest}, {"127.0.0.1:9999", http.StatusMisdirectedRequest}} {
+		request := httptest.NewRequest(http.MethodGet, "http://"+test.host+"/", nil)
+		request.Host = test.host
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != test.want {
+			t.Fatalf("host=%s status=%d want=%d", test.host, response.Code, test.want)
+		}
+	}
+}
+
 func TestTrustedProxyRequiresPeerAndIdentity(t *testing.T) {
 	t.Parallel()
 	_, network, _ := net.ParseCIDR("10.20.0.0/16")
