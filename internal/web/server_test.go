@@ -353,6 +353,45 @@ func TestScenarioUIPreviewsAndImportsStrictSourceWithCSRF(t *testing.T) {
 	}
 }
 
+func TestScenarioWorkbenchPreviewsBuiltinSourceContractAndClone(t *testing.T) {
+	runtime, err := appruntime.Open(context.Background(), config.Settings{DataDir: t.TempDir(), ListenAddress: "127.0.0.1:8787"}, version.Info{Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	handler := NewHandlerWithData(version.Info{Version: "test"}, runtime)
+	get := httptest.NewRequest(http.MethodGet, "http://example.com/scenarios?selected=builtin:flood", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, get)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	for _, required := range []string{"Scenario catalog", "pattern: flood", "P01", "N01", "CORRTEST_FLOOD_P01", "oscar_test_run_id", "Clone as custom"} {
+		if !strings.Contains(body, required) {
+			t.Errorf("workbench missing %q", required)
+		}
+	}
+	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(body)
+	if len(match) != 2 {
+		t.Fatal("clone CSRF token missing")
+	}
+	values := url.Values{"csrf_token": {match[1]}, "scenario_ref": {"builtin:flood"}}
+	post := httptest.NewRequest(http.MethodPost, "http://example.com/scenarios/clone", strings.NewReader(values.Encode()))
+	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	post.Header.Set("Origin", "http://example.com")
+	post.AddCookie(response.Result().Cookies()[0])
+	cloned := httptest.NewRecorder()
+	handler.ServeHTTP(cloned, post)
+	if cloned.Code != http.StatusSeeOther || !strings.Contains(cloned.Header().Get("Location"), "/scenarios?selected=imported%3A") {
+		t.Fatalf("clone status=%d location=%q body=%s", cloned.Code, cloned.Header().Get("Location"), cloned.Body.String())
+	}
+	items, err := runtime.ListScenarios(context.Background())
+	if err != nil || len(items) != 1 || items[0].SourceDocument == "" || items[0].Name == "flood-basic" {
+		t.Fatalf("cloned items=%+v err=%v", items, err)
+	}
+}
+
 func TestBearerSecurityProtectsEveryApplicationRoute(t *testing.T) {
 	t.Parallel()
 	security := Security{Mode: SecurityBearer, BearerToken: []byte("correct horse battery staple"), SecureCookies: true}

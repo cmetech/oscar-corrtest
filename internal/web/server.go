@@ -26,6 +26,7 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/evidence"
+	appruntime "github.com/cmetech/oscar-corrtest/internal/runtime"
 	"github.com/cmetech/oscar-corrtest/internal/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/version"
 )
@@ -78,6 +79,11 @@ type pageData struct {
 	ScenarioPlan      string
 	Help              HelpTopic
 	ReferenceTopics   []HelpTopic
+	ScenarioCatalog   []scenarioCatalogItem
+	SelectedScenario  string
+	SelectedName      string
+	SelectedPattern   string
+	SelectedBuiltIn   bool
 }
 
 type readinessView struct {
@@ -107,6 +113,18 @@ type scenarioManager interface {
 	ListScenarios(context.Context) ([]domain.ScenarioRecord, error)
 	PreviewScenario(context.Context, string, scenario.Scenario, string) (compiler.Plan, error)
 	ImportScenario(context.Context, []byte, scenario.Scenario) (domain.ScenarioRecord, error)
+}
+
+type scenarioInspector interface {
+	InspectScenario(context.Context, []byte, string) (appruntime.ScenarioInspection, error)
+}
+
+type scenarioCatalogItem struct {
+	Ref      string
+	Name     string
+	Pattern  string
+	Kind     string
+	Selected bool
 }
 
 // NewHandler returns the Plan-1 shell with no durable data source.
@@ -246,18 +264,70 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 			http.Error(w, "scenario management unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		targets, err := data.ListTargets(r.Context())
-		if err != nil {
-			http.Error(w, "scenario management unavailable", http.StatusServiceUnavailable)
-			return
-		}
 		items, err := manager.ListScenarios(r.Context())
 		if err != nil {
 			http.Error(w, "scenario management unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		render(w, tmpl, nonce, pageData{Version: info, Page: "scenarios", Readiness: readiness(data), Targets: targets,
-			ImportedScenarios: items, CSRFToken: csrfToken(w, r, csrfSecret)})
+		view, err := scenarioWorkbench(r.Context(), info, data, items, r.URL.Query().Get("selected"))
+		if err != nil {
+			http.Error(w, "scenario selection is unavailable", http.StatusNotFound)
+			return
+		}
+		view.CSRFToken = csrfToken(w, r, csrfSecret)
+		render(w, tmpl, nonce, view)
+	})
+	mux.HandleFunc("POST /scenarios/clone", func(w http.ResponseWriter, r *http.Request) {
+		manager, ok := data.(scenarioManager)
+		if !ok || csrfErr != nil {
+			http.Error(w, "scenario management unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid clone form", http.StatusBadRequest)
+			return
+		}
+		if !sameOrigin(r) || !validCSRF(r, csrfSecret) {
+			http.Error(w, "request origin or CSRF token is invalid", http.StatusForbidden)
+			return
+		}
+		pattern, ok := strings.CutPrefix(r.FormValue("scenario_ref"), "builtin:")
+		if !ok {
+			http.Error(w, "only built-in scenarios can be cloned", http.StatusUnprocessableEntity)
+			return
+		}
+		document := scenario.Builtin(pattern)
+		if len(document.Cases) != 2 {
+			http.Error(w, "built-in scenario is unavailable", http.StatusUnprocessableEntity)
+			return
+		}
+		items, err := manager.ListScenarios(r.Context())
+		if err != nil {
+			http.Error(w, "scenario clone unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		names := make(map[string]bool, len(items))
+		for _, item := range items {
+			names[item.Name] = true
+		}
+		baseName := document.Name + "-custom"
+		document.Name = baseName
+		for suffix := 2; names[document.Name]; suffix++ {
+			document.Name = baseName + "-" + strconv.Itoa(suffix)
+		}
+		document.Suite = "custom"
+		source, err := scenario.Encode(document)
+		if err != nil {
+			http.Error(w, "scenario clone unavailable", http.StatusUnprocessableEntity)
+			return
+		}
+		record, err := manager.ImportScenario(r.Context(), source, document)
+		if err != nil {
+			http.Error(w, "scenario clone unavailable", http.StatusUnprocessableEntity)
+			return
+		}
+		http.Redirect(w, r, "/scenarios?selected="+url.QueryEscape("imported:"+record.ID), http.StatusSeeOther)
 	})
 	mux.HandleFunc("POST /scenarios", func(w http.ResponseWriter, r *http.Request) {
 		manager, ok := data.(scenarioManager)
@@ -292,7 +362,14 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 				renderStatus(w, tmpl, nonce, http.StatusUnprocessableEntity, view)
 				return
 			}
-			plan, err := manager.PreviewScenario(r.Context(), r.FormValue("target_id"), document, mode)
+			var plan compiler.Plan
+			var err error
+			if inspector, ok := data.(scenarioInspector); ok {
+				inspection, inspectErr := inspector.InspectScenario(r.Context(), []byte(source), mode)
+				plan, err = inspection.Plan, inspectErr
+			} else {
+				plan, err = manager.PreviewScenario(r.Context(), r.FormValue("target_id"), document, mode)
+			}
 			if err != nil {
 				view.Error = err.Error()
 				renderStatus(w, tmpl, nonce, http.StatusUnprocessableEntity, view)
@@ -495,6 +572,58 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 		render(w, tmpl, nonce, pageData{Version: info, Page: "reference", Readiness: readiness(data), ReferenceTopics: catalog.All()})
 	})
 	return mux
+}
+
+func scenarioWorkbench(ctx context.Context, info version.Info, data DataSource, imported []domain.ScenarioRecord, selected string) (pageData, error) {
+	if selected == "" {
+		selected = "builtin:flood"
+	}
+	view := pageData{Version: info, Page: "scenarios", Readiness: readiness(data), ImportedScenarios: imported, SelectedScenario: selected}
+	for _, builtin := range scenario.AllBuiltins() {
+		ref := "builtin:" + builtin.Pattern
+		view.ScenarioCatalog = append(view.ScenarioCatalog, scenarioCatalogItem{Ref: ref, Name: builtin.Name, Pattern: builtin.Pattern, Kind: "Built-in", Selected: ref == selected})
+	}
+	for _, item := range imported {
+		document, _ := scenario.Decode(strings.NewReader(item.SourceDocument))
+		ref := "imported:" + item.ID
+		view.ScenarioCatalog = append(view.ScenarioCatalog, scenarioCatalogItem{Ref: ref, Name: item.Name, Pattern: document.Pattern, Kind: "Custom", Selected: ref == selected})
+	}
+	var source []byte
+	if pattern, ok := strings.CutPrefix(selected, "builtin:"); ok {
+		var err error
+		source, err = scenario.BuiltinSource(pattern)
+		if err != nil {
+			return pageData{}, err
+		}
+		view.SelectedBuiltIn = true
+	} else if id, ok := strings.CutPrefix(selected, "imported:"); ok {
+		for _, item := range imported {
+			if item.ID == id {
+				source = []byte(item.SourceDocument)
+				break
+			}
+		}
+		if len(source) == 0 {
+			return pageData{}, fmt.Errorf("selected scenario is unavailable")
+		}
+	} else {
+		return pageData{}, fmt.Errorf("selected scenario reference is invalid")
+	}
+	document, err := scenario.Decode(bytes.NewReader(source))
+	if err != nil {
+		return pageData{}, err
+	}
+	view.SelectedName, view.SelectedPattern, view.ScenarioSource = document.Name, document.Pattern, string(source)
+	if inspector, ok := data.(scenarioInspector); ok {
+		inspection, inspectErr := inspector.InspectScenario(ctx, source, "phase_b_dispatch")
+		if inspectErr != nil {
+			view.Error = inspectErr.Error()
+		} else {
+			encoded, _ := json.MarshalIndent(inspection.Plan, "", "  ")
+			view.ScenarioPlan = string(encoded)
+		}
+	}
+	return view, nil
 }
 
 func render(w http.ResponseWriter, tmpl *template.Template, nonce nonceFunc, data pageData) {

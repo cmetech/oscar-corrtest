@@ -1,16 +1,11 @@
 {{define "scenarios"}}
-<section class="page-heading"><p class="eyebrow">Closed, validated inputs</p><h1>Custom scenarios</h1><p>Paste strict YAML or JSON, compile a no-mutation preview, then persist the original source by content digest.</p></section>
+<section class="page-heading"><p class="eyebrow">Closed, validated inputs</p><h1>Scenario workbench</h1><p>Inspect canonical built-ins and custom scenarios as source plus the exact compiled P01/N01 OSCAR contract.</p></section>
 {{if .Error}}<div class="notice notice--error" role="alert">{{.Error}}</div>{{end}}
 {{if .Status}}<div class="notice" role="status">{{.Status}}</div>{{end}}
-<section class="panel">
-  <form method="post" action="/scenarios" class="form-grid">
-    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-    <label>Scenario YAML or JSON<textarea name="source" rows="18" required>{{.ScenarioSource}}</textarea></label>
-    <label>Preview target<select name="target_id">{{range .Targets}}<option value="{{.ID}}">{{.DisplayName}} — {{.BaseURL}}</option>{{end}}</select></label>
-    <label>Pipeline mode<select name="pipeline_mode"><option value="phase_b_dispatch">Phase B — audit and dispatch</option><option value="phase_a_audit_only">Phase A — audit only</option></select></label>
-    <div><button type="submit" name="action" value="preview">Compile preview</button> <button type="submit" name="action" value="import">Import validated source</button></div>
-  </form>
+<section class="scenario-workbench" aria-label="Scenario workbench">
+  <aside class="scenario-catalog"><header><p class="eyebrow">Catalog</p><h2>Scenario catalog</h2></header><nav aria-label="Scenarios">{{range .ScenarioCatalog}}<a href="/scenarios?selected={{urlquery .Ref}}"{{if .Selected}} aria-current="page"{{end}}><span>{{.Name}}</span><small>{{.Kind}} · {{.Pattern}}</small></a>{{end}}</nav></aside>
+  <section class="scenario-source"><header class="workbench-header"><div><p class="eyebrow">Source</p><h2>{{.SelectedName}}</h2></div>{{if .SelectedBuiltIn}}<form method="post" action="/scenarios/clone"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><input type="hidden" name="scenario_ref" value="{{.SelectedScenario}}"><button class="primary-button" type="submit">Clone as custom</button></form>{{end}}</header><p class="muted">Strict canonical YAML · {{.SelectedPattern}}</p><pre class="source-code"><code>{{.ScenarioSource}}</code></pre></section>
+  <section class="scenario-contract"><header><p class="eyebrow">Compiled contract</p><h2>P01 / N01</h2></header>{{if .ScenarioPlan}}<p class="muted">Names, labels, rules, stimuli, assertions, filters, and mutation budget.</p><pre class="contract-code"><code>{{.ScenarioPlan}}</code></pre>{{else}}<p class="notice notice--error">The selected source could not be compiled.</p>{{end}}</section>
 </section>
-{{if .ScenarioPlan}}<section class="panel"><h2>Immutable plan preview</h2><pre>{{.ScenarioPlan}}</pre></section>{{end}}
-<section class="panel"><h2>Imported scenarios</h2>{{if .ImportedScenarios}}<div class="data-table-wrapper"><table><caption>Persisted custom scenario sources</caption><thead><tr><th>Name</th><th>ID</th><th>SHA-256</th></tr></thead><tbody>{{range .ImportedScenarios}}<tr><td>{{.Name}}</td><td><code>{{.ID}}</code></td><td><code>{{.SHA256}}</code></td></tr>{{end}}</tbody></table></div>{{else}}<p class="muted">No custom scenarios imported.</p>{{end}}</section>
+<section class="panel" id="scenario-authoring"><h2>Custom scenarios</h2><p class="muted">Paste strict YAML or JSON. Preview is target-free; import preserves the validated source by content digest.</p><form method="post" action="/scenarios" class="form-grid"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><label>Scenario YAML or JSON<textarea name="source" rows="18" required>{{.ScenarioSource}}</textarea></label><label>Pipeline mode<select name="pipeline_mode"><option value="phase_b_dispatch">Phase B — audit and dispatch</option><option value="phase_a_audit_only">Phase A — audit only</option></select></label><div><button type="submit" name="action" value="preview">Compile preview</button> <button type="submit" name="action" value="import">Import validated source</button></div></form></section>
 {{end}}
