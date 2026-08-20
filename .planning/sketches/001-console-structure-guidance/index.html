@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>CorrTest Sketch 001 — Console Structure</title>
+  <link id="theme-link" rel="stylesheet" href="../themes/default.css">
+  <style>
+    * { box-sizing: border-box; }
+    html { background: #0f1115; }
+    body { margin: 0; color: var(--color-text); background: var(--color-bg); font: var(--text-base)/1.45 var(--font-sans); }
+    button, input, select { font: inherit; }
+    button, a, summary { transition: background .15s ease, border-color .15s ease, color .15s ease, transform .15s ease; }
+    button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+    code, .mono { font-family: var(--font-mono); }
+    .variant-nav { position: fixed; inset: 0 0 auto; z-index: 100; min-height: 48px; display: flex; align-items: center; gap: 6px; padding: 7px 16px; border-bottom: 1px solid var(--color-border); background: var(--color-surface); box-shadow: var(--shadow-sm); }
+    .variant-nav strong { margin-right: 10px; color: var(--color-text-muted); font: 700 var(--text-xs)/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+    .variant-tab { min-height: 32px; padding: 5px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); color: var(--color-text-muted); background: transparent; cursor: pointer; }
+    .variant-tab:hover { color: var(--color-text); border-color: var(--color-border-strong); background: var(--color-surface-hover); }
+    .variant-tab.active { color: var(--color-primary-fg); border-color: var(--color-primary); background: var(--color-primary); font-weight: 800; }
+    #sketch-frame { width: 100%; min-height: calc(100vh - 48px); margin: 48px auto 0; background: var(--color-bg); transition: max-width .2s ease; }
+    .variant { min-height: calc(100vh - 48px); }
+    .app-header { height: 58px; display: flex; align-items: center; justify-content: space-between; padding: 0 18px; border-bottom: 1px solid #363c47; color: #f7f8fa; background: var(--color-header); }
+    .brand-lockup, .header-status { display: flex; align-items: center; gap: 10px; }
+    .brand-mark { display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid #535a67; border-radius: var(--radius-sm); color: #fad22d; font: 900 12px/1 var(--font-mono); letter-spacing: -.05em; }
+    .brand-name { color: #f7f8fa; font-weight: 800; letter-spacing: .01em; }
+    .brand-name span { display: block; color: #aeb6c3; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
+    .header-status { color: #b9c1cc; font: var(--text-xs)/1 var(--font-mono); }
+    .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-success); box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-success) 15%, transparent); }
+    .shell { display: grid; min-height: calc(100vh - 106px); grid-template-columns: 206px minmax(0,1fr); }
+    .sidebar { display: flex; flex-direction: column; border-right: 1px solid var(--color-border); background: var(--color-surface); }
+    .nav-group { padding: 16px 12px 8px; }
+    .nav-label { margin: 0 8px 7px; color: var(--color-text-dim); font: 800 10px/1 var(--font-mono); letter-spacing: .11em; text-transform: uppercase; }
+    .sidebar a { display: flex; align-items: center; justify-content: space-between; min-height: 34px; margin: 2px 0; padding: 6px 9px; border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--color-text-muted); text-decoration: none; font-size: var(--text-sm); font-weight: 700; }
+    .sidebar a:hover { color: var(--color-text); background: var(--color-surface-hover); }
+    .sidebar a.active { color: var(--color-text); border-color: color-mix(in srgb, var(--color-primary) 40%, var(--color-border)); background: color-mix(in srgb, var(--color-primary) 9%, var(--color-surface)); }
+    .nav-count { min-width: 21px; padding: 1px 5px; border-radius: 9px; color: var(--color-text-muted); background: var(--color-bg); font: 10px/1.5 var(--font-mono); text-align: center; }
+    .sidebar-foot { margin-top: auto; padding: 12px; border-top: 1px solid var(--color-border); }
+    .target-state { padding: 9px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg); }
+    .target-state strong, .target-state span { display: block; }
+    .target-state strong { font-size: var(--text-sm); }
+    .target-state span { margin-top: 3px; color: var(--color-text-muted); font: 10px/1.4 var(--font-mono); }
+    .workspace { min-width: 0; padding: 20px 22px 44px; }
+    .breadcrumb { margin-bottom: 8px; color: var(--color-text-dim); font: 10px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+    .page-head { display: flex; align-items: start; justify-content: space-between; gap: 18px; margin-bottom: 16px; }
+    h1 { margin: 0; font-size: var(--text-2xl); line-height: 1.15; letter-spacing: -.025em; }
+    h2 { margin: 0; font-size: var(--text-lg); }
+    h3 { margin: 0; font-size: var(--text-base); }
+    p { margin: 0; }
+    .page-subtitle { max-width: 690px; margin-top: 5px; color: var(--color-text-muted); font-size: var(--text-sm); }
+    .button { min-height: 34px; padding: 6px 11px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); color: var(--color-text); background: var(--color-surface); cursor: pointer; font-weight: 750; }
+    .button:hover { border-color: var(--color-border-strong); background: var(--color-surface-hover); }
+    .button.primary { color: var(--color-primary-fg); border-color: var(--color-primary); background: var(--color-primary); }
+    .button.primary:hover { background: var(--color-primary-hover); transform: translateY(-1px); }
+    .button.small { min-height: 28px; padding: 4px 8px; font-size: var(--text-xs); }
+    .panel { border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
+    .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 43px; padding: 9px 12px; border-bottom: 1px solid var(--color-border); }
+    .panel-title { display: flex; align-items: center; gap: 8px; }
+    .toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin-bottom: 12px; }
+    .control { display: grid; gap: 3px; }
+    .control span { color: var(--color-text-muted); font: 700 10px/1 var(--font-mono); letter-spacing: .04em; text-transform: uppercase; }
+    input, select { min-height: 32px; padding: 5px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); color: var(--color-text); background: var(--color-bg); }
+    input:hover, select:hover { border-color: var(--color-border-strong); }
+    .grow { flex: 1 1 220px; }
+    table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+    th, td { padding: 8px 10px; border-bottom: 1px solid var(--color-border); text-align: left; vertical-align: middle; }
+    th { color: var(--color-text-muted); font: 800 10px/1.2 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; }
+    tbody tr:hover { background: var(--color-surface-hover); }
+    tbody tr:last-child td { border-bottom: 0; }
+    .pattern { color: var(--color-accent); font: 750 var(--text-xs)/1 var(--font-mono); }
+    .digest { color: var(--color-text-muted); font: var(--text-xs)/1 var(--font-mono); }
+    .pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; border: 1px solid var(--color-border); border-radius: var(--radius-full); color: var(--color-text-muted); font: 750 10px/1.5 var(--font-mono); }
+    .pill.builtin { color: var(--color-info); border-color: color-mix(in srgb, var(--color-info) 50%, var(--color-border)); }
+    .pill.valid { color: var(--color-success); border-color: color-mix(in srgb, var(--color-success) 55%, var(--color-border)); }
+    .split-a { display: grid; grid-template-columns: minmax(0,1fr) 282px; gap: 14px; }
+    .reference-rail { position: sticky; top: 68px; align-self: start; display: grid; gap: 10px; }
+    .reference-card { padding: 12px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
+    .reference-card h3 { margin-bottom: 7px; color: var(--color-accent); font: 800 11px/1.2 var(--font-mono); letter-spacing: .07em; text-transform: uppercase; }
+    .reference-card p, .reference-card li { color: var(--color-text-muted); font-size: var(--text-xs); }
+    .reference-card ul { display: grid; gap: 5px; margin: 0; padding-left: 17px; }
+    .reference-card code { color: var(--color-text); }
+    .contract-strip { display: grid; grid-template-columns: 1.2fr 1fr 1fr auto; gap: 1px; margin-bottom: 12px; overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-border); }
+    .contract-cell { min-width: 0; padding: 9px 11px; background: var(--color-surface); }
+    .contract-cell span { display: block; margin-bottom: 4px; color: var(--color-text-dim); font: 800 9px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+    .contract-cell strong { display: block; overflow: hidden; color: var(--color-text); font: 650 var(--text-xs)/1.35 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+    details.inline-docs { margin-top: 12px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
+    details.inline-docs summary { padding: 9px 12px; color: var(--color-text-muted); cursor: pointer; font-size: var(--text-sm); font-weight: 750; }
+    details.inline-docs summary:hover { color: var(--color-text); background: var(--color-surface-hover); }
+    .doc-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; padding: 0 12px 12px; }
+    .doc-grid section { padding: 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg); }
+    .doc-grid h3 { margin-bottom: 6px; color: var(--color-accent); font-size: var(--text-sm); }
+    .doc-grid p { color: var(--color-text-muted); font-size: var(--text-xs); }
+    .command-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 7px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
+    .command-bar .path { flex: 1; color: var(--color-text-muted); font: var(--text-xs)/1 var(--font-mono); }
+    .drawer { position: fixed; z-index: 60; inset: 48px 0 0 auto; width: min(420px,92vw); padding: 18px; border-left: 1px solid var(--color-border); color: var(--color-text); background: var(--color-surface); box-shadow: var(--shadow-lg); transform: translateX(105%); transition: transform .2s ease; overflow: auto; }
+    .drawer.open { transform: translateX(0); }
+    .drawer-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--color-border); }
+    .drawer-section { margin: 14px 0; }
+    .drawer-section h3 { margin-bottom: 6px; color: var(--color-accent); }
+    .drawer-section p, .drawer-section li { color: var(--color-text-muted); font-size: var(--text-sm); }
+    .drawer-section pre { overflow: auto; padding: 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); color: var(--color-text); background: var(--color-bg); font: var(--text-xs)/1.5 var(--font-mono); }
+    .screen { position: fixed; z-index: 55; inset: 48px 0 0; background: rgba(0,0,0,.38); opacity: 0; pointer-events: none; transition: opacity .2s ease; }
+    .screen.open { opacity: 1; pointer-events: auto; }
+    .toast { position: fixed; z-index: 200; left: 50%; bottom: 22px; padding: 9px 13px; border: 1px solid var(--color-success); border-radius: var(--radius-sm); color: var(--color-text); background: var(--color-surface); box-shadow: var(--shadow-md); opacity: 0; transform: translate(-50%,10px); pointer-events: none; transition: opacity .15s ease, transform .15s ease; font-size: var(--text-sm); }
+    .toast.show { opacity: 1; transform: translate(-50%,0); }
+    #sketch-tools { position: fixed; z-index: 9999; right: 12px; bottom: 12px; display: flex; gap: 5px; align-items: center; padding: 7px 9px; border-radius: 7px; color: white; background: rgba(0,0,0,.82); opacity: .45; transition: opacity .2s; font: 11px/1 system-ui; }
+    #sketch-tools:hover { opacity: 1; }
+    #sketch-tools select, #sketch-tools button { min-height: 26px; padding: 3px 6px; border: 1px solid #687080; border-radius: 3px; color: white; background: #242832; font: 11px/1 system-ui; }
+    .annotate [data-note] { outline: 1px dashed var(--color-accent); outline-offset: 2px; }
+    .annotate [data-note]:hover::after { position: absolute; z-index: 500; padding: 5px 7px; border-radius: 3px; color: white; background: #111; content: attr(data-note); font: 11px/1.2 system-ui; }
+    @media (max-width: 980px) {
+      .split-a { grid-template-columns: 1fr; }
+      .reference-rail { position: static; grid-template-columns: repeat(3,minmax(0,1fr)); }
+      .contract-strip { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    }
+    @media (max-width: 760px) {
+      .shell { grid-template-columns: 1fr; }
+      .sidebar { overflow-x: auto; flex-direction: row; border-right: 0; border-bottom: 1px solid var(--color-border); }
+      .nav-group { display: flex; padding: 8px; }
+      .nav-label, .sidebar-foot, .nav-count { display: none; }
+      .sidebar a { white-space: nowrap; }
+      .workspace { padding: 15px 12px 36px; }
+      .page-head { align-items: stretch; flex-direction: column; }
+      .reference-rail, .doc-grid { grid-template-columns: 1fr; }
+      .contract-strip { grid-template-columns: 1fr; }
+      .header-status .mono { display: none; }
+      th:nth-child(4), td:nth-child(4) { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="variant-nav" aria-label="Sketch variants">
+    <strong>Sketch 001</strong>
+    <button class="variant-tab active" data-variant="a">A: Reference rail</button>
+    <button class="variant-tab" data-variant="b">B: Inline contract</button>
+    <button class="variant-tab" data-variant="c">C: Docs drawer ★ Selected</button>
+  </nav>
+
+  <div id="sketch-frame">
+    <section id="variant-a" class="variant">
+      <header class="app-header">
+        <div class="brand-lockup"><span class="brand-mark">OC</span><div class="brand-name">OSCAR<span>Correlation Test Harness</span></div></div>
+        <div class="header-status"><span class="live-dot"></span><span>Ready</span><span class="mono">v0.2.0 · Phase B</span></div>
+      </header>
+      <div class="shell">
+        <aside class="sidebar">
+          <div class="nav-group"><p class="nav-label">Execute</p><a href="#">Dashboard</a><a href="#">Run test</a><a href="#">Runs <span class="nav-count">18</span></a></div>
+          <div class="nav-group"><p class="nav-label">Configure</p><a class="active" href="#">Scenarios <span class="nav-count">12</span></a><a href="#">Targets <span class="nav-count">2</span></a><a href="#">Settings</a></div>
+          <div class="nav-group"><p class="nav-label">Observe</p><a href="#">Logs</a><a href="#">Reference</a></div>
+          <div class="sidebar-foot"><div class="target-state"><strong>oscar-lab-01</strong><span>https://oscar.lab/api</span><span style="color:var(--color-success)">● API authenticated</span></div></div>
+        </aside>
+        <main class="workspace">
+          <div class="breadcrumb">Configure / Scenarios</div>
+          <div class="page-head"><div><h1>Scenario catalog</h1><p class="page-subtitle">Inspect built-in and imported correlation test definitions. Select a source to preview its P01/N01 contract before running.</p></div><button class="button primary fake-action">Create scenario</button></div>
+          <div class="split-a">
+            <div>
+              <div class="toolbar">
+                <label class="control grow"><span>Filter</span><input class="scenario-filter" placeholder="name, pattern, suite…"></label>
+                <label class="control"><span>Origin</span><select><option>All sources</option><option>Built-in</option><option>Imported</option></select></label>
+                <label class="control"><span>Pattern</span><select><option>All patterns</option><option>flood</option><option>sequence</option></select></label>
+              </div>
+              <section class="panel" data-note="Dense catalog remains the primary work area">
+                <div class="panel-head"><div class="panel-title"><h2>Available definitions</h2><span class="pill">12 total</span></div><span class="digest">schema v1alpha1</span></div>
+                <table><thead><tr><th>Name</th><th>Pattern</th><th>Origin</th><th>Cases</th><th>Digest</th></tr></thead><tbody>
+                  <tr data-search="flood basic flood builtin"><td><strong>flood-basic</strong></td><td><span class="pattern">flood</span></td><td><span class="pill builtin">built-in</span></td><td class="mono">P01 / N01</td><td class="digest">9af6211c…</td></tr>
+                  <tr data-search="sequence basic sequence builtin"><td><strong>sequence-basic</strong></td><td><span class="pattern">sequence</span></td><td><span class="pill builtin">built-in</span></td><td class="mono">P01 / N01</td><td class="digest">44bc0e18…</td></tr>
+                  <tr data-search="noc site outage co occurrence imported"><td><strong>noc-site-outage</strong></td><td><span class="pattern">co_occurrence</span></td><td><span class="pill valid">imported</span></td><td class="mono">P01 / N01</td><td class="digest">d13e87bd…</td></tr>
+                  <tr data-search="heartbeat absence absence builtin"><td><strong>absence-basic</strong></td><td><span class="pattern">absence</span></td><td><span class="pill builtin">built-in</span></td><td class="mono">P01 / N01</td><td class="digest">c82093fd…</td></tr>
+                </tbody></table>
+              </section>
+            </div>
+            <aside class="reference-rail" data-note="Guidance stays visible while working">
+              <section class="reference-card"><h3>Page contract</h3><p>Scenario management is local and non-mutating. Preview compiles a deterministic plan; OSCAR is contacted only when a run starts.</p></section>
+              <section class="reference-card"><h3>Required shape</h3><ul><li>Exactly <code>P01</code> and <code>N01</code></li><li><code>maxDuration ≤ 5m</code></li><li>Supported pattern enum</li><li>At least one typed assertion per case</li></ul></section>
+              <section class="reference-card"><h3>Reserved identity</h3><p>Do not define <code>alertname</code>, <code>category</code>, or <code>oscar_test_*</code>. CorrTest generates those labels for run and pattern filtering.</p></section>
+            </aside>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <section id="variant-b" class="variant" hidden>
+      <header class="app-header">
+        <div class="brand-lockup"><span class="brand-mark">OC</span><div class="brand-name">OSCAR<span>Correlation Test Harness</span></div></div>
+        <div class="header-status"><span class="live-dot"></span><span>Ready</span><span class="mono">v0.2.0 · Phase B</span></div>
+      </header>
+      <div class="shell">
+        <aside class="sidebar">
+          <div class="nav-group"><p class="nav-label">Workspace</p><a href="#">Dashboard</a><a href="#">Run test</a><a href="#">Runs <span class="nav-count">18</span></a><a class="active" href="#">Scenarios <span class="nav-count">12</span></a><a href="#">Targets <span class="nav-count">2</span></a></div>
+          <div class="nav-group"><p class="nav-label">System</p><a href="#">Settings</a><a href="#">Logs</a><a href="#">Reference</a></div>
+          <div class="sidebar-foot"><div class="target-state"><strong>oscar-lab-01</strong><span style="color:var(--color-success)">● API authenticated</span></div></div>
+        </aside>
+        <main class="workspace">
+          <div class="breadcrumb">Workspace / Scenarios</div>
+          <div class="page-head"><div><h1>Scenario catalog</h1><p class="page-subtitle">Built-in and imported correlation definitions with their immutable source digest.</p></div><button class="button primary fake-action">Create scenario</button></div>
+          <div class="contract-strip" data-note="Critical guidance is compressed into a one-line contract">
+            <div class="contract-cell"><span>Mutation boundary</span><strong>Preview: local only · Run: target mutation</strong></div>
+            <div class="contract-cell"><span>Case contract</span><strong>P01 positive + N01 negative</strong></div>
+            <div class="contract-cell"><span>Reserved labels</span><strong>alertname · category · oscar_test_*</strong></div>
+            <div class="contract-cell"><span>Schema</span><strong>v1alpha1</strong></div>
+          </div>
+          <div class="toolbar">
+            <label class="control grow"><span>Filter</span><input class="scenario-filter" placeholder="name, pattern, suite…"></label>
+            <label class="control"><span>Origin</span><select><option>All sources</option><option>Built-in</option><option>Imported</option></select></label>
+            <label class="control"><span>Pattern</span><select><option>All patterns</option><option>flood</option><option>sequence</option></select></label>
+          </div>
+          <section class="panel">
+            <div class="panel-head"><div class="panel-title"><h2>Available definitions</h2><span class="pill">12 total</span></div><span class="digest">source is immutable after import</span></div>
+            <table><thead><tr><th>Name</th><th>Pattern</th><th>Suite</th><th>Origin</th><th>Cases</th><th>Digest</th></tr></thead><tbody>
+              <tr data-search="flood basic flood builtin"><td><strong>flood-basic</strong></td><td><span class="pattern">flood</span></td><td class="mono">builtin-all</td><td><span class="pill builtin">built-in</span></td><td class="mono">P01 / N01</td><td class="digest">9af6211c…</td></tr>
+              <tr data-search="sequence basic sequence builtin"><td><strong>sequence-basic</strong></td><td><span class="pattern">sequence</span></td><td class="mono">builtin-all</td><td><span class="pill builtin">built-in</span></td><td class="mono">P01 / N01</td><td class="digest">44bc0e18…</td></tr>
+              <tr data-search="noc site outage co occurrence imported"><td><strong>noc-site-outage</strong></td><td><span class="pattern">co_occurrence</span></td><td class="mono">noc-regression</td><td><span class="pill valid">imported</span></td><td class="mono">P01 / N01</td><td class="digest">d13e87bd…</td></tr>
+              <tr data-search="heartbeat absence absence builtin"><td><strong>absence-basic</strong></td><td><span class="pattern">absence</span></td><td class="mono">builtin-all</td><td><span class="pill builtin">built-in</span></td><td class="mono">P01 / N01</td><td class="digest">c82093fd…</td></tr>
+            </tbody></table>
+          </section>
+          <details class="inline-docs"><summary>Technical reference — scenario identity, labels, timing, and assertion kinds</summary><div class="doc-grid"><section><h3>Identity</h3><p><code>apiVersion</code>, <code>kind</code>, <code>name</code>, <code>suite</code>, and supported <code>pattern</code> are mandatory.</p></section><section><h3>Stimuli</h3><p>Use either compact <code>role + repeat</code> or explicit ordered <code>events</code>; never mix the forms.</p></section><section><h3>Evidence</h3><p>Assertions support synthetic alert, correlation audit, and parent-link counts.</p></section></div></details>
+        </main>
+      </div>
+    </section>
+
+    <section id="variant-c" class="variant" hidden>
+      <header class="app-header">
+        <div class="brand-lockup"><span class="brand-mark">OC</span><div class="brand-name">OSCAR<span>Correlation Test Harness</span></div></div>
+        <div class="header-status"><span class="live-dot"></span><span>Ready</span><span class="mono">v0.2.0 · Phase B</span></div>
+      </header>
+      <div class="shell">
+        <aside class="sidebar">
+          <div class="nav-group"><p class="nav-label">Execute</p><a href="#">Dashboard</a><a href="#">Run test</a><a href="#">Runs <span class="nav-count">18</span></a></div>
+          <div class="nav-group"><p class="nav-label">Configure</p><a class="active" href="#">Scenarios <span class="nav-count">12</span></a><a href="#">Targets</a><a href="#">Settings</a></div>
+          <div class="nav-group"><p class="nav-label">Observe</p><a href="#">Logs</a></div>
+          <div class="sidebar-foot"><div class="target-state"><strong>oscar-lab-01</strong><span style="color:var(--color-success)">● API authenticated</span></div></div>
+        </aside>
+        <main class="workspace">
+          <div class="command-bar"><span class="path">Scenarios / Catalog</span><button class="button small" id="open-docs">? Page reference</button><button class="button small fake-action">⌘K Commands</button></div>
+          <div class="page-head"><div><h1>Scenario catalog</h1><p class="page-subtitle">Inspect, filter, and clone deterministic correlation definitions.</p></div><button class="button primary fake-action">Create scenario</button></div>
+          <div class="toolbar"><label class="control grow"><span>Filter</span><input class="scenario-filter" placeholder="name, pattern, suite…"></label><label class="control"><span>Origin</span><select><option>All sources</option><option>Built-in</option><option>Imported</option></select></label><label class="control"><span>Pattern</span><select><option>All patterns</option><option>flood</option><option>sequence</option></select></label></div>
+          <section class="panel" data-note="Maximum width is reserved for operational data">
+            <div class="panel-head"><div class="panel-title"><h2>Available definitions</h2><span class="pill">12 total</span></div><span class="digest">corrtest.oscar/v1alpha1</span></div>
+            <table><thead><tr><th>Name</th><th>Pattern</th><th>Suite</th><th>Origin</th><th>Cases</th><th>Duration</th><th>Digest</th></tr></thead><tbody>
+              <tr data-search="flood basic flood builtin"><td><strong>flood-basic</strong></td><td><span class="pattern">flood</span></td><td class="mono">builtin-all</td><td><span class="pill builtin">built-in</span></td><td class="mono">P01 / N01</td><td class="mono">90s</td><td class="digest">9af6211c…</td></tr>
+              <tr data-search="sequence basic sequence builtin"><td><strong>sequence-basic</strong></td><td><span class="pattern">sequence</span></td><td class="mono">builtin-all</td><td><span class="pill builtin">built-in</span></td><td class="mono">P01 / N01</td><td class="mono">90s</td><td class="digest">44bc0e18…</td></tr>
+              <tr data-search="noc site outage co occurrence imported"><td><strong>noc-site-outage</strong></td><td><span class="pattern">co_occurrence</span></td><td class="mono">noc-regression</td><td><span class="pill valid">imported</span></td><td class="mono">P01 / N01</td><td class="mono">2m</td><td class="digest">d13e87bd…</td></tr>
+              <tr data-search="heartbeat absence absence builtin"><td><strong>absence-basic</strong></td><td><span class="pattern">absence</span></td><td class="mono">builtin-all</td><td><span class="pill builtin">built-in</span></td><td class="mono">P01 / N01</td><td class="mono">90s</td><td class="digest">c82093fd…</td></tr>
+            </tbody></table>
+          </section>
+        </main>
+      </div>
+      <div class="screen" id="drawer-screen"></div>
+      <aside class="drawer" id="docs-drawer" aria-label="Page reference">
+        <div class="drawer-head"><div><div class="breadcrumb">Technical reference</div><h2>Scenario catalog</h2></div><button class="button small" id="close-docs">Close</button></div>
+        <section class="drawer-section"><h3>What this page controls</h3><p>Scenario sources are local immutable definitions. Viewing and compiling do not contact OSCAR. Starting a run creates a namespaced rule, injects alerts, gathers evidence, and removes owned resources.</p></section>
+        <section class="drawer-section"><h3>Required document shape</h3><pre>apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: flood-basic
+suite: builtin-all
+pattern: flood
+maxDuration: 90s
+cases: [P01, N01]</pre></section>
+        <section class="drawer-section"><h3>Identity labels</h3><ul><li><code>alertname</code>: CORRTEST_&lt;PATTERN&gt;_&lt;CASE&gt;_&lt;ROLE&gt;_&lt;RUN&gt;</li><li><code>category</code>: corrtest_&lt;pattern&gt;</li><li><code>oscar_test_run_id</code>: full run identifier</li><li><code>oscar_test_pattern</code>: normalized pattern</li></ul></section>
+      </aside>
+    </section>
+  </div>
+
+  <div class="toast" id="toast" role="status">Action simulated in sketch</div>
+  <div id="sketch-tools">
+    <span>Theme</span>
+    <select id="theme-switcher"><option value="default">Dark</option><option value="light">Light</option></select>
+    <button data-width="375px">Phone</button><button data-width="768px">Tablet</button><button data-width="100%">Desktop</button>
+    <button id="annotation-toggle">Notes</button>
+  </div>
+
+  <script>
+    const frame = document.getElementById('sketch-frame');
+    const toast = document.getElementById('toast');
+    let toastTimer;
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 1600);
+    }
+    document.querySelectorAll('.variant-tab').forEach(button => button.addEventListener('click', () => {
+      document.querySelectorAll('.variant-tab').forEach(item => item.classList.remove('active'));
+      document.querySelectorAll('.variant').forEach(item => { item.hidden = true; });
+      button.classList.add('active');
+      document.getElementById('variant-' + button.dataset.variant).hidden = false;
+    }));
+    document.querySelectorAll('.fake-action').forEach(button => button.addEventListener('click', () => showToast(button.textContent.trim() + ' — interaction preview')));
+    document.querySelectorAll('.scenario-filter').forEach(input => input.addEventListener('input', () => {
+      const query = input.value.trim().toLowerCase();
+      input.closest('.workspace').querySelectorAll('tbody tr').forEach(row => { row.hidden = !row.dataset.search.includes(query); });
+    }));
+    document.getElementById('theme-switcher').addEventListener('change', event => {
+      document.getElementById('theme-link').href = '../themes/' + event.target.value + '.css';
+    });
+    document.querySelectorAll('#sketch-tools [data-width]').forEach(button => button.addEventListener('click', () => {
+      frame.style.maxWidth = button.dataset.width;
+      showToast('Viewport: ' + button.textContent);
+    }));
+    document.getElementById('annotation-toggle').addEventListener('click', () => {
+      frame.classList.toggle('annotate');
+      showToast(frame.classList.contains('annotate') ? 'Annotations enabled' : 'Annotations disabled');
+    });
+    const drawer = document.getElementById('docs-drawer');
+    const screen = document.getElementById('drawer-screen');
+    function setDrawer(open) { drawer.classList.toggle('open', open); screen.classList.toggle('open', open); }
+    document.getElementById('open-docs').addEventListener('click', () => setDrawer(true));
+    document.getElementById('close-docs').addEventListener('click', () => setDrawer(false));
+    screen.addEventListener('click', () => setDrawer(false));
+  </script>
+</body>
+</html>
