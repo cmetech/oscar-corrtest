@@ -9,6 +9,7 @@ import (
 
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
+	"github.com/cmetech/oscar-corrtest/internal/evidence"
 )
 
 const outputAPIVersion = "corrtest.oscar/v1alpha1"
@@ -232,6 +233,76 @@ func (a *App) runBackup(ctx context.Context, args []string) int {
 		return 1
 	}
 	fmt.Fprintf(a.stdout, "Backup written: %s\n", destination)
+	return 0
+}
+
+type evidenceRuntime interface {
+	ExportRun(context.Context, string, string) (evidence.Result, error)
+	VerifyBundle(context.Context, string) error
+}
+
+func (a *App) runExport(ctx context.Context, args []string) int {
+	flags := flag.NewFlagSet("export", flag.ContinueOnError)
+	flags.SetOutput(a.stderr)
+	configPath, dataDir := commonConfigFlags(flags)
+	output := flags.String("output", "", "new evidence bundle path")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 1 || *output == "" {
+		fmt.Fprintln(a.stderr, "usage: oscar-corrtest export <run-id> --output <new-zip-path>")
+		return 2
+	}
+	destination, err := filepath.Abs(*output)
+	if err != nil {
+		fmt.Fprintf(a.stderr, "export: %v\n", err)
+		return 2
+	}
+	runtime, code := a.openRuntime(ctx, config.Overrides{ConfigPath: *configPath, DataDir: *dataDir})
+	if code != 0 {
+		return code
+	}
+	defer runtime.Close()
+	operations, ok := runtime.(evidenceRuntime)
+	if !ok {
+		fmt.Fprintln(a.stderr, "evidence export is unavailable")
+		return 1
+	}
+	result, err := operations.ExportRun(ctx, flags.Arg(0), destination)
+	if err != nil {
+		fmt.Fprintf(a.stderr, "export: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(a.stdout, "Evidence bundle: %s\nSHA256: %s\n", result.Path, result.SHA256)
+	return 0
+}
+
+func (a *App) runVerifyBundle(ctx context.Context, args []string) int {
+	flags := flag.NewFlagSet("verify-bundle", flag.ContinueOnError)
+	flags.SetOutput(a.stderr)
+	configPath, dataDir := commonConfigFlags(flags)
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 1 {
+		fmt.Fprintln(a.stderr, "usage: oscar-corrtest verify-bundle <zip-path>")
+		return 2
+	}
+	runtime, code := a.openRuntime(ctx, config.Overrides{ConfigPath: *configPath, DataDir: *dataDir})
+	if code != 0 {
+		return code
+	}
+	defer runtime.Close()
+	operations, ok := runtime.(evidenceRuntime)
+	if !ok {
+		fmt.Fprintln(a.stderr, "evidence verification is unavailable")
+		return 1
+	}
+	if err := operations.VerifyBundle(ctx, flags.Arg(0)); err != nil {
+		fmt.Fprintf(a.stderr, "verify-bundle: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(a.stdout, "Evidence bundle verified")
 	return 0
 }
 

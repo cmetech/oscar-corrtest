@@ -13,6 +13,7 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
+	"github.com/cmetech/oscar-corrtest/internal/evidence"
 	"github.com/cmetech/oscar-corrtest/internal/history"
 	"github.com/cmetech/oscar-corrtest/internal/oscar"
 	storage "github.com/cmetech/oscar-corrtest/internal/persistence/sqlite"
@@ -275,4 +276,22 @@ func (r *Runtime) ListArtifactEvidence(ctx context.Context, runID string) ([]dom
 // Backup creates a coordinated SQLite snapshot.
 func (r *Runtime) Backup(ctx context.Context, destination string) error {
 	return r.database.Backup(ctx, destination)
+}
+
+// ExportRun writes a portable, self-verifying evidence bundle for a terminal run.
+func (r *Runtime) ExportRun(ctx context.Context, runID, destination string) (evidence.Result, error) {
+	run, err := r.GetRun(ctx, runID)
+	if err != nil {
+		return evidence.Result{}, err
+	}
+	events, err := r.ListRunEvents(ctx, runID)
+	if err != nil {
+		return evidence.Result{}, err
+	}
+	return evidence.Write(ctx, destination, run, events)
+}
+
+// VerifyBundle validates an exported bundle without trusting its filenames or manifest.
+func (r *Runtime) VerifyBundle(ctx context.Context, path string) error {
+	return evidence.Verify(ctx, path)
 }
