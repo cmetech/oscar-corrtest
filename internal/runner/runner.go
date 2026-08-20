@@ -150,7 +150,14 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 		return err
 	}
 	for _, item := range plan.Cases {
+		var elapsed time.Duration
 		for _, alert := range item.Alerts {
+			if alert.Delay > elapsed {
+				if err := r.opts.Sleep(ctx, alert.Delay-elapsed); err != nil {
+					return r.failAndCleanup(ctx, run, plan, capabilities, resources, err)
+				}
+				elapsed = alert.Delay
+			}
 			result, err := r.api.Inject(ctx, alert)
 			if err != nil {
 				return r.failAndCleanup(ctx, run, plan, capabilities, resources, err)
@@ -190,23 +197,32 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 
 func (r *Runner) observeCase(ctx context.Context, run domain.Run, item compiler.CasePlan, started time.Time) (caseResult, error) {
 	result := caseResult{Name: item.Name, Code: item.Code}
-	sourceName := item.Alerts[0].Name
-	query := oscar.HistoryQuery{AlertName: sourceName, Start: started.Add(-time.Second), End: r.opts.Now().UTC().Add(r.opts.ObservationWindow)}
-	sources, err := r.pollHistory(ctx, query, true, r.opts.ObservationWindow)
-	if err != nil {
-		return result, err
+	query := oscar.HistoryQuery{Start: started.Add(-time.Second), End: r.opts.Now().UTC().Add(r.opts.ObservationWindow)}
+	sourceNames := map[string]bool{}
+	for _, alert := range item.Alerts {
+		sourceNames[alert.Name] = true
 	}
-	if len(sources) != 1 || sources[0].Labels["oscar_test_run_id"] != run.ID {
-		result.Verdict, result.Explanation = string(domain.VerdictInconclusive), "exact source history evidence was not unique"
-		return result, nil
+	for sourceName := range sourceNames {
+		query.AlertName = sourceName
+		sources, err := r.pollHistory(ctx, query, true, r.opts.ObservationWindow)
+		if err != nil {
+			return result, err
+		}
+		if len(sources) != 1 || sources[0].Labels["oscar_test_run_id"] != run.ID {
+			result.Verdict, result.Explanation = string(domain.VerdictInconclusive), "exact source history evidence was not unique"
+			return result, nil
+		}
+		result.SourceFingerprints = append(result.SourceFingerprints, sources[0].Fingerprint)
+		audits, err := r.api.CorrelationAudit(ctx, sources[0].Fingerprint)
+		if err != nil {
+			return result, err
+		}
+		for _, audit := range audits {
+			result.AuditOutcomes = append(result.AuditOutcomes, audit.Outcome)
+		}
 	}
-	result.SourceFingerprints = []string{sources[0].Fingerprint}
-	audits, err := r.api.CorrelationAudit(ctx, sources[0].Fingerprint)
-	if err != nil {
-		return result, err
-	}
-	for _, audit := range audits {
-		result.AuditOutcomes = append(result.AuditOutcomes, audit.Outcome)
+	if item.Rule.Pattern == "parent_child" {
+		return r.evaluateParentChild(ctx, item, result)
 	}
 	syntheticName := item.Rule.EmitAlertName
 	parentQuery := oscar.HistoryQuery{AlertName: syntheticName, Start: started.Add(-time.Second), End: query.End}
@@ -241,6 +257,25 @@ func (r *Runner) observeCase(ctx context.Context, run domain.Run, item compiler.
 		return result, nil
 	}
 	result.Verdict, result.Explanation = string(domain.VerdictFail), "observed correlation evidence differed from the expected cardinality"
+	return result, nil
+}
+
+func (r *Runner) evaluateParentChild(ctx context.Context, item compiler.CasePlan, result caseResult) (caseResult, error) {
+	if item.Polarity == "negative" {
+		if err := r.opts.Sleep(ctx, r.opts.ObservationWindow); err != nil {
+			return result, err
+		}
+	}
+	result.ObservationComplete = true
+	if item.Polarity == "positive" && contains(result.AuditOutcomes, "suppressed_per_notifier") {
+		result.Verdict, result.Explanation = string(domain.VerdictPass), "child was linked to an active parent with per-notifier suppression evidence"
+		return result, nil
+	}
+	if item.Polarity == "negative" && contains(result.AuditOutcomes, "released_no_trigger") {
+		result.Verdict, result.Explanation = string(domain.VerdictPass), "unmatched child was positively anchored as released without correlation"
+		return result, nil
+	}
+	result.Verdict, result.Explanation = string(domain.VerdictFail), "parent-child decision evidence differed from the expected outcome"
 	return result, nil
 }
 

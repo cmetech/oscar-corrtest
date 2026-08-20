@@ -3,7 +3,9 @@ package runner_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -104,6 +106,33 @@ func TestRunnerUsesHistoryFingerprintNotDiagnosticHash(t *testing.T) {
 	}
 }
 
+func TestRunnerExecutesEveryBuiltinPatternThroughOneCoordinator(t *testing.T) {
+	for index, input := range scenario.AllBuiltins() {
+		t.Run(input.Pattern, func(t *testing.T) {
+			database := openDatabase(t)
+			run := newRun()
+			run.ID = strings.TrimSuffix(run.ID, "01") + strconv.Itoa(index+10)
+			run.ShortToken = fmt.Sprintf("%08d", index+10)
+			if err := database.CreateRun(context.Background(), run); err != nil {
+				t.Fatal(err)
+			}
+			plan, err := compiler.Compile(run, input, compiler.Capabilities{PipelineMode: "phase_b_dispatch"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			api := &fakeAPI{runID: run.ID}
+			engine := runner.New(database, api, runner.Options{PollInterval: time.Millisecond, ObservationWindow: time.Millisecond, Stabilization: time.Millisecond, Sleep: func(context.Context, time.Duration) error { return nil }})
+			if err := engine.Execute(context.Background(), run, plan, runner.CapabilitySnapshot{PipelineMode: "phase_b_dispatch", Ready: true, LabelsSurvived: true}); err != nil {
+				t.Fatal(err)
+			}
+			stored, _ := database.GetRun(context.Background(), run.ID)
+			if stored.Verdict != domain.VerdictPass || stored.CleanupStatus != domain.CleanupClean {
+				t.Fatalf("run=%+v report=%s", stored, stored.CanonicalReportJSON)
+			}
+		})
+	}
+}
+
 type fakeAPI struct {
 	mu                       sync.Mutex
 	created                  int
@@ -113,6 +142,7 @@ type fakeAPI struct {
 	updated                  bool
 	requiredAuditFingerprint string
 	sawRequiredFingerprint   bool
+	runID                    string
 }
 
 func (f *fakeAPI) ValidateRule(context.Context, compiler.RulePlan) error { return nil }
@@ -142,11 +172,14 @@ func (f *fakeAPI) FindHistory(_ context.Context, query oscar.HistoryQuery) ([]os
 	defer f.mu.Unlock()
 	if strings.Contains(query.AlertName, "SYNTHETIC") {
 		if strings.Contains(query.AlertName, "_P01_") {
-			return []oscar.HistoryRecord{{ID: "parent", AlertName: query.AlertName, Fingerprint: "parent-fp", CreatedAt: query.Start.Add(time.Millisecond), Labels: map[string]string{"oscar_test_run_id": "crt_00000000000000000000000001"}}}, nil
+			return []oscar.HistoryRecord{{ID: "parent", AlertName: query.AlertName, Fingerprint: "parent-fp", CreatedAt: query.Start.Add(time.Millisecond), Labels: map[string]string{"oscar_test_run_id": f.effectiveRunID()}}}, nil
 		}
 		return nil, nil
 	}
-	return []oscar.HistoryRecord{{ID: "source", AlertName: query.AlertName, Fingerprint: "server-" + query.AlertName, CreatedAt: query.Start.Add(time.Millisecond), Labels: map[string]string{"oscar_test_run_id": "crt_00000000000000000000000001"}}}, nil
+	if query.AlertName == "" {
+		return nil, nil
+	}
+	return []oscar.HistoryRecord{{ID: "source", AlertName: query.AlertName, Fingerprint: "server-" + query.AlertName, CreatedAt: query.Start.Add(time.Millisecond), Labels: map[string]string{"oscar_test_run_id": f.effectiveRunID()}}}, nil
 }
 func (f *fakeAPI) CorrelationAudit(_ context.Context, fingerprint string) ([]oscar.AuditRecord, error) {
 	f.mu.Lock()
@@ -158,7 +191,20 @@ func (f *fakeAPI) CorrelationAudit(_ context.Context, fingerprint string) ([]osc
 	if strings.Contains(fingerprint, "_P01_") {
 		outcome = "parent_emitted"
 	}
+	if strings.Contains(fingerprint, "PARENTCHILD") {
+		outcome = "released_no_trigger"
+		if strings.Contains(fingerprint, "_P01_CHILD_") {
+			outcome = "suppressed_per_notifier"
+		}
+	}
 	return []oscar.AuditRecord{{ID: 1, AlertFingerprint: fingerprint, RuleID: 1, Pattern: "flood", Outcome: outcome}}, nil
+}
+
+func (f *fakeAPI) effectiveRunID() string {
+	if f.runID != "" {
+		return f.runID
+	}
+	return "crt_00000000000000000000000001"
 }
 
 func openDatabase(t *testing.T) *storage.Database {
