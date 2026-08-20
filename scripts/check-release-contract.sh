@@ -61,6 +61,11 @@ do
     exit 1
   }
 done
+repository_contexts=$(grep -Fc -- '--repo "$GITHUB_REPOSITORY"' "$release_workflow" || true)
+if [ "$repository_contexts" -ne 3 ]; then
+  printf 'every gh release command needs explicit repository context; found %s of 3\n' "$repository_contexts" >&2
+  exit 1
+fi
 for asset in \
   linux_amd64.tar.gz \
   linux_arm64.tar.gz \
