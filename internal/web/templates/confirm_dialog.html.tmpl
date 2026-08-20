@@ -1,0 +1,21 @@
+{{define "confirm-dialog"}}
+<dialog class="confirm-dialog" data-confirm-dialog aria-modal="true" aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-description">
+  <div class="confirm-dialog__surface">
+    <header class="confirm-dialog__header">
+      <span class="confirm-dialog__mark" aria-hidden="true">OC</span>
+      <div>
+        <p class="eyebrow">Confirm operation</p>
+        <h2 id="confirm-dialog-title" data-confirm-title>Confirm action?</h2>
+      </div>
+    </header>
+    <div class="confirm-dialog__warning">
+      <span class="confirm-dialog__warning-mark" aria-hidden="true">!</span>
+      <p id="confirm-dialog-description" data-confirm-description>This action requires confirmation.</p>
+    </div>
+    <footer class="confirm-dialog__actions">
+      <button class="secondary-button" type="button" data-confirm-cancel>Cancel</button>
+      <button class="danger-button danger-button--filled" type="button" data-confirm-accept>Confirm</button>
+    </footer>
+  </div>
+</dialog>
+{{end}}

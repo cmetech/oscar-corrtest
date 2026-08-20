@@ -297,6 +297,15 @@ func TestRunCancellationRequiresSameOriginAndCSRF(t *testing.T) {
 	get := httptest.NewRequest(http.MethodGet, "http://example.com/runs/crt_ui", nil)
 	getResponse := httptest.NewRecorder()
 	handler.ServeHTTP(getResponse, get)
+	for _, required := range []string{
+		`action="/runs/crt_ui/cancel" data-confirm-form`,
+		`data-confirm-title="Cancel active run?"`,
+		`data-confirm-label="Cancel and clean up"`,
+	} {
+		if !strings.Contains(getResponse.Body.String(), required) {
+			t.Errorf("run cancellation confirmation missing %q", required)
+		}
+	}
 	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(getResponse.Body.String())
 	if len(match) != 2 {
 		t.Fatalf("cancel CSRF token missing: %s", getResponse.Body.String())
@@ -322,6 +331,15 @@ func TestRunDeletionRequiresCleanupSafeTerminalStateAndCSRF(t *testing.T) {
 	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(getResponse.Body.String())
 	if len(match) != 2 || !strings.Contains(getResponse.Body.String(), "Delete verified local run") {
 		t.Fatalf("delete action missing: %s", getResponse.Body.String())
+	}
+	for _, required := range []string{
+		`action="/runs/crt_ui/delete" data-confirm-form`,
+		`data-confirm-title="Delete historical run?"`,
+		`data-confirm-label="Delete run"`,
+	} {
+		if !strings.Contains(getResponse.Body.String(), required) {
+			t.Errorf("run deletion confirmation missing %q", required)
+		}
 	}
 	values := url.Values{"csrf_token": {match[1]}}
 	post := httptest.NewRequest(http.MethodPost, "http://example.com/runs/crt_ui/delete", strings.NewReader(values.Encode()))
@@ -487,7 +505,7 @@ func TestScenarioWorkbenchDeletesUnusedCustomScenario(t *testing.T) {
 	getResponse := httptest.NewRecorder()
 	handler.ServeHTTP(getResponse, get)
 	body := getResponse.Body.String()
-	if !strings.Contains(body, "Delete custom scenario") || !strings.Contains(body, `data-confirm-scenario-delete`) {
+	if !strings.Contains(body, "Delete custom scenario") || !strings.Contains(body, `data-confirm-form`) || !strings.Contains(body, `data-confirm-title="Delete custom scenario?"`) || !strings.Contains(body, `data-confirm-value="delete"`) || !strings.Contains(body, `data-confirmation-field`) {
 		t.Fatalf("saved custom scenario missing guarded delete action: %s", body)
 	}
 	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(body)
@@ -651,6 +669,9 @@ func TestOperationsPageManagesWriteOnlyAPIKeyAndShowsServiceLogs(t *testing.T) {
 		"Operations", "Not configured", "running", "application.jsonl", "runtime ready", settings.EnvFile,
 		`class="operations-workspace"`, `class="operations-rail"`, `data-log-source-filter`,
 		`data-log-level-filter`, `data-log-text-filter`, `data-log-source="runtime"`, `data-log-level="info"`,
+		`action="/operations/api-key/clear" data-confirm-form`, `data-confirm-title="Clear managed OSCAR API key?"`,
+		`action="/operations/service/stop" data-confirm-form`, `data-confirm-title="Stop CorrTest service?"`,
+		`action="/operations/service/uninstall" data-confirm-form`, `data-confirm-title="Uninstall CorrTest user service?"`,
 	} {
 		if !strings.Contains(body, required) {
 			t.Errorf("operations page missing %q", required)

@@ -60,3 +60,22 @@ func TestReferenceRouteAndContextualDrawer(t *testing.T) {
 		}
 	}
 }
+
+func TestEveryPageIncludesAccessibleBrandedConfirmationDialog(t *testing.T) {
+	response := httptest.NewRecorder()
+	NewHandler(version.Info{Version: "test"}).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	for _, required := range []string{
+		`<dialog class="confirm-dialog"`, `data-confirm-dialog`,
+		`aria-modal="true"`,
+		`aria-labelledby="confirm-dialog-title"`, `aria-describedby="confirm-dialog-description"`,
+		`data-confirm-cancel`, `data-confirm-accept`, `src="/static/js/confirm-dialog.js"`,
+	} {
+		if !strings.Contains(body, required) {
+			t.Errorf("branded confirmation dialog missing %q", required)
+		}
+	}
+}

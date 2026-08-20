@@ -147,7 +147,8 @@ main {
   padding: clamp(var(--ct-space-4), 3vw, 36px);
 }
 
-body.help-open { overflow: hidden; }
+body.help-open,
+body.confirm-open { overflow: hidden; }
 
 .data-table-wrapper {
   overflow-x: auto;

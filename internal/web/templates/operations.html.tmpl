@@ -17,7 +17,7 @@
         <label>Replace key<input type="password" name="api_key" required autocomplete="new-password" spellcheck="false"></label>
         <button class="primary-button" type="submit">Save and use for new OSCAR requests</button>
       </form>
-      <form method="post" action="/operations/api-key/clear">
+      <form method="post" action="/operations/api-key/clear" data-confirm-form data-confirm-title="Clear managed OSCAR API key?" data-confirm-description="Remove OSCAR_API_KEY from the managed user .env file. Advanced per-target key references are unchanged." data-confirm-label="Clear API key">
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <button class="secondary-button" type="submit">Clear managed key</button>
       </form>
@@ -27,7 +27,7 @@
     <article class="panel operations-card">
       <header><p class="eyebrow">User service</p><h2>Background process</h2></header>
       <p><span class="status-pill">{{.Operations.Service.State}}</span> <span class="muted">{{.Operations.Service.Mechanism}}{{if .Operations.Service.PID}} · PID {{.Operations.Service.PID}}{{end}}</span></p>
-      <div class="button-row service-actions">{{range $action := (stringSlice "install" "start" "stop" "restart" "uninstall")}}<form method="post" action="/operations/service/{{$action}}"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><button class="secondary-button" type="submit">{{$action}}</button></form>{{end}}</div>
+      <div class="button-row service-actions">{{range $action := (stringSlice "install" "start" "stop" "restart" "uninstall")}}<form method="post" action="/operations/service/{{$action}}"{{if eq $action "stop"}} data-confirm-form data-confirm-title="Stop CorrTest service?" data-confirm-description="Stop the current user service. This UI will be unavailable until CorrTest is started again." data-confirm-label="Stop service"{{else if eq $action "uninstall"}} data-confirm-form data-confirm-title="Uninstall CorrTest user service?" data-confirm-description="Remove the background service definition. The binary, configuration, database, and reports are preserved." data-confirm-label="Uninstall service"{{end}}><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><button class="secondary-button" type="submit">{{$action}}</button></form>{{end}}</div>
       <p class="muted operations-note"><code>oscar-corrtest service status</code></p>
     </article>
 
