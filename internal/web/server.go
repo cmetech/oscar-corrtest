@@ -251,6 +251,7 @@ func csrfToken(w http.ResponseWriter, r *http.Request, secret []byte) string {
 		if randomErr != nil {
 			return ""
 		}
+		// #nosec G124 -- Plan 2 is loopback-only HTTP; HttpOnly and Strict SameSite protect this non-authentication CSRF cookie.
 		cookie = &http.Cookie{Name: "corrtest_csrf", Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode}
 		http.SetCookie(w, cookie)
 	}

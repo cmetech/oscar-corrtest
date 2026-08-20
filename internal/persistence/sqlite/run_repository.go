@@ -51,6 +51,7 @@ func (d *Database) ListRuns(ctx context.Context, filter domain.RunFilter) ([]dom
 	query := runSelect + ` WHERE 1=1`
 	var args []any
 	add := func(clause string, value any) {
+		// #nosec G202 -- every clause is a compile-time constant below; all caller values remain bound parameters.
 		query += clause
 		args = append(args, value)
 	}
@@ -199,8 +200,11 @@ func (d *Database) RecoverInterruptedRuns(ctx context.Context, at time.Time) (in
 	for rows.Next() {
 		var item activeRun
 		if err := rows.Scan(&item.id, &item.status); err != nil {
-			rows.Close()
+			closeErr := rows.Close()
 			_ = tx.Rollback()
+			if closeErr != nil {
+				return 0, fmt.Errorf("scan active run: %v; close rows: %w", err, closeErr)
+			}
 			return 0, fmt.Errorf("scan active run: %w", err)
 		}
 		active = append(active, item)

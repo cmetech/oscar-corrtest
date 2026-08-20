@@ -54,6 +54,7 @@ func New(root string) (*Store, error) {
 	} else {
 		return nil, fmt.Errorf("inspect artifact root: %w", err)
 	}
+	// #nosec G302 -- directories require execute permission; 0700 is the restrictive directory contract.
 	if err := os.Chmod(root, 0o700); err != nil {
 		return nil, fmt.Errorf("restrict artifact root: %w", err)
 	}
@@ -148,6 +149,7 @@ func (s *Store) Verify(ctx context.Context, manifest Manifest) (Integrity, error
 	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 		return "", fmt.Errorf("artifact %q is not a regular file", manifest.RelativePath)
 	}
+	// #nosec G304 -- full was validated beneath a 0700 root and every parent was lstat-checked as a non-symlink directory.
 	file, err := os.Open(full)
 	if err != nil {
 		return "", fmt.Errorf("open artifact: %w", err)
@@ -242,6 +244,7 @@ func (s *Store) verifyParents(directory string) error {
 }
 
 func syncDirectory(directory string) error {
+	// #nosec G304 -- directory was derived beneath the validated store root and checked component by component.
 	dir, err := os.Open(directory)
 	if err != nil {
 		return fmt.Errorf("open artifact directory for sync: %w", err)

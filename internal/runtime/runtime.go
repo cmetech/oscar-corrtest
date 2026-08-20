@@ -39,6 +39,7 @@ func Open(ctx context.Context, settings config.Settings, _ version.Info) (*Runti
 	if err := os.MkdirAll(settings.DataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create data directory: %w", err)
 	}
+	// #nosec G302 -- directories require execute permission; 0700 is the restrictive state-directory contract.
 	if err := os.Chmod(settings.DataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("restrict data directory: %w", err)
 	}

@@ -87,6 +87,7 @@ func Load(getenv func(string) string, overrides Overrides) (Settings, error) {
 }
 
 func readFile(path string) (*fileConfig, error) {
+	// #nosec G304 -- reading an explicitly selected configuration path is the intended CLI contract.
 	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil

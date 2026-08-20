@@ -105,6 +105,7 @@ func (d *Database) Backup(ctx context.Context, destination string) error {
 	if err := verifyBackup(ctx, temporary); err != nil {
 		return err
 	}
+	// #nosec G304 -- temporary is created by CreateTemp in a validated non-symlink destination directory.
 	file, err := os.Open(temporary)
 	if err != nil {
 		return fmt.Errorf("open backup for sync: %w", err)
@@ -176,6 +177,7 @@ func verifyBackup(ctx context.Context, path string) error {
 }
 
 func syncBackupDirectory(directory string) error {
+	// #nosec G304 -- directory is the previously lstat-validated parent of the explicit backup destination.
 	dir, err := os.Open(directory)
 	if err != nil {
 		return fmt.Errorf("open backup directory for sync: %w", err)
