@@ -281,10 +281,61 @@ func TestServeAcceptsOnlyLiteralLoopbackAddresses(t *testing.T) {
 			if code != 2 || called {
 				t.Fatalf("exit=%d called=%v stderr=%q", code, called, stderr.String())
 			}
-			if !strings.Contains(stderr.String(), "authenticated remote serving is not implemented") {
+			if !strings.Contains(stderr.String(), "non-loopback serving requires --remote-mode") {
 				t.Fatalf("stderr=%q", stderr.String())
 			}
 		})
+	}
+}
+
+func TestServeAllowsExplicitAuthenticatedRemoteModes(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		mode web.SecurityMode
+	}{
+		{"bearer", []string{"serve", "--listen", "0.0.0.0:8787", "--remote-mode", "bearer", "--auth-token-env", "CORRTEST_AUTH", "--tls-cert", "/cert.pem", "--tls-key", "/key.pem"}, web.SecurityBearer},
+		{"proxy", []string{"serve", "--listen", "0.0.0.0:8787", "--remote-mode", "trusted-proxy", "--proxy-header", "X-Forwarded-User", "--proxy-value", "corrtest", "--trusted-proxy", "10.0.0.0/8"}, web.SecurityTrustedProxy},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			var got web.Options
+			serve := func(_ context.Context, options web.Options) error { got = options; return nil }
+			app := NewConfigured(&stdout, &stderr, version.Info{}, serve, nil, func(key string) string {
+				switch key {
+				case "HOME":
+					return "/tmp/corrtest-home"
+				case "CORRTEST_AUTH":
+					return "correct horse battery staple"
+				default:
+					return ""
+				}
+			})
+			if code := app.Run(context.Background(), test.args); code != 0 {
+				t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+			}
+			if got.Security.Mode != test.mode {
+				t.Fatalf("security=%+v", got.Security)
+			}
+			if strings.Contains(stdout.String()+stderr.String(), "correct horse battery staple") {
+				t.Fatal("credential leaked to output")
+			}
+		})
+	}
+}
+
+func TestServeRejectsBearerRemoteModeWithoutTLS(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	app := NewConfigured(&stdout, &stderr, version.Info{}, func(context.Context, web.Options) error { return nil }, nil, func(key string) string {
+		if key == "CORRTEST_AUTH" {
+			return "correct horse battery staple"
+		}
+		return "/tmp"
+	})
+	code := app.Run(context.Background(), []string{"serve", "--listen", "0.0.0.0:8787", "--remote-mode", "bearer", "--auth-token-env", "CORRTEST_AUTH"})
+	if code != 2 || !strings.Contains(stderr.String(), "requires --tls-cert") {
+		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
 	}
 }
 

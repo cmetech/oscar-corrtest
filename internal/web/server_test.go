@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"html/template"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -236,6 +237,90 @@ func TestRunEventsSSEReplaysAfterSequence(t *testing.T) {
 	body := response.Body.String()
 	if strings.Contains(body, "id: 1") || !strings.Contains(body, "id: 2") || !strings.Contains(body, `"summary":"completed"`) {
 		t.Fatalf("SSE body=%q", body)
+	}
+}
+
+func TestBearerSecurityProtectsEveryApplicationRoute(t *testing.T) {
+	t.Parallel()
+	security := Security{Mode: SecurityBearer, BearerToken: []byte("correct horse battery staple"), SecureCookies: true}
+	handler, err := NewHandlerWithOptions(version.Info{}, nil, security)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/", "/healthz", "/readyz", "/targets", "/runs", "/run-test", "/settings", "/static/css/tokens.css"} {
+		request := httptest.NewRequest(http.MethodGet, "https://corrtest.example"+path, nil)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusUnauthorized {
+			t.Errorf("%s status=%d", path, response.Code)
+		}
+		request = httptest.NewRequest(http.MethodGet, "https://corrtest.example"+path, nil)
+		request.Header.Set("Authorization", "Bearer correct horse battery staple")
+		response = httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code == http.StatusUnauthorized {
+			t.Errorf("authorized %s remained unauthorized", path)
+		}
+	}
+}
+
+func TestBearerLoginCreatesSecureSessionWithoutReflectingSecret(t *testing.T) {
+	t.Parallel()
+	handler, err := NewHandlerWithOptions(version.Info{}, nil, Security{Mode: SecurityBearer, BearerToken: []byte("correct horse battery staple"), SecureCookies: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := url.Values{"token": {"correct horse battery staple"}}
+	request := httptest.NewRequest(http.MethodPost, "https://corrtest.example/login", strings.NewReader(values.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Origin", "https://corrtest.example")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 || !cookies[0].Secure || !cookies[0].HttpOnly || cookies[0].Value == "correct horse battery staple" {
+		t.Fatalf("unsafe session cookie: %+v", cookies)
+	}
+	home := httptest.NewRequest(http.MethodGet, "https://corrtest.example/", nil)
+	home.AddCookie(cookies[0])
+	homeResponse := httptest.NewRecorder()
+	handler.ServeHTTP(homeResponse, home)
+	if homeResponse.Code != http.StatusOK || strings.Contains(homeResponse.Body.String(), "correct horse battery staple") {
+		t.Fatalf("session status=%d body=%s", homeResponse.Code, homeResponse.Body.String())
+	}
+}
+
+func TestTrustedProxyRequiresPeerAndIdentity(t *testing.T) {
+	t.Parallel()
+	_, network, _ := net.ParseCIDR("10.20.0.0/16")
+	handler, err := NewHandlerWithOptions(version.Info{}, nil, Security{
+		Mode: SecurityTrustedProxy, ProxyHeader: "X-Forwarded-User", ProxyValue: "corrtest-operator", TrustedProxies: []*net.IPNet{network},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name, remote, identity string
+		want                   int
+	}{
+		{"direct spoof", "192.0.2.20:1234", "corrtest-operator", http.StatusUnauthorized},
+		{"missing identity", "10.20.1.2:1234", "", http.StatusUnauthorized},
+		{"wrong identity", "10.20.1.2:1234", "other", http.StatusUnauthorized},
+		{"trusted", "10.20.1.2:1234", "corrtest-operator", http.StatusOK},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/", nil)
+			request.RemoteAddr = test.remote
+			request.Header.Set("X-Forwarded-User", test.identity)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.want {
+				t.Fatalf("status=%d want=%d", response.Code, test.want)
+			}
+		})
 	}
 }
 

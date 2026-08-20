@@ -40,6 +40,9 @@ type Options struct {
 	ListenAddress string
 	Version       version.Info
 	Data          DataSource
+	Security      Security
+	TLSCertFile   string
+	TLSKeyFile    string
 }
 
 type pageData struct {
@@ -80,6 +83,18 @@ func NewHandler(info version.Info) http.Handler {
 // NewHandlerWithData returns the complete durable server-rendered application.
 func NewHandlerWithData(info version.Info, data DataSource) http.Handler {
 	return newHandlerWithData(info, data, parsedTemplates, staticHandler, generateNonce)
+}
+
+// NewHandlerWithOptions applies the explicit remote authentication policy.
+func NewHandlerWithOptions(info version.Info, data DataSource, security Security) (http.Handler, error) {
+	if err := security.validate(); err != nil {
+		return nil, err
+	}
+	base := newHandlerWithData(info, data, parsedTemplates, staticHandler, generateNonce)
+	if security.Mode == SecurityNone {
+		return base, nil
+	}
+	return authHandler{next: base, security: security}, nil
 }
 
 func newHandler(info version.Info, tmpl *template.Template, static http.Handler, nonce nonceFunc) http.Handler {
@@ -405,12 +420,23 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
+	handler, err := NewHandlerWithOptions(opts.Version, opts.Data, opts.Security)
+	if err != nil {
+		_ = listener.Close()
+		return err
+	}
 	server := &http.Server{
-		Handler: NewHandlerWithData(opts.Version, opts.Data), ReadHeaderTimeout: 5 * time.Second,
+		Handler: handler, ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,
 	}
 	errCh := make(chan error, 1)
-	go func() { errCh <- server.Serve(listener) }()
+	go func() {
+		if opts.TLSCertFile != "" || opts.TLSKeyFile != "" {
+			errCh <- server.ServeTLS(listener, opts.TLSCertFile, opts.TLSKeyFile)
+			return
+		}
+		errCh <- server.Serve(listener)
+	}()
 	select {
 	case err := <-errCh:
 		if errors.Is(err, http.ErrServerClosed) {
