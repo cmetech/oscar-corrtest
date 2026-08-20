@@ -22,6 +22,7 @@ type API interface {
 	Inject(context.Context, compiler.AlertPlan) (oscar.InjectionResult, error)
 	FindHistory(context.Context, oscar.HistoryQuery) ([]oscar.HistoryRecord, error)
 	CorrelationAudit(context.Context, string) ([]oscar.AuditRecord, error)
+	NotificationAudit(context.Context, string, time.Time, time.Time) ([]oscar.NotificationRecord, error)
 }
 
 type Store interface {
@@ -78,14 +79,15 @@ func New(store Store, api API, options Options) *Runner {
 }
 
 type caseResult struct {
-	Name                string   `json:"name"`
-	Code                string   `json:"code"`
-	Verdict             string   `json:"verdict"`
-	SourceFingerprints  []string `json:"sourceFingerprints"`
-	SyntheticCount      int      `json:"syntheticCount"`
-	AuditOutcomes       []string `json:"auditOutcomes"`
-	ObservationComplete bool     `json:"observationComplete"`
-	Explanation         string   `json:"explanation"`
+	Name                 string   `json:"name"`
+	Code                 string   `json:"code"`
+	Verdict              string   `json:"verdict"`
+	SourceFingerprints   []string `json:"sourceFingerprints"`
+	SyntheticCount       int      `json:"syntheticCount"`
+	AuditOutcomes        []string `json:"auditOutcomes"`
+	NotificationStatuses []string `json:"notificationStatuses,omitempty"`
+	ObservationComplete  bool     `json:"observationComplete"`
+	Explanation          string   `json:"explanation"`
 }
 
 type canonicalReport struct {
@@ -224,6 +226,15 @@ func (r *Runner) observeCase(ctx context.Context, run domain.Run, item compiler.
 		for _, audit := range audits {
 			result.AuditOutcomes = append(result.AuditOutcomes, audit.Outcome)
 		}
+		if item.Rule.Pattern == "parent_child" {
+			notifications, err := r.api.NotificationAudit(ctx, sources[0].Fingerprint, query.Start, query.End)
+			if err != nil {
+				return result, err
+			}
+			for _, notification := range notifications {
+				result.NotificationStatuses = append(result.NotificationStatuses, notification.Status)
+			}
+		}
 	}
 	if item.Rule.Pattern == "parent_child" {
 		return r.evaluateParentChild(ctx, item, result)
@@ -271,7 +282,7 @@ func (r *Runner) evaluateParentChild(ctx context.Context, item compiler.CasePlan
 		}
 	}
 	result.ObservationComplete = true
-	if item.Polarity == "positive" && contains(result.AuditOutcomes, "suppressed_per_notifier") {
+	if item.Polarity == "positive" && contains(result.AuditOutcomes, "suppressed_per_notifier") && contains(result.NotificationStatuses, "suppressed") {
 		result.Verdict, result.Explanation = string(domain.VerdictPass), "child was linked to an active parent with per-notifier suppression evidence"
 		return result, nil
 	}

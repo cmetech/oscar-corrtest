@@ -57,6 +57,15 @@ type AuditRecord struct {
 	Reason              string            `json:"reason,omitempty"`
 }
 
+type NotificationRecord struct {
+	ID               string            `json:"id"`
+	AlertFingerprint string            `json:"alertFingerprint"`
+	NotifierType     string            `json:"notifierType"`
+	Status           string            `json:"status"`
+	CreatedAt        time.Time         `json:"createdAt"`
+	Labels           map[string]string `json:"labels,omitempty"`
+}
+
 // MachineError preserves safe HTTP failure metadata without credentials.
 type MachineError struct {
 	Operation  string

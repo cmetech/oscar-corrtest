@@ -219,6 +219,33 @@ func (c *Client) CorrelationAudit(ctx context.Context, fingerprint string) ([]Au
 	return result, nil
 }
 
+func (c *Client) NotificationAudit(ctx context.Context, fingerprint string, start, end time.Time) ([]NotificationRecord, error) {
+	values := url.Values{"alert_fingerprint": {fingerprint}, "page": {"1"}, "per_page": {"100"},
+		"date_from": {start.UTC().Format(time.RFC3339Nano)}, "date_to": {end.UTC().Format(time.RFC3339Nano)}}
+	var response struct {
+		Items   []notificationWire `json:"items"`
+		Rows    []notificationWire `json:"rows"`
+		Records []notificationWire `json:"records"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, "/api/v1/notification-audit/", values, nil, &response); err != nil {
+		return nil, err
+	}
+	wires := response.Items
+	if len(wires) == 0 {
+		wires = response.Rows
+	}
+	if len(wires) == 0 {
+		wires = response.Records
+	}
+	result := make([]NotificationRecord, 0, len(wires))
+	for _, wire := range wires {
+		if wire.AlertFingerprint == fingerprint {
+			result = append(result, NotificationRecord{ID: wire.ID, AlertFingerprint: wire.AlertFingerprint, NotifierType: wire.NotifierType, Status: wire.Status, CreatedAt: wire.CreatedAt, Labels: wire.Labels})
+		}
+	}
+	return result, nil
+}
+
 func (c *Client) doJSON(ctx context.Context, method, path string, query url.Values, input, output any) error {
 	_, raw, err := c.do(ctx, method, path, query, input)
 	if err != nil {
@@ -362,4 +389,13 @@ func (r auditWire) normalized() AuditRecord {
 
 type auditListResponse struct {
 	Rows []auditWire `json:"rows"`
+}
+
+type notificationWire struct {
+	ID               string            `json:"id"`
+	AlertFingerprint string            `json:"alert_fingerprint"`
+	NotifierType     string            `json:"notifier_type"`
+	Status           string            `json:"status"`
+	CreatedAt        time.Time         `json:"created_at"`
+	Labels           map[string]string `json:"labels"`
 }

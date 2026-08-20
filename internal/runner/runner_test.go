@@ -129,6 +129,9 @@ func TestRunnerExecutesEveryBuiltinPatternThroughOneCoordinator(t *testing.T) {
 			if stored.Verdict != domain.VerdictPass || stored.CleanupStatus != domain.CleanupClean {
 				t.Fatalf("run=%+v report=%s", stored, stored.CanonicalReportJSON)
 			}
+			if input.Pattern == "parent_child" && !strings.Contains(string(stored.CanonicalReportJSON), `"notificationStatuses":["suppressed"]`) {
+				t.Fatalf("parent-child notification evidence missing: %s", stored.CanonicalReportJSON)
+			}
 		})
 	}
 }
@@ -198,6 +201,13 @@ func (f *fakeAPI) CorrelationAudit(_ context.Context, fingerprint string) ([]osc
 		}
 	}
 	return []oscar.AuditRecord{{ID: 1, AlertFingerprint: fingerprint, RuleID: 1, Pattern: "flood", Outcome: outcome}}, nil
+}
+
+func (f *fakeAPI) NotificationAudit(_ context.Context, fingerprint string, _, _ time.Time) ([]oscar.NotificationRecord, error) {
+	if strings.Contains(fingerprint, "_P01_CHILD_") {
+		return []oscar.NotificationRecord{{ID: "notification-1", AlertFingerprint: fingerprint, NotifierType: "email", Status: "suppressed", Labels: map[string]string{"oscar_test_run_id": f.effectiveRunID()}}}, nil
+	}
+	return nil, nil
 }
 
 func (f *fakeAPI) effectiveRunID() string {

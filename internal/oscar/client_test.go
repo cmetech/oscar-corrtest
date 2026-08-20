@@ -108,6 +108,19 @@ func TestUnknownSuccessfulInjectionIsIndeterminate(t *testing.T) {
 	}
 }
 
+func TestNotificationAuditIsBoundedByServerFingerprint(t *testing.T) {
+	server := testoscar.New(t)
+	server.Enqueue(testoscar.Response{Status: 200, Body: `{"items":[{"id":"n1","alert_fingerprint":"server-child-fp","notifier_type":"email","status":"suppressed","created_at":"2026-08-20T00:00:03Z","labels":{"oscar_test_run_id":"crt_abc"}}],"total":1,"page":1,"per_page":100}`})
+	records, err := newClient(t, server.URL()).NotificationAudit(context.Background(), "server-child-fp", time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC), time.Date(2026, 8, 20, 0, 1, 0, 0, time.UTC))
+	if err != nil || len(records) != 1 || records[0].NotifierType != "email" || records[0].Status != "suppressed" {
+		t.Fatalf("records=%+v err=%v", records, err)
+	}
+	request := server.Requests()[0]
+	if request.Path != "/api/v1/notification-audit/" || request.Query.Get("alert_fingerprint") != "server-child-fp" || request.Query.Get("per_page") != "100" {
+		t.Fatalf("request=%+v", request)
+	}
+}
+
 func newClient(t *testing.T, baseURL string) *oscar.Client {
 	t.Helper()
 	client, err := oscar.New(domain.Target{BaseURL: baseURL, APIProfile: "public-v1", Credential: domain.CredentialRef{Kind: domain.CredentialEnvironment, Reference: "OSCAR_KEY"}},
