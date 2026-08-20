@@ -125,6 +125,7 @@ type canonicalReport struct {
 func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan, capabilities CapabilitySnapshot) error {
 	attempts := make([]domain.AlertAttemptFact, 0, plan.MutationBudget.Alerts)
 	started := r.opts.Now().UTC()
+	run.StartedAt = &started
 	budgetDuration := plan.MaxDuration
 	if budgetDuration <= 0 {
 		budgetDuration = r.opts.CleanupTimeout
@@ -278,20 +279,20 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 	}
 	completionCtx, completionCancel := context.WithTimeout(context.WithoutCancel(ctx), r.opts.CleanupTimeout)
 	defer completionCancel()
-	cleanup, resolutions, cleanupError := r.cleanup(completionCtx, run.ID, resources, observedHistory(results))
+	cleanup, resolutions, cleanupError := r.cleanup(completionCtx, run.ID, resources, observedHistory(results), nil)
 	if cleanupError != nil {
 		cleanup = domain.CleanupDirty
 	}
 	return r.complete(completionCtx, run, plan, capabilities, results, attempts, resolutions, verdict, cleanup, errorString(cleanupError))
 }
 
-func (r *Runner) cleanup(ctx context.Context, runID string, resources []domain.Resource, histories []oscar.HistoryRecord) (domain.CleanupStatus, []domain.AlertResolutionFact, error) {
+func (r *Runner) cleanup(ctx context.Context, runID string, resources []domain.Resource, histories []oscar.HistoryRecord, discover func(context.Context) ([]oscar.HistoryRecord, error)) (domain.CleanupStatus, []domain.AlertResolutionFact, error) {
 	var failures []string
 	var resolutions []domain.AlertResolutionFact
 	if err := r.transition(ctx, runID, domain.RunCleaningUp, "Deleting owned temporary rules and resolving test alerts"); err != nil {
 		failures = append(failures, "persist CLEANING_UP: "+err.Error())
 	}
-	if len(resources) == 0 && len(histories) == 0 && len(failures) == 0 {
+	if len(resources) == 0 && len(histories) == 0 && discover == nil && len(failures) == 0 {
 		return domain.CleanupNotRequired, nil, nil
 	}
 	for _, resource := range resources {
@@ -321,6 +322,13 @@ func (r *Runner) cleanup(ctx context.Context, runID string, resources []domain.R
 			failures = append(failures, resource.ExternalName)
 		}
 	}
+	if discover != nil {
+		recovered, err := discover(ctx)
+		histories = append(histories, recovered...)
+		if err != nil {
+			failures = append(failures, "alert history recovery: "+err.Error())
+		}
+	}
 	for _, record := range histories {
 		if record.Labels["oscar_test_run_id"] != runID || record.Fingerprint == "" {
 			failures = append(failures, record.AlertName+": unsafe alert cleanup identity")
@@ -345,25 +353,32 @@ func (r *Runner) cleanup(ctx context.Context, runID string, resources []domain.R
 	return domain.CleanupClean, resolutions, nil
 }
 
-func observedHistory(results []caseResult) []oscar.HistoryRecord {
-	byFingerprint := map[string]oscar.HistoryRecord{}
-	for _, result := range results {
-		for _, record := range append(append([]oscar.HistoryRecord(nil), result.SourceHistory...), result.SyntheticHistory...) {
-			if record.Fingerprint != "" {
-				byFingerprint[record.Fingerprint] = record
-			}
+func uniqueHistory(records []oscar.HistoryRecord) []oscar.HistoryRecord {
+	byFingerprint := make(map[string]oscar.HistoryRecord, len(records))
+	for _, record := range records {
+		if record.Fingerprint != "" {
+			byFingerprint[record.Fingerprint] = record
 		}
 	}
 	keys := make([]string, 0, len(byFingerprint))
-	for key := range byFingerprint {
-		keys = append(keys, key)
+	for fingerprint := range byFingerprint {
+		keys = append(keys, fingerprint)
 	}
 	sort.Strings(keys)
-	items := make([]oscar.HistoryRecord, 0, len(keys))
-	for _, key := range keys {
-		items = append(items, byFingerprint[key])
+	result := make([]oscar.HistoryRecord, 0, len(keys))
+	for _, fingerprint := range keys {
+		result = append(result, byFingerprint[fingerprint])
 	}
-	return items
+	return result
+}
+
+func observedHistory(results []caseResult) []oscar.HistoryRecord {
+	var records []oscar.HistoryRecord
+	for _, result := range results {
+		records = append(records, result.SourceHistory...)
+		records = append(records, result.SyntheticHistory...)
+	}
+	return uniqueHistory(records)
 }
 
 func (r *Runner) failAndCleanup(ctx context.Context, run domain.Run, plan compiler.Plan, capabilities CapabilitySnapshot, resources []domain.Resource, attempts []domain.AlertAttemptFact, cause error) error {
@@ -372,14 +387,116 @@ func (r *Runner) failAndCleanup(ctx context.Context, run domain.Run, plan compil
 	if err := r.transition(cleanupCtx, run.ID, domain.RunCancelling, "Run failed or was cancelled; cleanup required"); err != nil {
 		cause = fmt.Errorf("persist cancellation before cleanup: %w (original error: %v)", err, cause)
 	}
-	cleanup, resolutions, cleanupErr := r.cleanup(cleanupCtx, run.ID, resources, nil)
+	var discover func(context.Context) ([]oscar.HistoryRecord, error)
+	if len(attempts) != 0 {
+		discover = func(discoveryCtx context.Context) ([]oscar.HistoryRecord, error) {
+			return r.discoverAttemptedHistory(discoveryCtx, run, plan, attempts)
+		}
+	}
+	cleanup, resolutions, cleanupErr := r.cleanup(cleanupCtx, run.ID, resources, nil, discover)
 	if cleanupErr != nil {
 		cleanup = domain.CleanupDirty
 	}
-	if err := r.complete(cleanupCtx, run, plan, capabilities, nil, attempts, resolutions, domain.VerdictError, cleanup, cause.Error()); err != nil {
+	terminal := cause.Error()
+	if cleanupErr != nil {
+		terminal += "; cleanup: " + cleanupErr.Error()
+	}
+	if err := r.complete(cleanupCtx, run, plan, capabilities, nil, attempts, resolutions, domain.VerdictError, cleanup, terminal); err != nil {
 		return err
 	}
 	return cause
+}
+
+func (r *Runner) discoverAttemptedHistory(ctx context.Context, run domain.Run, plan compiler.Plan, attempts []domain.AlertAttemptFact) ([]oscar.HistoryRecord, error) {
+	attemptedEvents := make(map[string]bool, len(attempts))
+	for _, attempt := range attempts {
+		if attempt.SendState == "SENT" && attempt.EventID != "" {
+			attemptedEvents[attempt.EventID] = true
+		}
+	}
+	if len(attemptedEvents) == 0 {
+		return nil, nil
+	}
+	expected := map[string]map[string]bool{}
+	syntheticNames := map[string]bool{}
+	for _, item := range plan.Cases {
+		if item.Rule.EmitAlertName != "" {
+			syntheticNames[item.Rule.EmitAlertName] = true
+		}
+		for _, alert := range item.Alerts {
+			eventID := alert.Labels["oscar_test_event_id"]
+			if !attemptedEvents[eventID] {
+				continue
+			}
+			if expected[alert.Name] == nil {
+				expected[alert.Name] = map[string]bool{}
+			}
+			expected[alert.Name][eventID] = true
+		}
+	}
+	if len(expected) == 0 {
+		return nil, fmt.Errorf("sent alert attempts could not be mapped to the immutable plan")
+	}
+	start := run.CreatedAt.UTC()
+	if run.StartedAt != nil && !run.StartedAt.IsZero() {
+		start = run.StartedAt.UTC()
+	}
+	end := r.opts.Now().UTC().Add(time.Minute)
+	byFingerprint := map[string]oscar.HistoryRecord{}
+	var failures []string
+	alertNames := make([]string, 0, len(expected))
+	for alertName := range expected {
+		alertNames = append(alertNames, alertName)
+	}
+	sort.Strings(alertNames)
+	for _, alertName := range alertNames {
+		records, err := r.api.FindHistory(ctx, oscar.HistoryQuery{AlertName: alertName, Start: start.Add(-time.Second), End: end})
+		if err != nil {
+			failures = append(failures, alertName+": "+err.Error())
+			continue
+		}
+		found := map[string]bool{}
+		for _, record := range records {
+			eventID := record.Labels["oscar_test_event_id"]
+			if record.AlertName != alertName || record.Labels["oscar_test_run_id"] != run.ID || record.Fingerprint == "" || !expected[alertName][eventID] {
+				continue
+			}
+			found[eventID] = true
+			byFingerprint[record.Fingerprint] = record
+		}
+		for eventID := range expected[alertName] {
+			if !found[eventID] {
+				failures = append(failures, alertName+"/"+eventID+": history not found")
+			}
+		}
+	}
+	alertNames = alertNames[:0]
+	for alertName := range syntheticNames {
+		alertNames = append(alertNames, alertName)
+	}
+	sort.Strings(alertNames)
+	for _, alertName := range alertNames {
+		records, err := r.api.FindHistory(ctx, oscar.HistoryQuery{AlertName: alertName, Start: start.Add(-time.Second), End: end})
+		if err != nil {
+			failures = append(failures, alertName+": "+err.Error())
+			continue
+		}
+		for _, record := range records {
+			if record.AlertName == alertName && record.Labels["oscar_test_run_id"] == run.ID && record.Fingerprint != "" {
+				byFingerprint[record.Fingerprint] = record
+			}
+		}
+	}
+	recovered := make([]oscar.HistoryRecord, 0, len(byFingerprint))
+	for _, record := range byFingerprint {
+		recovered = append(recovered, record)
+	}
+	recovered = uniqueHistory(recovered)
+	if len(failures) != 0 {
+		sort.Strings(failures)
+		return recovered, fmt.Errorf("%s", strings.Join(failures, ", "))
+	}
+	return recovered, nil
 }
 
 func (r *Runner) finishWithoutMutation(ctx context.Context, run domain.Run, plan compiler.Plan, capabilities CapabilitySnapshot, verdict domain.Verdict, explanation string) error {

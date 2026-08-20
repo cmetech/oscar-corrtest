@@ -226,6 +226,62 @@ func TestRunnerUsesDetachedBoundedContextToCleanupAfterCancellation(t *testing.T
 	if len(api.deleted) != 2 {
 		t.Fatalf("created rules were not cleaned after cancellation: deleted=%v", api.deleted)
 	}
+	if len(api.resolved) == 0 {
+		t.Fatal("accepted alert was not resolved after cancellation")
+	}
+}
+
+func TestRunnerResolvesInjectedAlertsWhenObservationFails(t *testing.T) {
+	database := openDatabase(t)
+	run := newRun()
+	if err := database.CreateRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	plan, _ := compiler.Compile(run, scenario.Builtin("flood"), compiler.Capabilities{PipelineMode: "phase_b_dispatch"})
+	api := &fakeAPI{auditError: errors.New("audit unavailable")}
+	engine := runner.New(database, api, runner.Options{PollInterval: time.Millisecond, ObservationWindow: time.Millisecond, CleanupTimeout: time.Second})
+	if err := engine.Execute(context.Background(), run, plan, runner.CapabilitySnapshot{PipelineMode: "phase_b_dispatch", Ready: true, LabelsSurvived: true}); err == nil {
+		t.Fatal("expected observation failure")
+	}
+	stored, err := database.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Verdict != domain.VerdictError || stored.CleanupStatus != domain.CleanupClean {
+		t.Fatalf("run=%+v", stored)
+	}
+	if len(api.resolved) == 0 {
+		t.Fatal("failure cleanup did not resolve exact run-owned history")
+	}
+	for _, record := range api.resolved {
+		if record.Labels["oscar_test_run_id"] != run.ID || record.Fingerprint == "" {
+			t.Fatalf("unsafe resolution record: %+v", record)
+		}
+	}
+}
+
+func TestRunnerMarksCleanupDirtyWhenInjectedHistoryCannotBeRecovered(t *testing.T) {
+	database := openDatabase(t)
+	run := newRun()
+	if err := database.CreateRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	plan, _ := compiler.Compile(run, scenario.Builtin("flood"), compiler.Capabilities{PipelineMode: "phase_b_dispatch"})
+	api := &fakeAPI{auditError: errors.New("audit unavailable"), hideHistoryOnAuditError: true}
+	engine := runner.New(database, api, runner.Options{PollInterval: time.Millisecond, ObservationWindow: time.Millisecond, CleanupTimeout: time.Second})
+	if err := engine.Execute(context.Background(), run, plan, runner.CapabilitySnapshot{PipelineMode: "phase_b_dispatch", Ready: true, LabelsSurvived: true}); err == nil {
+		t.Fatal("expected observation failure")
+	}
+	stored, err := database.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Verdict != domain.VerdictError || stored.CleanupStatus != domain.CleanupDirty {
+		t.Fatalf("unrecoverable alert residue must stay visible: %+v", stored)
+	}
+	if len(api.resolved) != 0 {
+		t.Fatalf("unexpected resolutions: %+v", api.resolved)
+	}
 }
 
 func TestRunnerPersistsTerminalNoMutationEvidenceWhenAlreadyCancelled(t *testing.T) {
@@ -313,6 +369,8 @@ type fakeAPI struct {
 	reconciled               oscar.Rule
 	hideReconciled           bool
 	hideHistory              bool
+	auditError               error
+	hideHistoryOnAuditError  bool
 	resolved                 []oscar.HistoryRecord
 }
 
@@ -394,6 +452,12 @@ func (f *fakeAPI) FindHistory(_ context.Context, query oscar.HistoryQuery) ([]os
 func (f *fakeAPI) CorrelationAudit(_ context.Context, fingerprint string) ([]oscar.AuditRecord, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.auditError != nil {
+		if f.hideHistoryOnAuditError {
+			f.hideHistory = true
+		}
+		return nil, f.auditError
+	}
 	if f.requiredAuditFingerprint != "" && fingerprint == f.requiredAuditFingerprint {
 		f.sawRequiredFingerprint = true
 	}

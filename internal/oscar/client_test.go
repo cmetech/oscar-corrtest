@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -187,6 +189,75 @@ func TestInjectClassifiesCurrentOscarTwoHundredBodies(t *testing.T) {
 	}
 }
 
+func TestRecordedPublicV1FixturesPinAdapterContracts(t *testing.T) {
+	injections := []struct {
+		fixture string
+		want    oscar.InjectionClass
+	}{
+		{fixture: "injection-accepted.json", want: oscar.InjectionAccepted},
+		{fixture: "injection-alert-rate-limited.json", want: oscar.InjectionRejected},
+		{fixture: "injection-api-rate-limited.json", want: oscar.InjectionQueued},
+		{fixture: "injection-queued.json", want: oscar.InjectionQueued},
+	}
+	for _, test := range injections {
+		t.Run(test.fixture, func(t *testing.T) {
+			server := testoscar.New(t)
+			server.Enqueue(testoscar.Response{Status: 200, Body: loadPublicV1Fixture(t, test.fixture)})
+			result, err := newClient(t, server.URL()).Inject(context.Background(), compiler.AlertPlan{
+				Name: "A", Status: "firing", Labels: map[string]string{"alertname": "A", "oscar_test_run_id": "crt_abc"},
+			})
+			if err != nil || result.Class != test.want {
+				t.Fatalf("result=%+v err=%v want=%s", result, err, test.want)
+			}
+		})
+	}
+
+	t.Run("history and audit routes", func(t *testing.T) {
+		server := testoscar.New(t)
+		server.Enqueue(testoscar.Response{Status: 200, Body: loadPublicV1Fixture(t, "history.json")})
+		server.Enqueue(testoscar.Response{Status: 200, Body: loadPublicV1Fixture(t, "audit.json")})
+		client := newClient(t, server.URL())
+		start := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+		alertName := "CORRTEST_FLOOD_P01_INTERFACE_DOWN_7Q9K2M4A"
+		records, err := client.FindHistory(context.Background(), oscar.HistoryQuery{AlertName: alertName, Start: start, End: start.Add(time.Minute)})
+		if err != nil || len(records) != 1 || records[0].Fingerprint != "abc123def456" || records[0].Annotations["summary"] != "[CORRTEST] source alert" {
+			t.Fatalf("records=%+v err=%v", records, err)
+		}
+		audits, err := client.CorrelationAudit(context.Background(), records[0].Fingerprint)
+		if err != nil || len(audits) != 1 || audits[0].Outcome != "parent_emitted" {
+			t.Fatalf("audits=%+v err=%v", audits, err)
+		}
+
+		requests := server.Requests()
+		if len(requests) != 2 {
+			t.Fatalf("requests=%+v", requests)
+		}
+		historyRequest := requests[0]
+		if historyRequest.Method != http.MethodGet || historyRequest.Path != "/api/v1/alerts/history" ||
+			historyRequest.Query.Get("perPage") != "100" || historyRequest.Query.Get("page") != "1" ||
+			historyRequest.Query.Get("order") != "asc" || historyRequest.Query.Get("column") != "createdAt" ||
+			historyRequest.Query.Get("start_datetime") != "2026-08-20T00:00:00Z" || historyRequest.Query.Get("end_datetime") != "2026-08-20T00:01:00Z" {
+			t.Fatalf("history request=%+v", historyRequest)
+		}
+		var filter struct {
+			Items []struct {
+				Field    string `json:"field"`
+				Operator string `json:"operator"`
+				Value    string `json:"value"`
+			} `json:"items"`
+		}
+		if err := json.Unmarshal([]byte(historyRequest.Query.Get("filter")), &filter); err != nil {
+			t.Fatal(err)
+		}
+		if len(filter.Items) != 1 || filter.Items[0].Field != "alertname" || filter.Items[0].Operator != "equals" || filter.Items[0].Value != alertName {
+			t.Fatalf("history filter=%+v", filter)
+		}
+		if requests[1].Method != http.MethodGet || requests[1].Path != "/api/v1/correlation_rules/audit" || requests[1].Query.Get("fingerprint") != "abc123def456" {
+			t.Fatalf("audit request=%+v", requests[1])
+		}
+	})
+}
+
 func TestHistoryProvidesServerFingerprintAndAuditUsesIt(t *testing.T) {
 	server := testoscar.New(t)
 	server.Enqueue(testoscar.Response{Status: 200, Body: `{"total_records":1,"total_pages":1,"page":1,"per_page":25,"records":[{"id":"h1","alertname":"CORRTEST_FLOOD_P01_SOURCE_7Q9K2M4A","fingerprint":"server-fp","status":"firing","createdAt":"2026-08-20T00:00:01Z","labels":[{"Label":"oscar_test_run_id","Value":"crt_abc"}],"annotations":[]}]}`})
@@ -307,4 +378,13 @@ func newClient(t *testing.T, baseURL string) *oscar.Client {
 		t.Fatal(err)
 	}
 	return client
+}
+
+func loadPublicV1Fixture(t *testing.T, name string) string {
+	t.Helper()
+	content, err := os.ReadFile(filepath.Join("testdata", "public-v1", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(content)
 }
