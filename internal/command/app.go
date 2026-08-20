@@ -23,6 +23,9 @@ type ApplicationRuntime interface {
 	ListTargets(context.Context) ([]domain.Target, error)
 	ListRuns(context.Context, domain.RunFilter) ([]domain.Run, error)
 	GetRun(context.Context, string) (domain.Run, error)
+	ListRunEvents(context.Context, string) ([]domain.RunEvent, error)
+	ListArtifactEvidence(context.Context, string) ([]domain.ArtifactEvidence, error)
+	ReadyStatus() (bool, string)
 	Backup(context.Context, string) error
 	Close() error
 }
@@ -114,7 +117,7 @@ func (a *App) runServe(ctx context.Context, args []string) int {
 		defer application.Close()
 	}
 	fmt.Fprintf(a.stdout, "listening on http://%s\n", settings.ListenAddress)
-	if err := a.serve(ctx, web.Options{ListenAddress: settings.ListenAddress, Version: a.info}); err != nil {
+	if err := a.serve(ctx, web.Options{ListenAddress: settings.ListenAddress, Version: a.info, Data: application}); err != nil {
 		fmt.Fprintf(a.stderr, "serve: %v\n", err)
 		return 1
 	}

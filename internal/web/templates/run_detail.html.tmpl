@@ -1,0 +1,13 @@
+{{define "run-detail"}}
+<section class="page-heading"><p class="eyebrow">Durable evidence</p><h1>Run detail</h1><p><code>{{.Run.ID}}</code></p></section>
+{{if .Error}}<div class="notice notice--error" role="alert">{{.Error}}</div>{{end}}
+<section class="summary-grid" aria-label="Run summary">
+  <div class="summary-card"><span>Status</span><strong>{{.Run.Status}}</strong></div>
+  <div class="summary-card"><span>Verdict</span><strong>{{if .Run.Verdict}}{{.Run.Verdict}}{{else}}Pending{{end}}</strong></div>
+  <div class="summary-card"><span>Cleanup</span><strong>{{.Run.CleanupStatus}}</strong></div>
+  <div class="summary-card"><span>Short token</span><strong><code>{{.Run.ShortToken}}</code></strong></div>
+</section>
+<section class="panel"><h2>Timeline</h2>{{if .Events}}<ol class="timeline">{{range .Events}}<li><time>{{.OccurredAt}}</time><strong>{{.Summary}}</strong><code>{{.Type}}</code></li>{{end}}</ol>{{else}}<p class="muted">No lifecycle events recorded.</p>{{end}}</section>
+<section class="panel"><h2>Evidence integrity</h2>{{if .Artifacts}}<div class="data-table-wrapper"><table><caption>Artifact integrity</caption><thead><tr><th>Artifact</th><th>State</th><th>Details</th></tr></thead><tbody>{{range .Artifacts}}<tr><td><code>{{.Artifact.RelativePath}}</code></td><td>{{.Integrity}}</td><td>{{if eq .Integrity "valid"}}Verified{{else}}<strong>Integrity warning</strong>{{if .Error}}: {{.Error}}{{end}}{{end}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="muted">No artifacts recorded.</p>{{end}}</section>
+{{if .Run.CanonicalReportJSON}}<section class="panel"><h2>Canonical report JSON</h2><pre>{{printf "%s" .Run.CanonicalReportJSON}}</pre></section>{{end}}
+{{end}}

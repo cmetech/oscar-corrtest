@@ -4,6 +4,7 @@
   <h1>Dashboard</h1>
   <p>Build evidence that OSCAR correlation rules behave exactly as intended.</p>
 </section>
+{{if not .Readiness.Ready}}<div class="notice notice--error" role="alert">Database unavailable: {{.Readiness.Error}}</div>{{end}}
 <section class="empty-state" aria-labelledby="empty-title">
   <span class="empty-mark" aria-hidden="true">◎</span>
   <h2 id="empty-title">No correlation runs yet</h2>

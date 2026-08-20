@@ -1,0 +1,4 @@
+{{define "settings"}}
+<section class="page-heading"><p class="eyebrow">Local diagnostics</p><h1>Settings</h1><p>Runtime readiness and storage diagnostics. Credential values are never displayed.</p></section>
+<section class="panel"><h2>Database</h2>{{if .Readiness.Ready}}<p><span class="status-pill status-pill--pass">Ready</span> <code>corrtest.db</code></p>{{else}}<div class="notice notice--error" role="alert">Not ready: {{.Readiness.Error}}</div>{{end}}</section>
+{{end}}

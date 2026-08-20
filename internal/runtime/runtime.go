@@ -71,6 +71,9 @@ func Open(ctx context.Context, settings config.Settings, _ version.Info) (*Runti
 // Readiness returns the immutable startup readiness snapshot.
 func (r *Runtime) Readiness() Readiness { return r.readiness }
 
+// ReadyStatus implements the transport-neutral readiness interface.
+func (r *Runtime) ReadyStatus() (bool, string) { return r.readiness.Ready, r.readiness.Error }
+
 // Settings returns non-secret effective settings.
 func (r *Runtime) Settings() config.Settings { return r.settings }
 
@@ -113,6 +116,37 @@ func (r *Runtime) ListRuns(ctx context.Context, filter domain.RunFilter) ([]doma
 // ListRunEvents returns a durable run timeline.
 func (r *Runtime) ListRunEvents(ctx context.Context, id string) ([]domain.RunEvent, error) {
 	return r.history.ListRunEvents(ctx, id)
+}
+
+// ListArtifactEvidence verifies available files while preserving incomplete manifests.
+func (r *Runtime) ListArtifactEvidence(ctx context.Context, runID string) ([]domain.ArtifactEvidence, error) {
+	records, err := r.database.ListArtifacts(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	evidence := make([]domain.ArtifactEvidence, 0, len(records))
+	for _, record := range records {
+		item := domain.ArtifactEvidence{Artifact: record, Integrity: domain.ArtifactIntegrityPending}
+		if record.Availability == domain.ArtifactAvailable {
+			integrity, verifyErr := r.artifacts.Verify(ctx, artifact.Manifest{
+				RelativePath: record.RelativePath, MIMEType: record.MIMEType, SHA256: record.SHA256, ByteSize: record.ByteSize,
+			})
+			if verifyErr != nil {
+				item.Integrity, item.Error = domain.ArtifactIntegrityError, verifyErr.Error()
+			} else {
+				switch integrity {
+				case artifact.IntegrityValid:
+					item.Integrity = domain.ArtifactIntegrityValid
+				case artifact.IntegrityMissing:
+					item.Integrity = domain.ArtifactIntegrityMissing
+				case artifact.IntegrityHashMismatch:
+					item.Integrity = domain.ArtifactIntegrityHashMismatch
+				}
+			}
+		}
+		evidence = append(evidence, item)
+	}
+	return evidence, nil
 }
 
 // Backup creates a coordinated SQLite snapshot.

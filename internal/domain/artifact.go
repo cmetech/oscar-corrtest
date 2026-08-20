@@ -28,6 +28,24 @@ type Artifact struct {
 	CreatedAt      time.Time            `json:"createdAt"`
 }
 
+// ArtifactIntegrity is the current relationship between a manifest and its file.
+type ArtifactIntegrity string
+
+const (
+	ArtifactIntegrityPending      ArtifactIntegrity = "pending"
+	ArtifactIntegrityValid        ArtifactIntegrity = "valid"
+	ArtifactIntegrityMissing      ArtifactIntegrity = "missing"
+	ArtifactIntegrityHashMismatch ArtifactIntegrity = "hash_mismatch"
+	ArtifactIntegrityError        ArtifactIntegrity = "error"
+)
+
+// ArtifactEvidence keeps damaged or incomplete artifacts visible to operators.
+type ArtifactEvidence struct {
+	Artifact  Artifact          `json:"artifact"`
+	Integrity ArtifactIntegrity `json:"integrity"`
+	Error     string            `json:"error,omitempty"`
+}
+
 // Validate verifies database-manifest invariants.
 func (artifact Artifact) Validate() error {
 	if artifact.ID == "" || artifact.RunID == "" || artifact.Kind == "" || artifact.RelativePath == "" || artifact.MIMEType == "" || artifact.RedactionState == "" || artifact.CreatedAt.IsZero() {

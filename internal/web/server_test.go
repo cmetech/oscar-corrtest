@@ -1,14 +1,20 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/cmetech/oscar-corrtest/internal/config"
+	"github.com/cmetech/oscar-corrtest/internal/domain"
+	appruntime "github.com/cmetech/oscar-corrtest/internal/runtime"
 	"github.com/cmetech/oscar-corrtest/internal/version"
 )
 
@@ -37,6 +43,193 @@ func TestHandlerRoutes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDurableTargetsRunsAndSettingsPages(t *testing.T) {
+	settings := config.Settings{
+		DataDir: filepath.Join(t.TempDir(), "state"), ListenAddress: "127.0.0.1:8787",
+	}
+	runtime, err := appruntime.Open(context.Background(), settings, version.Info{Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := runtime.CreateTarget(context.Background(), domain.TargetInput{
+		DisplayName: "Lab A", BaseURL: "https://oscar.example",
+		Credential: domain.CredentialRef{Kind: domain.CredentialEnvironment, Reference: "OSCAR_API_TOKEN"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := runtime.CreateRun(context.Background(), target.ID, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.Close(); err != nil {
+		t.Fatal(err)
+	}
+	runtime, err = appruntime.Open(context.Background(), settings, version.Info{Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runtime.Close() })
+	handler := NewHandlerWithData(version.Info{Version: "test"}, runtime)
+
+	tests := []struct {
+		path string
+		want []string
+	}{
+		{"/targets", []string{"Targets", "Lab A", "OSCAR_API_TOKEN"}},
+		{"/runs?status=INTERRUPTED", []string{"Runs", run.ID, "INTERRUPTED"}},
+		{"/runs/" + run.ID, []string{"Run detail", run.ID, "NOT_REQUIRED"}},
+		{"/settings", []string{"Settings", "corrtest.db", "Ready"}},
+	}
+	for _, test := range tests {
+		t.Run(test.path, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, test.path, nil)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			for _, want := range test.want {
+				if !strings.Contains(response.Body.String(), want) {
+					t.Fatalf("body missing %q: %s", want, response.Body.String())
+				}
+			}
+		})
+	}
+}
+
+func TestTargetCreationRequiresSameOriginAndCSRF(t *testing.T) {
+	runtime, err := appruntime.Open(context.Background(), config.Settings{
+		DataDir: filepath.Join(t.TempDir(), "state"), ListenAddress: "127.0.0.1:8787",
+	}, version.Info{Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runtime.Close() })
+	handler := NewHandlerWithData(version.Info{}, runtime)
+
+	get := httptest.NewRequest(http.MethodGet, "http://example.com/targets", nil)
+	getResponse := httptest.NewRecorder()
+	handler.ServeHTTP(getResponse, get)
+	if getResponse.Code != http.StatusOK || len(getResponse.Result().Cookies()) == 0 {
+		t.Fatalf("GET status=%d cookies=%v", getResponse.Code, getResponse.Result().Cookies())
+	}
+	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(getResponse.Body.String())
+	if len(match) != 2 {
+		t.Fatalf("CSRF token missing: %s", getResponse.Body.String())
+	}
+
+	values := url.Values{
+		"csrf_token": {match[1]}, "display_name": {"Lab B"}, "base_url": {"https://lab-b.example"},
+		"credential_kind": {"env"}, "credential_ref": {"OSCAR_API_TOKEN"},
+	}
+	post := httptest.NewRequest(http.MethodPost, "http://example.com/targets", strings.NewReader(values.Encode()))
+	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	post.Header.Set("Origin", "http://example.com")
+	post.AddCookie(getResponse.Result().Cookies()[0])
+	postResponse := httptest.NewRecorder()
+	handler.ServeHTTP(postResponse, post)
+	if postResponse.Code != http.StatusSeeOther {
+		t.Fatalf("POST status=%d body=%s", postResponse.Code, postResponse.Body.String())
+	}
+
+	crossSite := httptest.NewRequest(http.MethodPost, "http://example.com/targets", strings.NewReader(values.Encode()))
+	crossSite.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	crossSite.Header.Set("Origin", "https://evil.example")
+	crossSite.AddCookie(getResponse.Result().Cookies()[0])
+	crossSiteResponse := httptest.NewRecorder()
+	handler.ServeHTTP(crossSiteResponse, crossSite)
+	if crossSiteResponse.Code != http.StatusForbidden {
+		t.Fatalf("cross-site status=%d", crossSiteResponse.Code)
+	}
+}
+
+func TestTargetCreationLimitsBodyBeforeParsing(t *testing.T) {
+	runtime, err := appruntime.Open(context.Background(), config.Settings{
+		DataDir: filepath.Join(t.TempDir(), "state"), ListenAddress: "127.0.0.1:8787",
+	}, version.Info{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runtime.Close() })
+	handler := NewHandlerWithData(version.Info{}, runtime)
+	get := httptest.NewRequest(http.MethodGet, "http://example.com/targets", nil)
+	getResponse := httptest.NewRecorder()
+	handler.ServeHTTP(getResponse, get)
+	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(getResponse.Body.String())
+	if len(match) != 2 {
+		t.Fatal("CSRF token missing")
+	}
+	values := url.Values{
+		"csrf_token": {match[1]}, "display_name": {strings.Repeat("x", 70<<10)}, "base_url": {"https://oscar.example"},
+	}
+	post := httptest.NewRequest(http.MethodPost, "http://example.com/targets", strings.NewReader(values.Encode()))
+	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	post.Header.Set("Origin", "http://example.com")
+	post.AddCookie(getResponse.Result().Cookies()[0])
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, post)
+	if response.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestDatabaseReadinessFailureReturns503(t *testing.T) {
+	handler := NewHandlerWithData(version.Info{}, diagnosticData{})
+	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "migration checksum mismatch") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestRunDetailKeepsMissingArtifactVisible(t *testing.T) {
+	handler := NewHandlerWithData(version.Info{}, missingArtifactData{})
+	request := httptest.NewRequest(http.MethodGet, "/runs/crt_00000000000000000000000000", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Integrity warning") || !strings.Contains(response.Body.String(), "missing") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+type diagnosticData struct{}
+
+func (diagnosticData) ReadyStatus() (bool, string) { return false, "migration checksum mismatch" }
+func (diagnosticData) CreateTarget(context.Context, domain.TargetInput) (domain.Target, error) {
+	return domain.Target{}, errors.New("read-only")
+}
+func (diagnosticData) ListTargets(context.Context) ([]domain.Target, error) { return nil, nil }
+func (diagnosticData) ListRuns(context.Context, domain.RunFilter) ([]domain.Run, error) {
+	return nil, nil
+}
+func (diagnosticData) GetRun(context.Context, string) (domain.Run, error) {
+	return domain.Run{}, errors.New("not found")
+}
+func (diagnosticData) ListRunEvents(context.Context, string) ([]domain.RunEvent, error) {
+	return nil, nil
+}
+func (diagnosticData) ListArtifactEvidence(context.Context, string) ([]domain.ArtifactEvidence, error) {
+	return nil, nil
+}
+
+type missingArtifactData struct{ diagnosticData }
+
+func (missingArtifactData) ReadyStatus() (bool, string) { return true, "" }
+func (missingArtifactData) GetRun(context.Context, string) (domain.Run, error) {
+	return domain.Run{
+		ID: "crt_00000000000000000000000000", ShortToken: "00000000", Status: domain.RunInterrupted,
+		CleanupStatus: domain.CleanupNotRequired,
+	}, nil
+}
+func (missingArtifactData) ListArtifactEvidence(context.Context, string) ([]domain.ArtifactEvidence, error) {
+	return []domain.ArtifactEvidence{{
+		Artifact:  domain.Artifact{RelativePath: "runs/crt_00000000000000000000000000/report.json"},
+		Integrity: domain.ArtifactIntegrityMissing,
+	}}, nil
 }
 
 func TestHealthRejectsPost(t *testing.T) {

@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/static/css/tokens.css">
   <link rel="stylesheet" href="/static/css/base.css">
   <link rel="stylesheet" href="/static/css/components.css">
+  <link rel="stylesheet" href="/static/css/pages.css">
   <script defer src="/static/js/theme.js"></script>
 </head>
 <body>
@@ -25,14 +26,20 @@
   </header>
   <div class="app-shell">
     <nav class="primary-nav" aria-label="Primary">
-      <a href="/" aria-current="page">Dashboard</a>
+      <a href="/"{{if eq .Page "dashboard"}} aria-current="page"{{end}}>Dashboard</a>
       <a href="#" aria-disabled="true">Run test</a>
-      <a href="#" aria-disabled="true">Runs</a>
+      <a href="/runs"{{if or (eq .Page "runs") (eq .Page "run-detail")}} aria-current="page"{{end}}>Runs</a>
       <a href="#" aria-disabled="true">Scenarios</a>
-      <a href="#" aria-disabled="true">Targets</a>
-      <a href="#" aria-disabled="true">Settings</a>
+      <a href="/targets"{{if eq .Page "targets"}} aria-current="page"{{end}}>Targets</a>
+      <a href="/settings"{{if eq .Page "settings"}} aria-current="page"{{end}}>Settings</a>
     </nav>
-    <main>{{template "dashboard" .}}</main>
+    <main>
+      {{if eq .Page "targets"}}{{template "targets" .}}
+      {{else if eq .Page "runs"}}{{template "runs" .}}
+      {{else if eq .Page "run-detail"}}{{template "run-detail" .}}
+      {{else if eq .Page "settings"}}{{template "settings" .}}
+      {{else}}{{template "dashboard" .}}{{end}}
+    </main>
   </div>
 </body>
 </html>{{end}}

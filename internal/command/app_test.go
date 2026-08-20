@@ -120,6 +120,13 @@ func (f *fakeRuntime) GetRun(_ context.Context, id string) (domain.Run, error) {
 	}
 	return domain.Run{}, errors.New("not found")
 }
+func (f *fakeRuntime) ListRunEvents(context.Context, string) ([]domain.RunEvent, error) {
+	return nil, nil
+}
+func (f *fakeRuntime) ListArtifactEvidence(context.Context, string) ([]domain.ArtifactEvidence, error) {
+	return nil, nil
+}
+func (f *fakeRuntime) ReadyStatus() (bool, string)                 { return true, "" }
 func (f *fakeRuntime) Backup(_ context.Context, path string) error { f.backupPath = path; return nil }
 func (f *fakeRuntime) Close() error                                { f.closed = true; return nil }
 

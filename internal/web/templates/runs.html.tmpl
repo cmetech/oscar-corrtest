@@ -1,0 +1,14 @@
+{{define "runs"}}
+<section class="page-heading"><p class="eyebrow">Evidence history</p><h1>Runs</h1><p>Filter and reopen durable correlation-test records.</p></section>
+{{if .Error}}<div class="notice notice--error" role="alert">{{.Error}}</div>{{end}}
+<form method="get" action="/runs" class="filter-bar" aria-label="Run filters">
+  <label>Status<input name="status" value="{{.Status}}" placeholder="COMPLETED"></label>
+  <label>Verdict<input name="verdict" value="{{.Verdict}}" placeholder="PASS"></label>
+  <label>Cleanup<input name="cleanup" value="{{.Cleanup}}" placeholder="CLEAN"></label>
+  <label>Pattern<input name="pattern" value="{{.Pattern}}" placeholder="flood"></label>
+  <button class="primary-button" type="submit">Apply filters</button>
+</form>
+{{if .Runs}}<div class="data-table-wrapper"><table><caption>Durable correlation test runs</caption><thead><tr><th>Run</th><th>Status</th><th>Verdict</th><th>Cleanup</th><th>Created</th></tr></thead><tbody>
+{{range .Runs}}<tr><td><a href="/runs/{{.ID}}"><code>{{.ID}}</code></a></td><td><span class="status-pill">{{.Status}}</span></td><td>{{if .Verdict}}{{.Verdict}}{{else}}—{{end}}</td><td>{{.CleanupStatus}}</td><td>{{.CreatedAt}}</td></tr>{{end}}
+</tbody></table></div>{{else}}<section class="empty-state"><h2>No runs found</h2><p>No durable runs match the selected filters.</p></section>{{end}}
+{{end}}

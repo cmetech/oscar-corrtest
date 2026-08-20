@@ -1,0 +1,27 @@
+{{define "targets"}}
+<section class="page-heading">
+  <p class="eyebrow">Connections</p>
+  <h1>Targets</h1>
+  <p>Store OSCAR endpoint metadata and credential references without persisting secret values.</p>
+</section>
+{{if .Error}}<div class="notice notice--error" role="alert">{{.Error}}</div>{{end}}
+<section class="panel" aria-labelledby="add-target-title">
+  <h2 id="add-target-title">Add target</h2>
+  <form method="post" action="/targets" class="form-grid">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <label>Display name<input name="display_name" required autocomplete="off"></label>
+    <label>Base URL<input name="base_url" type="url" required placeholder="https://oscar.example"></label>
+    <label>Credential source<select name="credential_kind"><option value="">None</option><option value="env">Environment</option><option value="file">Mounted file</option><option value="systemd">systemd credential</option></select></label>
+    <label>Credential reference<input name="credential_ref" autocomplete="off" aria-describedby="credential-help"><small id="credential-help">Reference name or path only; never enter a secret value.</small></label>
+    <label>Custom CA path<input name="ca_path" autocomplete="off"></label>
+    <label class="check"><input type="checkbox" name="insecure"> Disable TLS verification</label>
+    <button class="primary-button" type="submit">Add target</button>
+  </form>
+</section>
+<section class="panel" aria-labelledby="target-list-title">
+  <h2 id="target-list-title">Configured targets</h2>
+  {{if .Targets}}<div class="data-table-wrapper"><table><caption>Configured OSCAR targets</caption><thead><tr><th>Name</th><th>URL</th><th>Credential reference</th><th>TLS</th></tr></thead><tbody>
+  {{range .Targets}}<tr><td>{{.DisplayName}}</td><td><code>{{.BaseURL}}</code></td><td>{{if .Credential.Reference}}<code>{{.Credential.Kind}}:{{.Credential.Reference}}</code>{{else}}None{{end}}</td><td>{{if .TLS.Insecure}}Insecure{{else}}Verified{{end}}</td></tr>{{end}}
+  </tbody></table></div>{{else}}<p class="muted">No targets configured.</p>{{end}}
+</section>
+{{end}}

@@ -1,0 +1,46 @@
+.panel {
+  margin-top: var(--ct-space-6);
+  padding: var(--ct-space-6);
+  border: 1px solid var(--ct-border);
+  border-radius: var(--ct-radius-card);
+  background: var(--ct-card);
+}
+
+.form-grid,
+.filter-bar,
+.summary-grid {
+  display: grid;
+  gap: var(--ct-space-4);
+}
+
+.form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.filter-bar { grid-template-columns: repeat(4, minmax(120px, 1fr)) auto; margin: var(--ct-space-6) 0; align-items: end; }
+.summary-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: var(--ct-space-6); }
+
+label { display: grid; gap: var(--ct-space-1); color: var(--ct-fg-muted); font-weight: 650; }
+input, select { min-height: 42px; padding: var(--ct-space-2) var(--ct-space-3); border: 1px solid var(--ct-border); border-radius: var(--ct-radius-input); background: var(--ct-bg); color: var(--ct-fg); font: inherit; }
+small, .muted { color: var(--ct-fg-muted); font-weight: 400; }
+.check { display: flex; align-items: center; gap: var(--ct-space-2); }
+.check input { min-height: auto; }
+.primary-button { min-height: 42px; padding: var(--ct-space-2) var(--ct-space-4); border: 0; border-radius: var(--ct-radius-input); background: var(--ct-accent); color: var(--ct-accent-fg); font: inherit; font-weight: 800; cursor: pointer; }
+.notice { margin-top: var(--ct-space-4); padding: var(--ct-space-3) var(--ct-space-4); border: 1px solid var(--ct-warning); border-radius: var(--ct-radius-input); }
+.notice--error { border-color: var(--ct-fail); }
+th, td { padding: var(--ct-space-3); border-bottom: 1px solid var(--ct-border); text-align: left; }
+th { color: var(--ct-fg-muted); font-size: 12px; text-transform: uppercase; }
+caption { padding: var(--ct-space-3); text-align: left; font-weight: 750; }
+code, pre { font-family: var(--ct-font-mono); }
+pre { overflow: auto; white-space: pre-wrap; }
+.status-pill { display: inline-flex; padding: 2px 8px; border: 1px solid var(--ct-border); border-radius: 999px; font-size: 12px; font-weight: 800; }
+.status-pill--pass { border-color: var(--ct-pass); }
+.summary-card { padding: var(--ct-space-4); border: 1px solid var(--ct-border); border-radius: var(--ct-radius-card); background: var(--ct-card); }
+.summary-card span { display: block; color: var(--ct-fg-muted); font-size: 12px; }
+.timeline { display: grid; gap: var(--ct-space-3); padding-left: var(--ct-space-6); }
+.timeline li { display: grid; grid-template-columns: minmax(170px, auto) 1fr auto; gap: var(--ct-space-3); }
+
+@media (max-width: 900px) {
+  .filter-bar, .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 620px) {
+  .form-grid, .filter-bar, .summary-grid { grid-template-columns: 1fr; }
+  .timeline li { grid-template-columns: 1fr; }
+}
