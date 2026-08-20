@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/artifact"
 	"github.com/cmetech/oscar-corrtest/internal/compiler"
@@ -27,6 +28,17 @@ type Readiness struct {
 	Ready        bool   `json:"ready"`
 	DatabasePath string `json:"databasePath"`
 	Error        string `json:"error,omitempty"`
+}
+
+// Diagnostic is the fail-closed target compatibility result used by doctor and runs.
+type Diagnostic struct {
+	TargetID       string                 `json:"targetId"`
+	APIProfile     string                 `json:"apiProfile"`
+	PipelineMode   string                 `json:"pipelineMode"`
+	RuleValidation bool                   `json:"ruleValidation"`
+	LabelProbe     oscar.LabelProbeResult `json:"labelProbe"`
+	Compatible     bool                   `json:"compatible"`
+	Detail         string                 `json:"detail,omitempty"`
 }
 
 // Runtime owns one process's durable services.
@@ -105,7 +117,7 @@ func (r *Runtime) PreviewScenario(ctx context.Context, targetID string, document
 }
 
 // ExecuteBuiltin serializes live mutation runs through the same durable runtime used by CLI and UI.
-func (r *Runtime) ExecuteBuiltin(ctx context.Context, targetID, pattern, pipelineMode string, labelsSurvived bool) (domain.Run, error) {
+func (r *Runtime) ExecuteBuiltin(ctx context.Context, targetID, pattern, pipelineMode string) (domain.Run, error) {
 	r.runMu.Lock()
 	defer r.runMu.Unlock()
 	target, err := r.GetTarget(ctx, targetID)
@@ -124,8 +136,9 @@ func (r *Runtime) ExecuteBuiltin(ctx context.Context, targetID, pattern, pipelin
 	if err != nil {
 		return run, err
 	}
+	diagnostic := r.diagnose(ctx, client, target, run, plan, pipelineMode)
 	engine := runner.New(r.database, client, runner.Options{})
-	executeErr := engine.Execute(ctx, run, plan, runner.CapabilitySnapshot{APIProfile: target.APIProfile, PipelineMode: pipelineMode, Ready: true, LabelsSurvived: labelsSurvived, Compatibility: true})
+	executeErr := engine.Execute(ctx, run, plan, diagnostic.snapshot())
 	stored, getErr := r.GetRun(context.Background(), run.ID)
 	if getErr != nil {
 		return run, getErr
@@ -134,7 +147,7 @@ func (r *Runtime) ExecuteBuiltin(ctx context.Context, targetID, pattern, pipelin
 }
 
 // ExecuteScenario runs a strict custom document through the identical safety lifecycle as built-ins.
-func (r *Runtime) ExecuteScenario(ctx context.Context, targetID string, document scenario.Scenario, pipelineMode string, labelsSurvived bool) (domain.Run, error) {
+func (r *Runtime) ExecuteScenario(ctx context.Context, targetID string, document scenario.Scenario, pipelineMode string) (domain.Run, error) {
 	r.runMu.Lock()
 	defer r.runMu.Unlock()
 	target, err := r.GetTarget(ctx, targetID)
@@ -153,7 +166,8 @@ func (r *Runtime) ExecuteScenario(ctx context.Context, targetID string, document
 	if err != nil {
 		return run, err
 	}
-	executeErr := runner.New(r.database, client, runner.Options{}).Execute(ctx, run, plan, runner.CapabilitySnapshot{APIProfile: target.APIProfile, PipelineMode: pipelineMode, Ready: true, LabelsSurvived: labelsSurvived, Compatibility: true})
+	diagnostic := r.diagnose(ctx, client, target, run, plan, pipelineMode)
+	executeErr := runner.New(r.database, client, runner.Options{}).Execute(ctx, run, plan, diagnostic.snapshot())
 	stored, getErr := r.GetRun(context.Background(), run.ID)
 	if getErr != nil {
 		return run, getErr
@@ -163,7 +177,7 @@ func (r *Runtime) ExecuteScenario(ctx context.Context, targetID string, document
 
 // StartBuiltin validates and persists a queued run, then executes independently
 // from the initiating browser request. The process root context still controls shutdown.
-func (r *Runtime) StartBuiltin(ctx context.Context, targetID, pattern, pipelineMode string, labelsSurvived bool) (domain.Run, error) {
+func (r *Runtime) StartBuiltin(ctx context.Context, targetID, pattern, pipelineMode string) (domain.Run, error) {
 	target, err := r.GetTarget(ctx, targetID)
 	if err != nil {
 		return domain.Run{}, err
@@ -186,10 +200,64 @@ func (r *Runtime) StartBuiltin(ctx context.Context, targetID, pattern, pipelineM
 	go func() {
 		r.runMu.Lock()
 		defer r.runMu.Unlock()
+		diagnostic := r.diagnose(r.rootCtx, client, target, run, plan, pipelineMode)
 		engine := runner.New(r.database, client, runner.Options{})
-		_ = engine.Execute(r.rootCtx, run, plan, runner.CapabilitySnapshot{APIProfile: target.APIProfile, PipelineMode: pipelineMode, Ready: true, LabelsSurvived: labelsSurvived, Compatibility: true})
+		_ = engine.Execute(r.rootCtx, run, plan, diagnostic.snapshot())
 	}()
 	return run, nil
+}
+
+// Doctor performs the same rule-schema and label-survival preflight used by execution.
+func (r *Runtime) Doctor(ctx context.Context, targetID, pipelineMode string) (Diagnostic, error) {
+	target, err := r.GetTarget(ctx, targetID)
+	if err != nil {
+		return Diagnostic{}, err
+	}
+	id, err := domain.NewRunID(rand.Reader)
+	if err != nil {
+		return Diagnostic{}, err
+	}
+	run := domain.Run{ID: id.String(), ShortToken: id.Short()}
+	plan, err := compiler.Compile(run, scenario.Builtin("flood"), compiler.Capabilities{PipelineMode: pipelineMode})
+	if err != nil {
+		return Diagnostic{}, err
+	}
+	client, err := oscar.New(target, oscar.Options{HarnessVersion: r.version})
+	if err != nil {
+		return Diagnostic{}, err
+	}
+	return r.diagnose(ctx, client, target, run, plan, pipelineMode), nil
+}
+
+func (r *Runtime) diagnose(ctx context.Context, client *oscar.Client, target domain.Target, run domain.Run, plan compiler.Plan, pipelineMode string) Diagnostic {
+	result := Diagnostic{TargetID: target.ID, APIProfile: target.APIProfile, PipelineMode: pipelineMode}
+	if len(plan.Cases) == 0 {
+		result.Detail = "compiled plan contained no validation rule"
+		return result
+	}
+	if err := client.ValidateRule(ctx, plan.Cases[0].Rule); err != nil {
+		result.Detail = err.Error()
+		return result
+	}
+	result.RuleValidation = true
+	probeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	probe, err := client.ProbeLabelSurvival(probeCtx, run.ID, run.ShortToken)
+	result.LabelProbe = probe
+	if err != nil {
+		result.Detail = err.Error()
+		return result
+	}
+	result.Compatible = probe.Accepted && probe.HistoryFound && probe.Fingerprint != "" && len(probe.MissingLabels) == 0
+	if !result.Compatible {
+		result.Detail = "public-v1 injection/history did not preserve the reserved identity contract"
+	}
+	return result
+}
+
+func (diagnostic Diagnostic) snapshot() runner.CapabilitySnapshot {
+	return runner.CapabilitySnapshot{APIProfile: diagnostic.APIProfile, PipelineMode: diagnostic.PipelineMode,
+		Ready: diagnostic.RuleValidation, LabelsSurvived: diagnostic.Compatible, Compatibility: diagnostic.Compatible, ReadinessDetail: diagnostic.Detail}
 }
 
 // Readiness returns the immutable startup readiness snapshot.

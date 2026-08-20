@@ -39,7 +39,7 @@ func TestScenarioListPlanAndRunCommandsShareRuntimeContracts(t *testing.T) {
 	}{
 		{[]string{"scenario", "list", "--output", "json"}, `"pattern":"parent_child"`},
 		{[]string{"plan", "builtin:flood", "--target", "tgt_lab", "--pipeline-mode", "phase_b_dispatch", "--output", "json"}, `"mutationBudget"`},
-		{[]string{"run", "builtin:flood", "--target", "tgt_lab", "--pipeline-mode", "phase_b_dispatch", "--labels-survived", "--output", "json"}, completed.ID},
+		{[]string{"run", "builtin:flood", "--target", "tgt_lab", "--pipeline-mode", "phase_b_dispatch", "--output", "json"}, completed.ID},
 	}
 	for _, test := range tests {
 		var stdout, stderr bytes.Buffer
@@ -197,14 +197,14 @@ func (f *fakeRuntime) Close() error                                { f.closed = 
 func (f *fakeRuntime) PreviewBuiltin(_ context.Context, targetID, pattern, mode string) (compiler.Plan, error) {
 	return compiler.Plan{APIVersion: outputAPIVersion, Pattern: pattern, RunID: "preview", MutationBudget: compiler.MutationBudget{Rules: 2, Alerts: 9}}, nil
 }
-func (f *fakeRuntime) ExecuteBuiltin(_ context.Context, targetID, pattern, mode string, labelsSurvived bool) (domain.Run, error) {
+func (f *fakeRuntime) ExecuteBuiltin(_ context.Context, targetID, pattern, mode string) (domain.Run, error) {
 	return f.executedRun, nil
 }
 func (f *fakeRuntime) PreviewScenario(_ context.Context, targetID string, document scenario.Scenario, mode string) (compiler.Plan, error) {
 	f.customScenario = document
 	return compiler.Plan{APIVersion: outputAPIVersion, Pattern: document.Pattern, RunID: "preview"}, nil
 }
-func (f *fakeRuntime) ExecuteScenario(_ context.Context, targetID string, document scenario.Scenario, mode string, labelsSurvived bool) (domain.Run, error) {
+func (f *fakeRuntime) ExecuteScenario(_ context.Context, targetID string, document scenario.Scenario, mode string) (domain.Run, error) {
 	f.customScenario = document
 	return f.executedRun, nil
 }

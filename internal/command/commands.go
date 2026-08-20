@@ -10,6 +10,7 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/evidence"
+	appruntime "github.com/cmetech/oscar-corrtest/internal/runtime"
 )
 
 const outputAPIVersion = "corrtest.oscar/v1alpha1"
@@ -28,6 +29,55 @@ func (a *App) runTarget(ctx context.Context, args []string) int {
 		fmt.Fprintf(a.stderr, "unknown target command %q\n", args[0])
 		return 2
 	}
+}
+
+type doctorRuntime interface {
+	Doctor(context.Context, string, string) (appruntime.Diagnostic, error)
+}
+
+func (a *App) runDoctor(ctx context.Context, args []string) int {
+	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	flags.SetOutput(a.stderr)
+	configPath, dataDir := commonConfigFlags(flags)
+	target := flags.String("target", "", "target ID")
+	mode := flags.String("pipeline-mode", "", "phase_a_audit_only or phase_b_dispatch")
+	output := flags.String("output", "human", "human or json")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 || *target == "" || !validPipelineMode(*mode) || !validOutput(*output) {
+		fmt.Fprintln(a.stderr, "usage: oscar-corrtest doctor --target <id> --pipeline-mode <mode> [--output human|json]")
+		return 2
+	}
+	runtime, code := a.openRuntime(ctx, config.Overrides{ConfigPath: *configPath, DataDir: *dataDir})
+	if code != 0 {
+		return code
+	}
+	defer runtime.Close()
+	doctor, ok := runtime.(doctorRuntime)
+	if !ok {
+		fmt.Fprintln(a.stderr, "target diagnostics are unavailable")
+		return 1
+	}
+	result, err := doctor.Doctor(ctx, *target, *mode)
+	if err != nil {
+		fmt.Fprintf(a.stderr, "doctor: %v\n", err)
+		return 3
+	}
+	if *output == "json" {
+		if code := a.writeJSON(result); code != 0 {
+			return code
+		}
+	} else {
+		fmt.Fprintf(a.stdout, "Target: %s\nRule validation: %t\nReserved labels survived: %t\nCompatible: %t\n", result.TargetID, result.RuleValidation, result.Compatible, result.Compatible)
+		if result.Detail != "" {
+			fmt.Fprintf(a.stdout, "Detail: %s\n", result.Detail)
+		}
+	}
+	if !result.Compatible {
+		return 2
+	}
+	return 0
 }
 
 func (a *App) runTargetAdd(ctx context.Context, args []string) int {

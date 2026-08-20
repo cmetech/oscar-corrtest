@@ -125,7 +125,7 @@ func TestStartBuiltinRejectsUnknownTargetWithoutCreatingRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = runtime.Close() })
-	if _, err := runtime.StartBuiltin(context.Background(), "tgt_missing", "flood", "phase_b_dispatch", true); err == nil {
+	if _, err := runtime.StartBuiltin(context.Background(), "tgt_missing", "flood", "phase_b_dispatch"); err == nil {
 		t.Fatal("unknown target accepted")
 	}
 	runs, err := runtime.ListRuns(context.Background(), domain.RunFilter{})

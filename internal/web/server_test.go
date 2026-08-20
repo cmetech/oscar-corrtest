@@ -211,7 +211,7 @@ func TestRunTestPageStartsBackgroundRunWithCSRF(t *testing.T) {
 	if len(match) != 2 {
 		t.Fatal("CSRF token missing")
 	}
-	values := url.Values{"csrf_token": {match[1]}, "target_id": {"tgt_lab"}, "pattern": {"flood"}, "pipeline_mode": {"phase_b_dispatch"}, "labels_survived": {"on"}}
+	values := url.Values{"csrf_token": {match[1]}, "target_id": {"tgt_lab"}, "pattern": {"flood"}, "pipeline_mode": {"phase_b_dispatch"}}
 	post := httptest.NewRequest(http.MethodPost, "http://example.com/runs", strings.NewReader(values.Encode()))
 	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	post.Header.Set("Origin", "http://example.com")
@@ -221,7 +221,7 @@ func TestRunTestPageStartsBackgroundRunWithCSRF(t *testing.T) {
 	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/runs/crt_ui" {
 		t.Fatalf("POST status=%d location=%q body=%s", response.Code, response.Header().Get("Location"), response.Body.String())
 	}
-	if data.pattern != "flood" || !data.labelsSurvived {
+	if data.pattern != "flood" {
 		t.Fatalf("start args=%+v", data)
 	}
 }
@@ -356,16 +356,15 @@ func (missingArtifactData) GetRun(context.Context, string) (domain.Run, error) {
 
 type runUIData struct {
 	diagnosticData
-	pattern        string
-	labelsSurvived bool
+	pattern string
 }
 
 func (d *runUIData) ReadyStatus() (bool, string) { return true, "" }
 func (d *runUIData) ListTargets(context.Context) ([]domain.Target, error) {
 	return []domain.Target{{ID: "tgt_lab", DisplayName: "Lab", BaseURL: "https://oscar.example"}}, nil
 }
-func (d *runUIData) StartBuiltin(_ context.Context, targetID, pattern, mode string, labelsSurvived bool) (domain.Run, error) {
-	d.pattern, d.labelsSurvived = pattern, labelsSurvived
+func (d *runUIData) StartBuiltin(_ context.Context, targetID, pattern, mode string) (domain.Run, error) {
+	d.pattern = pattern
 	return domain.Run{ID: "crt_ui", ShortToken: "00000001", Status: domain.RunQueued, CleanupStatus: domain.CleanupNotRequired}, nil
 }
 

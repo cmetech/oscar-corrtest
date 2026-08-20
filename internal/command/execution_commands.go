@@ -15,12 +15,12 @@ import (
 
 type correlationRuntime interface {
 	PreviewBuiltin(context.Context, string, string, string) (compiler.Plan, error)
-	ExecuteBuiltin(context.Context, string, string, string, bool) (domain.Run, error)
+	ExecuteBuiltin(context.Context, string, string, string) (domain.Run, error)
 }
 
 type customCorrelationRuntime interface {
 	PreviewScenario(context.Context, string, scenario.Scenario, string) (compiler.Plan, error)
-	ExecuteScenario(context.Context, string, scenario.Scenario, string, bool) (domain.Run, error)
+	ExecuteScenario(context.Context, string, scenario.Scenario, string) (domain.Run, error)
 }
 
 func (a *App) runScenario(_ context.Context, args []string) int {
@@ -113,7 +113,6 @@ func (a *App) runPlanOrExecute(ctx context.Context, args []string, execute bool)
 	configPath, dataDir := commonConfigFlags(flags)
 	target := flags.String("target", "", "target ID")
 	mode := flags.String("pipeline-mode", "", "publication_disabled, phase_a_audit_only, phase_b_dispatch, or unknown")
-	labelsSurvived := flags.Bool("labels-survived", false, "declare a successful reserved-label round trip")
 	output := flags.String("output", "human", "human or json")
 	source := ""
 	parseArgs := args
@@ -127,7 +126,7 @@ func (a *App) runPlanOrExecute(ctx context.Context, args []string, execute bool)
 		source = flags.Arg(0)
 	}
 	if flags.NArg() > 1 || source == "" || *target == "" || !validOutput(*output) {
-		fmt.Fprintf(a.stderr, "usage: oscar-corrtest %s <builtin:pattern|scenario-file> --target <id> --pipeline-mode <mode> [--labels-survived]\n", name)
+		fmt.Fprintf(a.stderr, "usage: oscar-corrtest %s <builtin:pattern|scenario-file> --target <id> --pipeline-mode <mode>\n", name)
 		return 2
 	}
 	builtin := strings.HasPrefix(source, "builtin:")
@@ -185,9 +184,9 @@ func (a *App) runPlanOrExecute(ctx context.Context, args []string, execute bool)
 	var run domain.Run
 	var err error
 	if builtin {
-		run, err = execution.ExecuteBuiltin(ctx, *target, pattern, *mode, *labelsSurvived)
+		run, err = execution.ExecuteBuiltin(ctx, *target, pattern, *mode)
 	} else if customExecution, ok := application.(customCorrelationRuntime); ok {
-		run, err = customExecution.ExecuteScenario(ctx, *target, custom, *mode, *labelsSurvived)
+		run, err = customExecution.ExecuteScenario(ctx, *target, custom, *mode)
 	} else {
 		err = fmt.Errorf("custom scenario execution is unavailable")
 	}

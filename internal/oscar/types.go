@@ -66,6 +66,15 @@ type NotificationRecord struct {
 	Labels           map[string]string `json:"labels,omitempty"`
 }
 
+// LabelProbeResult records transport acceptance and authoritative history read-back.
+type LabelProbeResult struct {
+	Accepted      bool              `json:"accepted"`
+	HistoryFound  bool              `json:"historyFound"`
+	Fingerprint   string            `json:"fingerprint,omitempty"`
+	Labels        map[string]string `json:"labels,omitempty"`
+	MissingLabels []string          `json:"missingLabels,omitempty"`
+}
+
 // MachineError preserves safe HTTP failure metadata without credentials.
 type MachineError struct {
 	Operation  string

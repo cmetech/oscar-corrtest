@@ -55,7 +55,7 @@ func TestPublicV1RuleLifecycleUsesCreateReadDeleteOnly(t *testing.T) {
 	}
 }
 
-func TestInjectClassifiesResponseAndNeverSuppliesFingerprint(t *testing.T) {
+func TestInjectClassifiesResponseAndKeepsTransportFingerprintNonAuthoritative(t *testing.T) {
 	server := testoscar.New(t)
 	server.Enqueue(testoscar.Response{Status: 200, Body: `{"status":"accepted","task_id":"job-1"}`})
 	client := newClient(t, server.URL())
@@ -68,8 +68,8 @@ func TestInjectClassifiesResponseAndNeverSuppliesFingerprint(t *testing.T) {
 	if request.Path != "/api/v1/alerts" {
 		t.Fatalf("path=%q", request.Path)
 	}
-	if strings.Contains(strings.ToLower(request.Body), "fingerprint") || strings.Contains(request.Body, "am_fingerprint") {
-		t.Fatalf("client fingerprint leaked into payload: %s", request.Body)
+	if strings.Contains(request.Body, "oscar_fingerprint") || strings.Contains(request.Body, "am_fingerprint") {
+		t.Fatalf("authoritative fingerprint label leaked into payload: %s", request.Body)
 	}
 	var body map[string]any
 	if err := json.Unmarshal([]byte(request.Body), &body); err != nil {
@@ -77,6 +77,19 @@ func TestInjectClassifiesResponseAndNeverSuppliesFingerprint(t *testing.T) {
 	}
 	if _, ok := body["groupKey"]; !ok {
 		t.Fatalf("missing Alertmanager group envelope: %v", body)
+	}
+	alerts := body["alerts"].([]any)
+	if alerts[0].(map[string]any)["fingerPrint"] == "" {
+		t.Fatalf("missing required Alertmanager transport fingerprint: %v", body)
+	}
+}
+
+func TestInjectRecognizesCurrentOscarAsyncResponse(t *testing.T) {
+	server := testoscar.New(t)
+	server.Enqueue(testoscar.Response{Status: 200, Body: `{"id":"11111111-1111-1111-1111-111111111111","status":"Alert group processing initiated in async mode"}`})
+	result, err := newClient(t, server.URL()).Inject(context.Background(), compiler.AlertPlan{Name: "A", Status: "firing", Labels: map[string]string{"alertname": "A"}})
+	if err != nil || result.Class != oscar.InjectionAccepted || result.TaskID == "" {
+		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }
 
@@ -104,6 +117,17 @@ func TestUnknownSuccessfulInjectionIsIndeterminate(t *testing.T) {
 	server.Enqueue(testoscar.Response{Status: 200, Body: `{"message":"queued somewhere"}`})
 	result, err := newClient(t, server.URL()).Inject(context.Background(), compiler.AlertPlan{Name: "A", Status: "firing", Labels: map[string]string{"alertname": "A"}})
 	if err != nil || result.Class != oscar.InjectionIndeterminate {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
+func TestLabelProbeRequiresUniqueHistoryAndEveryReservedLabel(t *testing.T) {
+	server := testoscar.New(t)
+	server.Enqueue(testoscar.Response{Status: 200, Body: `{"status":"accepted","task_id":"probe-1"}`})
+	server.Enqueue(testoscar.Response{Status: 200, Body: `{"total_records":1,"total_pages":1,"page":1,"per_page":100,"records":[{"ID":"11111111-1111-1111-1111-111111111111","alertname":"CORRTEST_PROBE_P00_SOURCE_7Q9K2M4A","fingerprint":"server-probe-fp","status":"firing","createdAt":"2026-08-20T00:00:01Z","labels":[{"Label":"alertname","Value":"CORRTEST_PROBE_P00_SOURCE_7Q9K2M4A"},{"Label":"oscar_test_run_id","Value":"crt_abc"}],"annotations":[]}]}`})
+	client := newClient(t, server.URL())
+	result, err := client.ProbeLabelSurvival(context.Background(), "crt_abc", "7Q9K2M4A")
+	if err != nil || !result.Accepted || !result.HistoryFound || result.Fingerprint != "server-probe-fp" || len(result.MissingLabels) == 0 {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }

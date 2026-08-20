@@ -1,5 +1,5 @@
 {{define "run-test"}}
-<section class="page-heading"><p class="eyebrow">Deterministic black-box proof</p><h1>Run correlation test</h1><p>Review the target, pipeline mode, label-survival qualification, and mutation scope before starting.</p></section>
+<section class="page-heading"><p class="eyebrow">Deterministic black-box proof</p><h1>Run correlation test</h1><p>Review the target, pipeline mode, and mutation scope. The harness runs its rule-schema and reserved-label preflight automatically.</p></section>
 {{if .Error}}<div class="notice notice--error" role="alert">{{.Error}}</div>{{end}}
 <section class="panel">
   <form method="post" action="/runs" class="form-grid">
@@ -7,7 +7,6 @@
     <label>Target<select name="target_id" required>{{range .Targets}}<option value="{{.ID}}">{{.DisplayName}} — {{.BaseURL}}</option>{{end}}</select></label>
     <label>Pattern<select name="pattern" required>{{range .Scenarios}}<option value="{{.Pattern}}">{{.Pattern}} — {{len .Cases}} cases</option>{{end}}</select></label>
     <label>Pipeline mode<select name="pipeline_mode" required><option value="phase_b_dispatch">Phase B — audit and dispatch</option><option value="phase_a_audit_only">Phase A — audit only (cannot pass dispatch assertions)</option></select></label>
-    <label><input type="checkbox" name="labels_survived" required> Reserved labels survived a public-v1 injection/history probe</label>
     <button type="submit">Start run</button>
   </form>
 </section>

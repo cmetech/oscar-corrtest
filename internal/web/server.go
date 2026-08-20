@@ -72,7 +72,7 @@ type readinessView struct {
 type nonceFunc func() (string, error)
 
 type runStarter interface {
-	StartBuiltin(context.Context, string, string, string, bool) (domain.Run, error)
+	StartBuiltin(context.Context, string, string, string) (domain.Run, error)
 }
 
 // NewHandler returns the Plan-1 shell with no durable data source.
@@ -226,7 +226,7 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 			http.Error(w, "pipeline mode is invalid", http.StatusUnprocessableEntity)
 			return
 		}
-		run, err := starter.StartBuiltin(r.Context(), r.FormValue("target_id"), r.FormValue("pattern"), mode, r.FormValue("labels_survived") == "on")
+		run, err := starter.StartBuiltin(r.Context(), r.FormValue("target_id"), r.FormValue("pattern"), mode)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 			return

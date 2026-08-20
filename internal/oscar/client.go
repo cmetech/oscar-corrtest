@@ -3,8 +3,10 @@ package oscar
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +29,7 @@ type Options struct {
 	Getenv         func(string) string
 	HTTPClient     *http.Client
 	HarnessVersion string
+	PollInterval   time.Duration
 }
 
 type Client struct {
@@ -33,6 +37,7 @@ type Client struct {
 	http           *http.Client
 	credential     string
 	harnessVersion string
+	pollInterval   time.Duration
 }
 
 func New(target domain.Target, options Options) (*Client, error) {
@@ -71,7 +76,11 @@ func New(target domain.Target, options Options) (*Client, error) {
 		transport.TLSClientConfig = tlsConfig
 		httpClient = &http.Client{Transport: transport, Timeout: 30 * time.Second}
 	}
-	return &Client{baseURL: baseURL, http: httpClient, credential: credential, harnessVersion: options.HarnessVersion}, nil
+	pollInterval := options.PollInterval
+	if pollInterval <= 0 {
+		pollInterval = time.Second
+	}
+	return &Client{baseURL: baseURL, http: httpClient, credential: credential, harnessVersion: options.HarnessVersion, pollInterval: pollInterval}, nil
 }
 
 func resolveCredential(reference domain.CredentialRef, getenv func(string) string) (string, error) {
@@ -149,10 +158,14 @@ func (c *Client) DeleteRule(ctx context.Context, id int) error {
 }
 
 func (c *Client) Inject(ctx context.Context, alert compiler.AlertPlan) (InjectionResult, error) {
+	transportFingerprint, err := alertmanagerTransportFingerprint(alert.Labels)
+	if err != nil {
+		return InjectionResult{}, err
+	}
 	payload := map[string]any{
 		"receiver": "oscar-corrtest", "status": alert.Status, "groupKey": alert.Labels["oscar_test_run_id"] + ":" + alert.Name,
 		"groupLabels": map[string]string{"alertname": alert.Name}, "commonLabels": alert.Labels,
-		"commonAnnotations": alert.Annotations, "alerts": []any{map[string]any{"status": alert.Status, "labels": alert.Labels, "annotations": alert.Annotations}},
+		"commonAnnotations": alert.Annotations, "alerts": []any{map[string]any{"fingerPrint": transportFingerprint, "status": alert.Status, "labels": alert.Labels, "annotations": alert.Annotations}},
 	}
 	status, raw, err := c.do(ctx, http.MethodPost, "/api/v1/alerts", nil, payload)
 	if err != nil {
@@ -162,12 +175,16 @@ func (c *Client) Inject(ctx context.Context, alert compiler.AlertPlan) (Injectio
 	var response struct {
 		Status   string `json:"status"`
 		TaskID   string `json:"task_id"`
+		ID       string `json:"id"`
 		Accepted *int   `json:"accepted"`
 		Rejected *int   `json:"rejected"`
 		Queued   *bool  `json:"queued"`
 	}
 	if json.Unmarshal(raw, &response) == nil {
 		result.TaskID = response.TaskID
+		if result.TaskID == "" {
+			result.TaskID = response.ID
+		}
 		switch strings.ToLower(response.Status) {
 		case "accepted", "scheduled", "success", "ok":
 			result.Class = InjectionAccepted
@@ -178,6 +195,9 @@ func (c *Client) Inject(ctx context.Context, alert compiler.AlertPlan) (Injectio
 		case "partial", "partially_accepted":
 			result.Class = InjectionPartial
 		}
+		if response.ID != "" && strings.EqualFold(response.Status, "Alert group processing initiated in async mode") {
+			result.Class = InjectionAccepted
+		}
 		if response.Accepted != nil && response.Rejected != nil && *response.Rejected > 0 {
 			result.Class = InjectionPartial
 		}
@@ -186,6 +206,30 @@ func (c *Client) Inject(ctx context.Context, alert compiler.AlertPlan) (Injectio
 		}
 	}
 	return result, nil
+}
+
+// alertmanagerTransportFingerprint satisfies OSCAR's current webhook envelope.
+// It is deliberately not the OSCAR fingerprint and is never used as an assertion key.
+func alertmanagerTransportFingerprint(labels map[string]string) (string, error) {
+	if len(labels) == 0 {
+		return "", fmt.Errorf("alert labels are required")
+	}
+	keys := make([]string, 0, len(labels))
+	for key := range labels {
+		if key == "oscar_fingerprint" || key == "am_fingerprint" {
+			return "", fmt.Errorf("pre-stamped fingerprint labels are forbidden")
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	hash := sha256.New()
+	for _, key := range keys {
+		_, _ = io.WriteString(hash, key)
+		_, _ = hash.Write([]byte{0})
+		_, _ = io.WriteString(hash, labels[key])
+		_, _ = hash.Write([]byte{0})
+	}
+	return hex.EncodeToString(hash.Sum(nil))[:16], nil
 }
 
 func (c *Client) FindHistory(ctx context.Context, query HistoryQuery) ([]HistoryRecord, error) {
@@ -244,6 +288,55 @@ func (c *Client) NotificationAudit(ctx context.Context, fingerprint string, star
 		}
 	}
 	return result, nil
+}
+
+// ProbeLabelSurvival injects one diagnostic alert and reads its server identity
+// back from history. It creates no rule and never trusts the transport fingerprint.
+func (c *Client) ProbeLabelSurvival(ctx context.Context, runID, shortToken string) (LabelProbeResult, error) {
+	name := "CORRTEST_PROBE_P00_SOURCE_" + strings.ToUpper(shortToken)
+	labels := map[string]string{
+		"alertname": name, "category": "corrtest_probe", "oscar_test": "true", "oscar_test_harness": "corrtest",
+		"oscar_test_schema_version": "v1", "oscar_test_run_id": runID, "oscar_test_run_short": strings.ToUpper(shortToken),
+		"oscar_test_suite": "diagnostic", "oscar_test_scenario": "label-survival", "oscar_test_pattern": "probe",
+		"oscar_test_case": "label-survival", "oscar_test_case_code": "P00", "oscar_test_polarity": "diagnostic",
+		"oscar_test_alert_class": "source", "oscar_test_alert_role": "probe", "oscar_test_rule_name": "none", "severity": "warning",
+	}
+	result, err := c.Inject(ctx, compiler.AlertPlan{Name: name, Status: "firing", Labels: labels, Annotations: map[string]string{"summary": "[CORRTEST][PROBE] reserved label survival"}})
+	if err != nil {
+		return LabelProbeResult{}, err
+	}
+	probe := LabelProbeResult{Accepted: result.Class == InjectionAccepted}
+	if !probe.Accepted {
+		return probe, nil
+	}
+	start := time.Now().UTC().Add(-5 * time.Second)
+	for {
+		records, findErr := c.FindHistory(ctx, HistoryQuery{AlertName: name, Start: start, End: time.Now().UTC().Add(time.Minute)})
+		if findErr != nil {
+			return probe, findErr
+		}
+		if len(records) == 1 {
+			probe.HistoryFound, probe.Fingerprint, probe.Labels = true, records[0].Fingerprint, records[0].Labels
+			for key, value := range labels {
+				if key == "severity" {
+					continue
+				}
+				if records[0].Labels[key] != value {
+					probe.MissingLabels = append(probe.MissingLabels, key)
+				}
+			}
+			sort.Strings(probe.MissingLabels)
+			return probe, nil
+		}
+		if len(records) > 1 {
+			return probe, fmt.Errorf("label probe history identity was not unique")
+		}
+		select {
+		case <-ctx.Done():
+			return probe, ctx.Err()
+		case <-time.After(c.pollInterval):
+		}
+	}
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path string, query url.Values, input, output any) error {
