@@ -126,6 +126,7 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 				labels[key] = value
 			}
 			name := names[event.Role]
+			labels["alertname"] = name
 			item.Alerts = append(item.Alerts, AlertPlan{Name: name, Status: event.Status, Labels: labels, Delay: event.Delay, Annotations: map[string]string{"oscar_test_event_id": fmt.Sprintf("%s-%s-%03d", run.ID, caseCode, index+1), "oscar_test_event_index": fmt.Sprintf("%d", index+1), "summary": fmt.Sprintf("[CORRTEST][%s][%s][%s] source alert %d of %d", patternCode, caseCode, short, index+1, len(events))}})
 		}
 		alertNames := uniqueNames(names)
@@ -166,21 +167,28 @@ func matchCriteria(pattern string, names map[string]string) map[string]any {
 	}
 	switch pattern {
 	case "flood":
-		return map[string]any{"alertname": first(), "min_count": 5}
+		return map[string]any{"match": map[string]string{"alertname": first()}, "min_count": 5}
 	case "co_occurrence":
-		return map[string]any{"alertnames": uniqueNames(names)}
+		matches := make([]any, 0, len(names))
+		for _, name := range uniqueNames(names) {
+			matches = append(matches, map[string]string{"alertname": name})
+		}
+		return map[string]any{"required_matches": matches, "min_matches": len(matches)}
 	case "sequence":
 		return map[string]any{"sequence": []any{map[string]string{"alertname": names["login_failure"]}, map[string]string{"alertname": names["privileged_command"]}}}
 	case "cross_source":
-		return map[string]any{"alertnames": uniqueNames(names), "sources": []string{"snmp", "api"}}
+		return map[string]any{"required_sources": []any{
+			map[string]any{"source": "snmp", "match": map[string]string{"alertname": first()}},
+			map[string]any{"source": "api", "match": map[string]string{"alertname": first()}},
+		}}
 	case "threshold":
-		return map[string]any{"alertname": first(), "distinct_label": "device", "min_distinct": 3}
+		return map[string]any{"match": map[string]string{"alertname": first()}, "distinct_label": "device", "min_distinct_count": 3}
 	case "persistence":
-		return map[string]any{"alertname": first(), "unresolved_for_seconds": 30}
+		return map[string]any{"match": map[string]string{"alertname": first()}, "unresolved_for_seconds": 30}
 	case "absence":
-		return map[string]any{"alertname": first(), "absent_for_seconds": 30}
+		return map[string]any{"expected_match": map[string]string{"alertname": first()}, "expected_every_seconds": 10, "absent_for_seconds": 30}
 	case "parent_child":
-		return map[string]any{"parent": map[string]string{"alertname": names["parent"]}, "child": map[string]string{"alertname": names["child"]}, "suppress_for_notifiers": []string{"email"}}
+		return map[string]any{"parent_match": map[string]string{"alertname": names["parent"]}, "child_matches": []any{map[string]string{"alertname": names["child"]}}, "suppress_children_for_notifiers": []string{"email"}, "tag_children_for_notifiers": []string{}}
 	default:
 		return nil
 	}

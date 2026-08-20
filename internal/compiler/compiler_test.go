@@ -23,6 +23,9 @@ func TestCompileFloodBuildsInspectableIsolatedCases(t *testing.T) {
 		t.Fatalf("positive=%+v", positive)
 	}
 	alert := positive.Alerts[0]
+	if alert.Labels["alertname"] != alert.Name {
+		t.Fatalf("physical alertname label=%q name=%q", alert.Labels["alertname"], alert.Name)
+	}
 	if alert.Name != "CORRTEST_FLOOD_P01_INTERFACEDOWN_7Q9K2M4A" {
 		t.Fatalf("alert name=%q", alert.Name)
 	}

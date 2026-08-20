@@ -68,3 +68,36 @@ func TestPatternStimuliEncodeCurrentOscarSemantics(t *testing.T) {
 		t.Fatalf("parent-child plan=%+v", parentChild.Cases[0])
 	}
 }
+
+func TestCompiledMatchCriteriaMirrorOSCARPublicV1Schemas(t *testing.T) {
+	run := domain.Run{ID: "crt_0123456789ABCDEFGHJKMNPQRS", ShortToken: "7Q9K2M4A"}
+	tests := []struct {
+		pattern string
+		keys    []string
+	}{
+		{"flood", []string{"match", "min_count"}},
+		{"co_occurrence", []string{"required_matches", "min_matches"}},
+		{"sequence", []string{"sequence"}},
+		{"persistence", []string{"match", "unresolved_for_seconds"}},
+		{"absence", []string{"expected_match", "expected_every_seconds", "absent_for_seconds"}},
+		{"parent_child", []string{"parent_match", "child_matches", "suppress_children_for_notifiers", "tag_children_for_notifiers"}},
+		{"cross_source", []string{"required_sources"}},
+		{"threshold", []string{"match", "distinct_label", "min_distinct_count"}},
+	}
+	for _, test := range tests {
+		plan, err := compiler.Compile(run, scenario.Builtin(test.pattern), compiler.Capabilities{PipelineMode: "phase_b_dispatch"})
+		if err != nil {
+			t.Fatalf("%s: %v", test.pattern, err)
+		}
+		for _, item := range plan.Cases {
+			if len(item.Rule.MatchCriteria) != len(test.keys) {
+				t.Errorf("%s keys=%v want=%v", test.pattern, item.Rule.MatchCriteria, test.keys)
+			}
+			for _, key := range test.keys {
+				if _, ok := item.Rule.MatchCriteria[key]; !ok {
+					t.Errorf("%s missing OSCAR schema key %q: %v", test.pattern, key, item.Rule.MatchCriteria)
+				}
+			}
+		}
+	}
+}
