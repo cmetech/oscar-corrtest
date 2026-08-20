@@ -16,7 +16,7 @@ GOVULNCHECK_VERSION := v1.6.0
 
 .DEFAULT_GOAL := build
 
-.PHONY: tools fmt-check mod-check archive-mod-check vet security test test-race plan2-gate plan3-gate plan4-gate plan5-gate plan6-gate plan7-gate container-check package-content-check reproducible-check release-gate build cross package checksums standalone-check ci-core ci clean
+.PHONY: tools fmt-check mod-check archive-mod-check vet security test test-race plan2-gate plan3-gate plan4-gate plan5-gate plan6-gate plan7-gate container-check release-contract-check package-content-check reproducible-check release-gate build cross package checksums standalone-check ci-core ci clean
 
 tools:
 	mkdir -p "$(TOOLS_DIR)"
@@ -60,7 +60,7 @@ plan4-gate:
 	go test -count=1 ./internal/scenario ./internal/compiler ./internal/runner
 
 plan5-gate:
-	go test -count=1 ./internal/scenario ./internal/compiler ./internal/runner -run 'Persistence|Absence|Timer|Timing|Builtin'
+	./scripts/check-release-contract.sh
 
 plan6-gate:
 	go test -count=1 ./internal/compiler ./internal/oscar ./internal/runner -run 'Parent|Notification|Builtin'
@@ -71,6 +71,10 @@ plan7-gate:
 container-check:
 	grep -q '^FROM scratch$$' Containerfile
 	! grep -Eq '(^|:)latest([[:space:]]|$$)' Containerfile
+	./scripts/check-release-contract.sh
+
+release-contract-check:
+	./scripts/check-release-contract.sh
 
 build:
 	mkdir -p "$(BUILD_DIR)"

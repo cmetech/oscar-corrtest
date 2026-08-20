@@ -34,12 +34,15 @@ jobs:
           }
 
       - name: Verify, build, and package
-        run: make ci
+        run: make clean release-gate
 
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh release create "$GITHUB_REF_NAME"
-          dist/*.tar.gz dist/SHA256SUMS
-          --verify-tag --generate-notes
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/oscar-corrtest_${GITHUB_REF_NAME}_linux_amd64.tar.gz" \
+            "dist/oscar-corrtest_${GITHUB_REF_NAME}_linux_arm64.tar.gz" \
+            dist/SHA256SUMS \
+            --verify-tag --generate-notes

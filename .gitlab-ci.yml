@@ -22,17 +22,23 @@ cache:
 verify:
   stage: verify
   script:
-    - make tools
-    - make ci-core
-    - make standalone-check
+    - make clean release-gate
+  artifacts:
+    name: oscar-corrtest-verified-$CI_COMMIT_SHA
+    expire_in: 14 days
+    when: always
+    paths:
+      - dist/*.tar.gz
+      - dist/SHA256SUMS
 
 package:
   stage: package
   needs:
     - job: verify
+      artifacts: true
   script:
-    - make package
-    - make checksums
+    - ./scripts/check-package.sh dist "$(git describe --tags --always --dirty --match='v[0-9]*' 2>/dev/null || echo 0.0.0-dev)"
+    - cd dist && sha256sum -c SHA256SUMS
   artifacts:
     name: oscar-corrtest-$CI_COMMIT_SHA
     expire_in: 14 days
