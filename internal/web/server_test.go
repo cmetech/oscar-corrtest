@@ -18,8 +18,11 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
+	"github.com/cmetech/oscar-corrtest/internal/envfile"
+	"github.com/cmetech/oscar-corrtest/internal/operations"
 	appruntime "github.com/cmetech/oscar-corrtest/internal/runtime"
 	"github.com/cmetech/oscar-corrtest/internal/scenario"
+	"github.com/cmetech/oscar-corrtest/internal/service"
 	"github.com/cmetech/oscar-corrtest/internal/version"
 )
 
@@ -30,13 +33,13 @@ func TestRequestLogExcludesSecretsAndQuery(t *testing.T) {
 	}
 	defer logs.Close()
 	handler := requestLogger(NewHandler(version.Info{}), logs.Logger("web"))
-	request := httptest.NewRequest(http.MethodGet, "/settings?api_key=query-secret", nil)
+	request := httptest.NewRequest(http.MethodGet, "/?api_key=query-secret", nil)
 	request.Header.Set("Cookie", "corrtest_session=cookie-secret")
 	request.Header.Set("X-API-Key", "header-secret")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	records := logs.Recent(10)
-	if len(records) != 1 || records[0].Attributes["method"] != "GET" || records[0].Attributes["route"] != "/settings" || records[0].Attributes["status"] != "200" {
+	if len(records) != 1 || records[0].Attributes["method"] != "GET" || records[0].Attributes["route"] != "/{$}" || records[0].Attributes["status"] != "200" {
 		t.Fatalf("records=%+v", records)
 	}
 	encoded := records[0].Message
@@ -124,7 +127,6 @@ func TestDurableTargetsRunsAndSettingsPages(t *testing.T) {
 		{"/targets", []string{"Targets", "Lab A", "OSCAR_API_TOKEN"}},
 		{"/runs?status=INTERRUPTED", []string{"Runs", run.ID, "INTERRUPTED"}},
 		{"/runs/" + run.ID, []string{"Run detail", run.ID, "NOT_REQUIRED", "data-run-timeline"}},
-		{"/settings", []string{"Settings", "corrtest.db", "Ready"}},
 	}
 	for _, test := range tests {
 		t.Run(test.path, func(t *testing.T) {
@@ -140,6 +142,14 @@ func TestDurableTargetsRunsAndSettingsPages(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSettingsRedirectsToOperations(t *testing.T) {
+	response := httptest.NewRecorder()
+	NewHandler(version.Info{}).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/settings", nil))
+	if response.Code != http.StatusPermanentRedirect || response.Header().Get("Location") != "/operations" {
+		t.Fatalf("status=%d location=%q", response.Code, response.Header().Get("Location"))
 	}
 }
 
@@ -391,6 +401,71 @@ func TestScenarioWorkbenchPreviewsBuiltinSourceContractAndClone(t *testing.T) {
 		t.Fatalf("cloned items=%+v err=%v", items, err)
 	}
 }
+
+func TestOperationsPageManagesWriteOnlyAPIKeyAndShowsServiceLogs(t *testing.T) {
+	root := t.TempDir()
+	store, err := envfile.Open(filepath.Join(root, ".env"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs, err := applog.Open(filepath.Join(root, "logs"), nil, applog.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer logs.Close()
+	logs.Logger("runtime").Info("runtime ready")
+	settings := config.Settings{ConfigPath: filepath.Join(root, "config.json"), EnvFile: filepath.Join(root, ".env"), DataDir: filepath.Join(root, "data"), LogDir: filepath.Join(root, "logs"), ListenAddress: "127.0.0.1:8787"}
+	controller := operations.New(settings, store, &webOperationsManager{status: service.Status{State: service.StateRunning, Mechanism: "test", PID: 42}}, logs)
+	runtime, err := appruntime.OpenWithOptions(context.Background(), settings, version.Info{Version: "test"}, appruntime.Options{Environment: store, Logs: logs, Operations: controller})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	handler := NewHandlerWithData(version.Info{Version: "test"}, runtime)
+	get := httptest.NewRequest(http.MethodGet, "http://example.com/operations", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, get)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	for _, required := range []string{"Operations", "Not configured", "running", "application.jsonl", "runtime ready", settings.EnvFile} {
+		if !strings.Contains(body, required) {
+			t.Errorf("operations page missing %q", required)
+		}
+	}
+	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(body)
+	if len(match) != 2 {
+		t.Fatal("operations CSRF missing")
+	}
+	const secret = "operations-secret-sentinel"
+	values := url.Values{"csrf_token": {match[1]}, "api_key": {secret}}
+	post := httptest.NewRequest(http.MethodPost, "http://example.com/operations/api-key", strings.NewReader(values.Encode()))
+	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	post.Header.Set("Origin", "http://example.com")
+	post.AddCookie(response.Result().Cookies()[0])
+	saved := httptest.NewRecorder()
+	handler.ServeHTTP(saved, post)
+	if saved.Code != http.StatusSeeOther {
+		t.Fatalf("save status=%d body=%s", saved.Code, saved.Body.String())
+	}
+	configured := httptest.NewRecorder()
+	handler.ServeHTTP(configured, httptest.NewRequest(http.MethodGet, "/operations", nil))
+	if !strings.Contains(configured.Body.String(), "Configured") || strings.Contains(configured.Body.String(), secret) {
+		t.Fatalf("unsafe configured page: %s", configured.Body.String())
+	}
+}
+
+type webOperationsManager struct{ status service.Status }
+
+func (*webOperationsManager) Install(context.Context) error                    { return nil }
+func (*webOperationsManager) Start(context.Context) error                      { return nil }
+func (*webOperationsManager) Stop(context.Context) error                       { return nil }
+func (*webOperationsManager) Restart(context.Context) error                    { return nil }
+func (m *webOperationsManager) Status(context.Context) (service.Status, error) { return m.status, nil }
+func (*webOperationsManager) Logs(context.Context, int, bool) error            { return nil }
+func (*webOperationsManager) Uninstall(context.Context) error                  { return nil }
+func (*webOperationsManager) DefinitionPath() string                           { return "/test/service" }
 
 func TestBearerSecurityProtectsEveryApplicationRoute(t *testing.T) {
 	t.Parallel()

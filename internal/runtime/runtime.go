@@ -27,6 +27,7 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/envfile"
 	"github.com/cmetech/oscar-corrtest/internal/evidence"
 	"github.com/cmetech/oscar-corrtest/internal/history"
+	"github.com/cmetech/oscar-corrtest/internal/operations"
 	"github.com/cmetech/oscar-corrtest/internal/oscar"
 	storage "github.com/cmetech/oscar-corrtest/internal/persistence/sqlite"
 	"github.com/cmetech/oscar-corrtest/internal/runner"
@@ -54,20 +55,21 @@ type Diagnostic struct {
 
 // Runtime owns one process's durable services.
 type Runtime struct {
-	settings  config.Settings
-	database  *storage.Database
-	history   *history.Service
-	artifacts *artifact.Store
-	readiness Readiness
-	version   string
-	getenv    func(string) string
-	logger    *slog.Logger
-	logs      *applog.System
-	runMu     sync.Mutex
-	activeMu  sync.Mutex
-	active    map[string]context.CancelFunc
-	runWG     sync.WaitGroup
-	rootCtx   context.Context
+	settings   config.Settings
+	database   *storage.Database
+	history    *history.Service
+	artifacts  *artifact.Store
+	readiness  Readiness
+	version    string
+	getenv     func(string) string
+	logger     *slog.Logger
+	logs       *applog.System
+	operations *operations.Controller
+	runMu      sync.Mutex
+	activeMu   sync.Mutex
+	active     map[string]context.CancelFunc
+	runWG      sync.WaitGroup
+	rootCtx    context.Context
 }
 
 // Options supplies process-scoped application dependencies.
@@ -75,6 +77,7 @@ type Options struct {
 	Environment *envfile.Store
 	Logger      *slog.Logger
 	Logs        *applog.System
+	Operations  *operations.Controller
 }
 
 // Open initializes local state, migrations, artifact storage, and interrupted-run recovery.
@@ -115,7 +118,7 @@ func OpenWithOptions(ctx context.Context, settings config.Settings, info version
 	}
 	result := &Runtime{
 		settings: settings, database: database, history: service, artifacts: artifacts,
-		readiness: Readiness{Ready: database.Ready() == nil, DatabasePath: databasePath}, version: info.Version, getenv: getenv, logger: logger, logs: options.Logs, rootCtx: ctx,
+		readiness: Readiness{Ready: database.Ready() == nil, DatabasePath: databasePath}, version: info.Version, getenv: getenv, logger: logger, logs: options.Logs, operations: options.Operations, rootCtx: ctx,
 		active: make(map[string]context.CancelFunc),
 	}
 	if readyErr := database.Ready(); readyErr != nil {
@@ -132,6 +135,9 @@ func OpenWithOptions(ctx context.Context, settings config.Settings, info version
 
 // LogSystem returns the process-owned redacted log system when configured.
 func (r *Runtime) LogSystem() *applog.System { return r.logs }
+
+// Operations returns the value-safe operator controller when configured.
+func (r *Runtime) Operations() *operations.Controller { return r.operations }
 
 func (r *Runtime) newOSCARClient(target domain.Target) (*oscar.Client, error) {
 	client, err := oscar.New(target, oscar.Options{HarnessVersion: r.version, Getenv: r.getenv})

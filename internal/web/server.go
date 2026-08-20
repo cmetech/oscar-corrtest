@@ -23,9 +23,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/applog"
 	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/evidence"
+	"github.com/cmetech/oscar-corrtest/internal/operations"
 	appruntime "github.com/cmetech/oscar-corrtest/internal/runtime"
 	"github.com/cmetech/oscar-corrtest/internal/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/version"
@@ -84,6 +86,9 @@ type pageData struct {
 	SelectedName      string
 	SelectedPattern   string
 	SelectedBuiltIn   bool
+	Operations        operations.Snapshot
+	OperationLogs     []applog.Record
+	OperationMessage  string
 }
 
 type readinessView struct {
@@ -125,6 +130,10 @@ type scenarioCatalogItem struct {
 	Pattern  string
 	Kind     string
 	Selected bool
+}
+
+type operationsProvider interface {
+	Operations() *operations.Controller
 }
 
 // NewHandler returns the Plan-1 shell with no durable data source.
@@ -564,8 +573,152 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 			}
 		}
 	})
-	mux.HandleFunc("GET /settings", func(w http.ResponseWriter, _ *http.Request) {
-		render(w, tmpl, nonce, pageData{Version: info, Page: "settings", Readiness: readiness(data)})
+	mux.HandleFunc("GET /operations", func(w http.ResponseWriter, r *http.Request) {
+		controller := operationsController(data)
+		if controller == nil || csrfErr != nil {
+			http.Error(w, "operations unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		snapshot, err := controller.Snapshot(r.Context())
+		if err != nil {
+			http.Error(w, "operations unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		render(w, tmpl, nonce, pageData{Version: info, Page: "operations", Readiness: readiness(data), Operations: snapshot, OperationLogs: controller.RecentLogs(200), OperationMessage: r.URL.Query().Get("message"), CSRFToken: csrfToken(w, r, csrfSecret)})
+	})
+	mux.HandleFunc("POST /operations/api-key", func(w http.ResponseWriter, r *http.Request) {
+		controller := operationsController(data)
+		if controller == nil || csrfErr != nil {
+			http.Error(w, "operations unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid API key form", http.StatusBadRequest)
+			return
+		}
+		if !sameOrigin(r) || !validCSRF(r, csrfSecret) {
+			http.Error(w, "request origin or CSRF token is invalid", http.StatusForbidden)
+			return
+		}
+		if _, err := controller.ReplaceAPIKey(r.Context(), r.FormValue("api_key")); err != nil {
+			http.Error(w, "API key was not saved", http.StatusUnprocessableEntity)
+			return
+		}
+		r.Form = nil
+		r.PostForm = nil
+		http.Redirect(w, r, "/operations?message=api-key-saved", http.StatusSeeOther)
+	})
+	mux.HandleFunc("POST /operations/api-key/clear", func(w http.ResponseWriter, r *http.Request) {
+		controller := operationsController(data)
+		if controller == nil || csrfErr != nil {
+			http.Error(w, "operations unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+		if err := r.ParseForm(); err != nil || !sameOrigin(r) || !validCSRF(r, csrfSecret) {
+			http.Error(w, "request origin or CSRF token is invalid", http.StatusForbidden)
+			return
+		}
+		if _, err := controller.ClearAPIKey(r.Context()); err != nil {
+			http.Error(w, "API key was not cleared", http.StatusUnprocessableEntity)
+			return
+		}
+		http.Redirect(w, r, "/operations?message=api-key-cleared", http.StatusSeeOther)
+	})
+	mux.HandleFunc("POST /operations/service/{action}", func(w http.ResponseWriter, r *http.Request) {
+		controller := operationsController(data)
+		if controller == nil || csrfErr != nil {
+			http.Error(w, "operations unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+		if err := r.ParseForm(); err != nil || !sameOrigin(r) || !validCSRF(r, csrfSecret) {
+			http.Error(w, "request origin or CSRF token is invalid", http.StatusForbidden)
+			return
+		}
+		action := r.PathValue("action")
+		if action == "stop" || action == "restart" {
+			w.Header().Set("Location", "/operations?message=service-"+action+"-requested")
+			w.WriteHeader(http.StatusSeeOther)
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			go func() { _, _ = controller.ServiceAction(context.Background(), action) }()
+			return
+		}
+		if _, err := controller.ServiceAction(r.Context(), action); err != nil {
+			http.Error(w, "service action failed", http.StatusUnprocessableEntity)
+			return
+		}
+		http.Redirect(w, r, "/operations?message=service-"+url.QueryEscape(action)+"-complete", http.StatusSeeOther)
+	})
+	mux.HandleFunc("GET /operations/logs/{source}", func(w http.ResponseWriter, r *http.Request) {
+		controller := operationsController(data)
+		if controller == nil {
+			http.Error(w, "log source unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		file, err := controller.OpenLogSource(r.PathValue("source"))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		defer file.Close()
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, r.PathValue("source")))
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		_, _ = io.Copy(w, file)
+	})
+	mux.HandleFunc("GET /operations/events", func(w http.ResponseWriter, r *http.Request) {
+		controller := operationsController(data)
+		if controller == nil {
+			http.Error(w, "operations unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		flusher, _ := w.(http.Flusher)
+		if snapshot, err := controller.Snapshot(r.Context()); err == nil {
+			writeSSE(w, "service", snapshot.Service)
+		}
+		for _, record := range controller.RecentLogs(200) {
+			writeSSE(w, "log", record)
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+		subscription := controller.SubscribeLogs()
+		defer subscription.Cancel()
+		serviceTicker := time.NewTicker(5 * time.Second)
+		defer serviceTicker.Stop()
+		heartbeat := time.NewTicker(15 * time.Second)
+		defer heartbeat.Stop()
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case record, ok := <-subscription.C:
+				if !ok {
+					return
+				}
+				writeSSE(w, "log", record)
+			case <-serviceTicker.C:
+				if snapshot, err := controller.Snapshot(r.Context()); err == nil {
+					writeSSE(w, "service", snapshot.Service)
+				}
+			case <-heartbeat.C:
+				_, _ = io.WriteString(w, ": ping\n\n")
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+	})
+	mux.HandleFunc("GET /settings", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/operations", http.StatusPermanentRedirect)
 	})
 	mux.HandleFunc("GET /reference", func(w http.ResponseWriter, _ *http.Request) {
 		catalog := defaultHelpCatalog()
@@ -624,6 +777,22 @@ func scenarioWorkbench(ctx context.Context, info version.Info, data DataSource, 
 		}
 	}
 	return view, nil
+}
+
+func operationsController(data DataSource) *operations.Controller {
+	provider, ok := data.(operationsProvider)
+	if !ok {
+		return nil
+	}
+	return provider.Operations()
+}
+
+func writeSSE(w io.Writer, event string, value any) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, encoded)
 }
 
 func render(w http.ResponseWriter, tmpl *template.Template, nonce nonceFunc, data pageData) {

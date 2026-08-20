@@ -13,6 +13,7 @@
   <script defer src="/static/js/run-stream.js"></script>
   <script defer src="/static/js/help.js"></script>
   <script defer src="/static/js/scenarios.js"></script>
+  <script defer src="/static/js/operations.js"></script>
 </head>
 <body>
   <header class="app-header">
@@ -35,7 +36,7 @@
       <a href="/runs"{{if or (eq .Page "runs") (eq .Page "run-detail")}} aria-current="page"{{end}}>Runs</a>
       <a href="/scenarios"{{if eq .Page "scenarios"}} aria-current="page"{{end}}>Scenarios</a>
       <a href="/targets"{{if eq .Page "targets"}} aria-current="page"{{end}}>Targets</a>
-      <a href="/settings"{{if eq .Page "settings"}} aria-current="page"{{end}}>Settings</a>
+      <a href="/operations"{{if eq .Page "operations"}} aria-current="page"{{end}}>Operations</a>
       <a href="/reference"{{if eq .Page "reference"}} aria-current="page"{{end}}>Reference</a>
     </nav>
     <main>
@@ -44,7 +45,7 @@
       {{else if eq .Page "scenarios"}}{{template "scenarios" .}}
       {{else if eq .Page "runs"}}{{template "runs" .}}
       {{else if eq .Page "run-detail"}}{{template "run-detail" .}}
-      {{else if eq .Page "settings"}}{{template "settings" .}}
+      {{else if eq .Page "operations"}}{{template "operations" .}}
       {{else if eq .Page "reference"}}{{template "reference" .}}
       {{else}}{{template "dashboard" .}}{{end}}
     </main>
