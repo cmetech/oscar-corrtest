@@ -27,6 +27,9 @@ rejects unsafe archive members, and atomically replaces only the executable.
 It never starts `serve` or writes configuration, SQLite, evidence, or
 credentials.
 
+When `XDG_BIN_HOME` is set, the default destination is
+`$XDG_BIN_HOME/oscar-corrtest`; otherwise it is the path above.
+
 Pin a release or choose another absolute user-owned destination:
 
 ```sh
@@ -54,7 +57,7 @@ irm https://raw.githubusercontent.com/cmetech/oscar-corrtest/main/scripts/instal
 ```
 
 The default destination is
-`%LOCALAPPDATA%\oscar-corrtest\bin\oscar-corrtest.exe`. The installer verifies
+`%LOCALAPPDATA%\Programs\oscar-corrtest\oscar-corrtest.exe`. The installer verifies
 SHA-256 before replacing the executable and adds that directory to the current
 user's `PATH` when needed. It does not change machine-wide configuration or
 install/start a Windows service.
@@ -112,11 +115,36 @@ oscar-corrtest target list
 oscar-corrtest doctor --target <target-id> --pipeline-mode phase_b_dispatch
 ```
 
-Only the environment-variable name is stored. For persistence across shells,
-put the key in a protected regular file and use
-`--credential-file /absolute/path/to/api-key` instead. A custom `--ca-file` is
-needed only when OSCAR uses a private certificate authority. `--insecure` is a
-diagnostic escape hatch and should not be normal configuration.
+For the simplest persistent setup, start the UI, open **Operations**, and save
+the global key there. It writes only `OSCAR_API_KEY` to:
+
+- Linux/macOS: `$HOME/.config/oscar-corrtest/.env` (or
+  `$XDG_CONFIG_HOME/oscar-corrtest/.env`);
+- Windows: `%LOCALAPPDATA%\oscar-corrtest\.env`.
+
+Targets with no explicit credential reference use this global key. The external
+process environment has startup priority; a live UI replacement applies until
+restart and the page reports when the external value will resume.
+
+To run in the background, use explicit lifecycle commands after installation:
+
+```sh
+oscar-corrtest service install
+oscar-corrtest service start
+oscar-corrtest service status
+oscar-corrtest service logs
+```
+
+`service install` enables login startup but does not start CorrTest now. See
+[service-management.md](service-management.md) for stop, restart, status exit
+codes, Windows behavior, and `service uninstall`.
+
+For advanced per-target overrides, CorrTest stores only the credential
+reference. Use `--credential-env`, `--credential-file`, or the systemd
+credential option when a target must not use the global managed key. A custom
+`--ca-file` is needed only when OSCAR uses a private certificate authority.
+`--insecure` is a diagnostic escape hatch and should not be normal
+configuration.
 
 On PowerShell, the equivalent API-key assignment is:
 
@@ -190,7 +218,7 @@ rm "$HOME/.local/bin/oscar-corrtest"
 ```
 
 On Windows, remove
-`%LOCALAPPDATA%\oscar-corrtest\bin\oscar-corrtest.exe` and optionally remove
+`%LOCALAPPDATA%\Programs\oscar-corrtest\oscar-corrtest.exe` and optionally remove
 that directory from the current-user `PATH`. These steps intentionally preserve
 all corrtest state. Delete the state/configuration directories separately only
 after backing them up and confirming their exact location.

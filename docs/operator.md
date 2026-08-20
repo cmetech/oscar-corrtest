@@ -48,6 +48,25 @@ Only terminal `CLEAN` or `NOT_REQUIRED` runs qualify. Each artifact is hash-veri
 
 The Scenarios UI accepts bounded strict YAML/JSON source. Preview compiles through the same compiler without contacting OSCAR; import persists the original validated source by its SHA-256 digest.
 
+Use the catalog to preview any built-in, compare P01 with N01, and select
+**Clone as custom** before editing. The compiled pane exposes alertname,
+`category=corrtest_<pattern>`, `oscar_test_run_id`, rule criteria, assertion
+values, and manual OSCAR filters. See [scenario-authoring.md](scenario-authoring.md).
+
+## Operations and application logs
+
+The Operations page manages the write-only global API key, shows the effective
+configuration/state/log paths, exposes current-user service state, and follows
+redacted structured records. The primary file is `application.jsonl`; rotation
+keeps five 10 MiB backups. Downloads are limited to the displayed application
+and bootstrap sources. Operational logs help diagnose the harness but are not
+correlation verdict evidence.
+
+Linux/macOS defaults include `$HOME/.config/oscar-corrtest/.env`; Windows uses
+`%LOCALAPPDATA%\oscar-corrtest\.env`. Use `oscar-corrtest service install`,
+`service start`, `service stop`, `service restart`, `service status`,
+`service logs`, and `service uninstall` for the equivalent lifecycle CLI.
+
 ## Serving modes
 
 The default starts an unauthenticated HTTP listener on every interface:

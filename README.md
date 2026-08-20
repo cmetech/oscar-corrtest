@@ -22,6 +22,17 @@ unauthenticated; use it only where network access is appropriate for a test
 tool that can create temporary rules and inject alerts. The installer never
 starts a background service.
 
+For persistent user-scoped operation, explicitly install and start it:
+
+```bash
+oscar-corrtest service install
+oscar-corrtest service start
+oscar-corrtest service status
+```
+
+The install step enables future login startup but does not start the process
+immediately. See [service management](docs/service-management.md).
+
 Configure an OSCAR target when you are ready to run tests:
 
 ```bash
@@ -40,9 +51,19 @@ oscar-corrtest run builtin:flood \
   --target <target-id> --pipeline-mode phase_b_dispatch
 ```
 
-Only the API-key reference is stored; the value remains in the environment.
+The easiest persistent configuration is the Operations page: paste the global
+key once and CorrTest writes `OSCAR_API_KEY` to its managed user `.env`. Linux
+and macOS use `$HOME/.config/oscar-corrtest/.env` unless
+`XDG_CONFIG_HOME` is set; Windows uses
+`%LOCALAPPDATA%\oscar-corrtest\.env`. The UI never reads the value back.
+Advanced targets may still use explicit environment/file/systemd references,
+which override the global key.
 Runs started from the browser continue if the browser disconnects; reconnecting replays persisted events.
-The Scenarios page validates, previews, and imports strict YAML/JSON. Active run pages provide cancellation with bounded cleanup; cleanup-safe terminal runs can be deleted only after local artifact verification.
+The Scenarios page shows canonical built-in source and compiled P01/N01
+contracts, provides **Clone as custom**, and validates/imports strict YAML/JSON.
+See [scenario authoring](docs/scenario-authoring.md). Active run pages provide
+cancellation with bounded cleanup; cleanup-safe terminal runs can be deleted
+only after local artifact verification.
 
 Windows amd64 and version-pinned installation are also supported. See the
 [installation guide](docs/install.md) for Windows PowerShell, upgrades,
