@@ -29,6 +29,7 @@ verify:
     when: always
     paths:
       - dist/*.tar.gz
+      - dist/*.zip
       - dist/SHA256SUMS
 
 package:
@@ -45,6 +46,7 @@ package:
     when: always
     paths:
       - dist/*.tar.gz
+      - dist/*.zip
       - dist/SHA256SUMS
 
 # Operator gate before the first real semantic tag: confirm CI_JOB_TOKEN can
@@ -68,4 +70,4 @@ release:
       --name "OSCAR Correlation Test Harness $CI_COMMIT_TAG"
       --notes "Automated release $CI_COMMIT_TAG"
       --use-package-registry
-      dist/*.tar.gz dist/SHA256SUMS
+      dist/*.tar.gz dist/*.zip dist/SHA256SUMS

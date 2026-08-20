@@ -8,6 +8,24 @@ for workflow in .github/workflows/ci.yml .github/workflows/release.yml; do
   }
 done
 
+for asset_fragment in darwin_amd64.tar.gz darwin_arm64.tar.gz windows_amd64.zip; do
+  grep -Fq "$asset_fragment" .github/workflows/ci.yml || {
+    printf 'GitHub CI artifact set omits %s\n' "$asset_fragment" >&2
+    exit 1
+  }
+done
+grep -Fq 'dist/*.zip' .gitlab-ci.yml || {
+  printf '%s\n' 'GitLab artifact/release lanes omit Windows ZIP assets' >&2
+  exit 1
+}
+release_gate=$(sed -n '/^release-gate:/,/^$/p' Makefile)
+for gate in installer-posix-check release-script-check package-content-check reproducible-check; do
+  printf '%s\n' "$release_gate" | grep -q "$gate" || {
+    printf 'offline release gate omits %s\n' "$gate" >&2
+    exit 1
+  }
+done
+
 release_workflow=.github/workflows/release.yml
 for contract in \
   '^  verify:' \

@@ -142,7 +142,10 @@ ci:
 
 release-gate: ci
 	$(MAKE) plan3-gate plan4-gate plan5-gate plan6-gate plan7-gate
-	$(MAKE) container-check package-content-check reproducible-check
+	$(MAKE) container-check
+	$(MAKE) installer-posix-check release-script-check
+	$(MAKE) clean package checksums package-content-check
+	$(MAKE) reproducible-check
 
 live-qualification:
 	./scripts/live-qualification.sh
