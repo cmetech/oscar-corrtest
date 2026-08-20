@@ -70,7 +70,10 @@ Advanced targets may still use explicit environment/file/systemd references,
 which override the global key.
 Runs started from the browser continue if the browser disconnects; reconnecting replays persisted events.
 The Scenarios page shows canonical built-in source and compiled P01/N01
-contracts, provides **Clone as custom**, and validates/imports strict YAML/JSON.
+contracts. **Edit a copy** opens an unsaved draft; **Save custom scenario**
+persists one immutable version after validation. Modified saved scenarios become
+new versions. Unused custom versions can be deleted from the UI, while versions
+referenced by historical runs are retained.
 See [scenario authoring](docs/scenario-authoring.md). Active run pages provide
 cancellation with bounded cleanup; cleanup-safe terminal runs can be deleted
 only after local artifact verification.

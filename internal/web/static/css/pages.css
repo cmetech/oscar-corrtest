@@ -23,6 +23,8 @@ small, .muted { color: var(--ct-fg-muted); font-weight: 400; }
 .check { display: flex; align-items: center; gap: var(--ct-space-2); }
 .check input { min-height: auto; }
 .primary-button { min-height: 42px; padding: var(--ct-space-2) var(--ct-space-4); border: 0; border-radius: var(--ct-radius-input); background: var(--ct-accent); color: var(--ct-accent-fg); font: inherit; font-weight: 800; cursor: pointer; }
+.danger-button { display: inline-flex; min-height: 38px; align-items: center; padding: 6px 10px; border: 1px solid var(--ct-fail); border-radius: var(--ct-radius-input); background: color-mix(in srgb, var(--ct-fail) 10%, var(--ct-card)); color: var(--ct-fail); cursor: pointer; font: inherit; font-weight: 800; }
+.danger-button:hover { background: color-mix(in srgb, var(--ct-fail) 18%, var(--ct-card)); }
 .notice { margin-top: var(--ct-space-4); padding: var(--ct-space-3) var(--ct-space-4); border: 1px solid var(--ct-warning); border-radius: var(--ct-radius-input); }
 .notice--error { border-color: var(--ct-fail); }
 th, td { padding: var(--ct-space-3); border-bottom: 1px solid var(--ct-border); text-align: left; }

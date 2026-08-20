@@ -294,6 +294,56 @@ func TestImportScenarioPersistsOriginalSourceOnceByDigest(t *testing.T) {
 	}
 }
 
+func TestDeleteScenarioRemovesUnusedCustomScenario(t *testing.T) {
+	runtime, err := Open(context.Background(), config.Settings{DataDir: t.TempDir(), ListenAddress: "127.0.0.1:8787"}, version.Info{Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	document, err := scenario.Decode(strings.NewReader(runtimeScenarioSource))
+	if err != nil {
+		t.Fatal(err)
+	}
+	imported, err := runtime.ImportScenario(context.Background(), []byte(runtimeScenarioSource), document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.DeleteScenario(context.Background(), imported.ID); err != nil {
+		t.Fatal(err)
+	}
+	items, err := runtime.ListScenarios(context.Background())
+	if err != nil || len(items) != 0 {
+		t.Fatalf("scenarios=%+v err=%v", items, err)
+	}
+}
+
+func TestDeleteScenarioPreservesScenarioReferencedByHistoricalRun(t *testing.T) {
+	runtime, err := Open(context.Background(), config.Settings{DataDir: t.TempDir(), ListenAddress: "127.0.0.1:8787"}, version.Info{Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	document, err := scenario.Decode(strings.NewReader(runtimeScenarioSource))
+	if err != nil {
+		t.Fatal(err)
+	}
+	imported, err := runtime.ImportScenario(context.Background(), []byte(runtimeScenarioSource), document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.CreateRun(context.Background(), "", imported.ID, "test"); err != nil {
+		t.Fatal(err)
+	}
+	deleteErr := runtime.DeleteScenario(context.Background(), imported.ID)
+	if deleteErr == nil || !strings.Contains(deleteErr.Error(), "historical run") {
+		t.Fatalf("delete error=%v", deleteErr)
+	}
+	items, err := runtime.ListScenarios(context.Background())
+	if err != nil || len(items) != 1 || items[0].ID != imported.ID {
+		t.Fatalf("referenced scenario was not preserved: scenarios=%+v err=%v", items, err)
+	}
+}
+
 func TestRetentionDeletesOnlyTerminalCleanupSafeRuns(t *testing.T) {
 	runtime, err := Open(context.Background(), config.Settings{DataDir: t.TempDir(), ListenAddress: "127.0.0.1:8787"}, version.Info{Version: "test"})
 	if err != nil {

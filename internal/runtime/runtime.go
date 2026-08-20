@@ -611,6 +611,11 @@ func (r *Runtime) ListScenarios(ctx context.Context) ([]domain.ScenarioRecord, e
 	return r.database.ListScenarios(ctx)
 }
 
+// DeleteScenario removes one unused custom scenario from the local catalog.
+func (r *Runtime) DeleteScenario(ctx context.Context, id string) error {
+	return r.database.DeleteScenario(ctx, id)
+}
+
 // PreviewRetention returns at most 500 old runs that are terminal and whose
 // independent cleanup state proves local deletion is safe.
 func (r *Runtime) PreviewRetention(ctx context.Context, before time.Time) ([]domain.Run, error) {

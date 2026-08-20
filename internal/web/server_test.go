@@ -363,7 +363,7 @@ func TestScenarioUIPreviewsAndImportsStrictSourceWithCSRF(t *testing.T) {
 	}
 }
 
-func TestScenarioWorkbenchPreviewsBuiltinSourceContractAndClone(t *testing.T) {
+func TestScenarioWorkbenchPreviewsBuiltinSourceAndOpensUnsavedDraft(t *testing.T) {
 	runtime, err := appruntime.Open(context.Background(), config.Settings{DataDir: t.TempDir(), ListenAddress: "127.0.0.1:8787"}, version.Info{Version: "test"})
 	if err != nil {
 		t.Fatal(err)
@@ -403,12 +403,189 @@ func TestScenarioWorkbenchPreviewsBuiltinSourceContractAndClone(t *testing.T) {
 	post.AddCookie(response.Result().Cookies()[0])
 	cloned := httptest.NewRecorder()
 	handler.ServeHTTP(cloned, post)
-	if cloned.Code != http.StatusSeeOther || !strings.Contains(cloned.Header().Get("Location"), "/scenarios?selected=imported%3A") {
+	if cloned.Code != http.StatusSeeOther || cloned.Header().Get("Location") != "/scenarios?selected=draft%3Aflood" {
 		t.Fatalf("clone status=%d location=%q body=%s", cloned.Code, cloned.Header().Get("Location"), cloned.Body.String())
 	}
 	items, err := runtime.ListScenarios(context.Background())
-	if err != nil || len(items) != 1 || items[0].SourceDocument == "" || items[0].Name == "flood-basic" {
-		t.Fatalf("cloned items=%+v err=%v", items, err)
+	if err != nil || len(items) != 0 {
+		t.Fatalf("opening a draft persisted scenarios=%+v err=%v", items, err)
+	}
+	draftGet := httptest.NewRequest(http.MethodGet, "http://example.com"+cloned.Header().Get("Location"), nil)
+	draftResponse := httptest.NewRecorder()
+	handler.ServeHTTP(draftResponse, draftGet)
+	if draftResponse.Code != http.StatusOK {
+		t.Fatalf("draft status=%d body=%s", draftResponse.Code, draftResponse.Body.String())
+	}
+	draftBody := draftResponse.Body.String()
+	for _, required := range []string{"flood-basic-custom", "Unsaved draft", "Save custom scenario"} {
+		if !strings.Contains(draftBody, required) {
+			t.Errorf("draft workbench missing %q", required)
+		}
+	}
+	if strings.Contains(draftBody, "Delete custom scenario") {
+		t.Fatal("unsaved draft exposed a delete action")
+	}
+}
+
+func TestSavingScenarioDraftTransitionsToSingleSavedVersion(t *testing.T) {
+	runtime, err := appruntime.Open(context.Background(), config.Settings{DataDir: t.TempDir(), ListenAddress: "127.0.0.1:8787"}, version.Info{Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	handler := NewHandlerWithData(version.Info{Version: "test"}, runtime)
+	get := httptest.NewRequest(http.MethodGet, "http://example.com/scenarios?selected=draft:flood", nil)
+	getResponse := httptest.NewRecorder()
+	handler.ServeHTTP(getResponse, get)
+	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(getResponse.Body.String())
+	if len(match) != 2 {
+		t.Fatal("scenario draft CSRF token missing")
+	}
+	document := scenario.Builtin("flood")
+	document.Name = "flood-basic-custom"
+	document.Suite = "custom"
+	source, err := scenario.Encode(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := url.Values{"csrf_token": {match[1]}, "action": {"import"}, "source": {string(source)}, "pipeline_mode": {"phase_b_dispatch"}}
+	post := httptest.NewRequest(http.MethodPost, "http://example.com/scenarios?selected=draft:flood", strings.NewReader(values.Encode()))
+	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	post.Header.Set("Origin", "http://example.com")
+	post.AddCookie(getResponse.Result().Cookies()[0])
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, post)
+	if response.Code != http.StatusOK {
+		t.Fatalf("save status=%d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, "Saved custom version") || !strings.Contains(body, "Delete custom scenario") {
+		t.Fatalf("saved draft did not transition to saved controls: %s", body)
+	}
+	items, err := runtime.ListScenarios(context.Background())
+	if err != nil || len(items) != 1 || items[0].Name != "flood-basic-custom" {
+		t.Fatalf("saved scenarios=%+v err=%v", items, err)
+	}
+}
+
+func TestScenarioWorkbenchDeletesUnusedCustomScenario(t *testing.T) {
+	runtime, err := appruntime.Open(context.Background(), config.Settings{DataDir: t.TempDir(), ListenAddress: "127.0.0.1:8787"}, version.Info{Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	document, err := scenario.Decode(strings.NewReader(webScenarioSource))
+	if err != nil {
+		t.Fatal(err)
+	}
+	imported, err := runtime.ImportScenario(context.Background(), []byte(webScenarioSource), document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandlerWithData(version.Info{Version: "test"}, runtime)
+	get := httptest.NewRequest(http.MethodGet, "http://example.com/scenarios?selected=imported:"+imported.ID, nil)
+	getResponse := httptest.NewRecorder()
+	handler.ServeHTTP(getResponse, get)
+	body := getResponse.Body.String()
+	if !strings.Contains(body, "Delete custom scenario") || !strings.Contains(body, `data-confirm-scenario-delete`) {
+		t.Fatalf("saved custom scenario missing guarded delete action: %s", body)
+	}
+	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(body)
+	if len(match) != 2 {
+		t.Fatal("scenario delete CSRF token missing")
+	}
+	values := url.Values{"csrf_token": {match[1]}, "confirm": {"delete"}}
+	post := httptest.NewRequest(http.MethodPost, "http://example.com/scenarios/"+imported.ID+"/delete", strings.NewReader(values.Encode()))
+	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	post.Header.Set("Origin", "http://example.com")
+	post.AddCookie(getResponse.Result().Cookies()[0])
+	deleted := httptest.NewRecorder()
+	handler.ServeHTTP(deleted, post)
+	if deleted.Code != http.StatusSeeOther || deleted.Header().Get("Location") != "/scenarios?message=scenario-deleted" {
+		t.Fatalf("delete status=%d location=%q body=%s", deleted.Code, deleted.Header().Get("Location"), deleted.Body.String())
+	}
+	items, err := runtime.ListScenarios(context.Background())
+	if err != nil || len(items) != 0 {
+		t.Fatalf("deleted scenarios=%+v err=%v", items, err)
+	}
+}
+
+func TestScenarioDeleteRequiresExplicitConfirmation(t *testing.T) {
+	runtime, err := appruntime.Open(context.Background(), config.Settings{DataDir: t.TempDir(), ListenAddress: "127.0.0.1:8787"}, version.Info{Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	document, err := scenario.Decode(strings.NewReader(webScenarioSource))
+	if err != nil {
+		t.Fatal(err)
+	}
+	imported, err := runtime.ImportScenario(context.Background(), []byte(webScenarioSource), document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandlerWithData(version.Info{Version: "test"}, runtime)
+	get := httptest.NewRequest(http.MethodGet, "http://example.com/scenarios?selected=imported:"+imported.ID, nil)
+	getResponse := httptest.NewRecorder()
+	handler.ServeHTTP(getResponse, get)
+	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(getResponse.Body.String())
+	if len(match) != 2 {
+		t.Fatal("scenario delete CSRF token missing")
+	}
+	values := url.Values{"csrf_token": {match[1]}}
+	post := httptest.NewRequest(http.MethodPost, "http://example.com/scenarios/"+imported.ID+"/delete", strings.NewReader(values.Encode()))
+	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	post.Header.Set("Origin", "http://example.com")
+	post.AddCookie(getResponse.Result().Cookies()[0])
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, post)
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("delete without confirmation status=%d body=%s", response.Code, response.Body.String())
+	}
+	items, err := runtime.ListScenarios(context.Background())
+	if err != nil || len(items) != 1 || items[0].ID != imported.ID {
+		t.Fatalf("unconfirmed deletion changed scenarios=%+v err=%v", items, err)
+	}
+}
+
+func TestScenarioWorkbenchRejectsDeletingScenarioUsedByHistoricalRun(t *testing.T) {
+	runtime, err := appruntime.Open(context.Background(), config.Settings{DataDir: t.TempDir(), ListenAddress: "127.0.0.1:8787"}, version.Info{Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	document, err := scenario.Decode(strings.NewReader(webScenarioSource))
+	if err != nil {
+		t.Fatal(err)
+	}
+	imported, err := runtime.ImportScenario(context.Background(), []byte(webScenarioSource), document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.CreateRun(context.Background(), "", imported.ID, "test"); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandlerWithData(version.Info{Version: "test"}, runtime)
+	get := httptest.NewRequest(http.MethodGet, "http://example.com/scenarios?selected=imported:"+imported.ID, nil)
+	getResponse := httptest.NewRecorder()
+	handler.ServeHTTP(getResponse, get)
+	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(getResponse.Body.String())
+	if len(match) != 2 {
+		t.Fatal("scenario delete CSRF token missing")
+	}
+	values := url.Values{"csrf_token": {match[1]}, "confirm": {"delete"}}
+	post := httptest.NewRequest(http.MethodPost, "http://example.com/scenarios/"+imported.ID+"/delete", strings.NewReader(values.Encode()))
+	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	post.Header.Set("Origin", "http://example.com")
+	post.AddCookie(getResponse.Result().Cookies()[0])
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, post)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "historical runs") {
+		t.Fatalf("delete status=%d body=%s", response.Code, response.Body.String())
+	}
+	items, err := runtime.ListScenarios(context.Background())
+	if err != nil || len(items) != 1 || items[0].ID != imported.ID {
+		t.Fatalf("referenced scenario was not preserved: scenarios=%+v err=%v", items, err)
 	}
 }
 

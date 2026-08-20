@@ -4,15 +4,19 @@ The Scenarios page is a three-pane engineering workbench:
 
 1. **Scenario catalog** lists all eight immutable built-ins and imported custom
    documents.
-2. **Source** shows canonical strict YAML. Select **Clone as custom** to create
-   an editable imported copy of a built-in.
+2. **Source** shows canonical strict YAML. Select **Edit a copy** to open an
+   unsaved editable draft of a built-in. The draft is not written to SQLite.
 3. **Compiled contract** shows both P01 and N01 rules, alert stimuli, reserved
    labels, assertions, observation windows, OSCAR inspection filters, and the
    mutation budget.
 
 Preview and validation are target-free: they do not resolve an API key, contact
-OSCAR, create a rule, inject an alert, or write a run. Import stores the exact
-validated source and SHA-256 digest in SQLite.
+OSCAR, create a rule, inject an alert, or write a run. **Save custom scenario**
+stores the exact validated source and SHA-256 digest in SQLite. Editing a saved
+scenario and choosing **Save as new version** preserves the old immutable
+version and creates a new one. **Delete custom scenario** removes an unused
+version after confirmation; a version referenced by historical runs cannot be
+deleted until those runs are removed.
 
 ## Required document shape
 

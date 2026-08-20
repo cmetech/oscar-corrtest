@@ -53,6 +53,18 @@
   if (copySource && source) {
     copySource.addEventListener('click', function () { copyText(source.value, 'Scenario source'); });
   }
+
+  var deleteForm = workbench.querySelector('[data-confirm-scenario-delete]');
+  if (deleteForm) {
+    deleteForm.addEventListener('submit', function (event) {
+      if (!window.confirm('Delete this custom scenario from the local catalog? Historical scenarios used by a run cannot be deleted.')) {
+        event.preventDefault();
+        return;
+      }
+      var confirmation = deleteForm.querySelector('[data-delete-confirmation]');
+      if (confirmation) confirmation.value = 'delete';
+    });
+  }
   Array.prototype.forEach.call(workbench.querySelectorAll('[data-copy-value]'), function (button) {
     button.addEventListener('click', function () { copyText(button.dataset.copyValue, 'Inspection filter'); });
   });

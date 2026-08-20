@@ -20,7 +20,7 @@
     </nav>
     <div class="catalog-guidance">
       <strong>Custom scenarios</strong>
-      <p>Select the closest built-in, choose <em>Edit a copy</em>, then validate and import the modified YAML.</p>
+      <p><em>Edit a copy</em> opens an unsaved draft. Validate it, then save one immutable custom version. Modified saved versions are stored separately; unused versions can be deleted.</p>
     </div>
   </aside>
 
@@ -29,10 +29,10 @@
       <div><p class="eyebrow">Exact source</p><h2>{{.SelectedName}}</h2></div>
       <div class="button-row source-actions">
         <button class="secondary-button" type="button" data-copy-source>Copy source</button>
-        {{if .SelectedBuiltIn}}<form method="post" action="/scenarios/clone"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><input type="hidden" name="scenario_ref" value="{{.SelectedScenario}}"><button class="primary-button" type="submit">Edit a copy</button></form>{{end}}
+        {{if .SelectedBuiltIn}}<form method="post" action="/scenarios/clone"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><input type="hidden" name="scenario_ref" value="{{.SelectedScenario}}"><button class="primary-button" type="submit">Edit a copy</button></form>{{else if not .SelectedDraft}}<form method="post" action="/scenarios/{{.SelectedScenarioID}}/delete" data-confirm-scenario-delete><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><input type="hidden" name="confirm" value="" data-delete-confirmation><button class="danger-button" type="submit">Delete custom scenario</button></form>{{end}}
       </div>
     </header>
-    <p class="muted source-context"><span class="status-pill">{{if .SelectedBuiltIn}}Read-only built-in{{else}}Editable custom{{end}}</span> Strict canonical YAML · <code>{{.SelectedPattern}}</code></p>
+    <p class="muted source-context"><span class="status-pill">{{if .SelectedBuiltIn}}Read-only built-in{{else if .SelectedDraft}}Unsaved draft{{else}}Saved custom version{{end}}</span> Strict canonical YAML · <code>{{.SelectedPattern}}</code></p>
     {{if .Error}}<div class="notice notice--error" role="alert"><strong>Validation failed.</strong> {{.Error}}</div>{{end}}
 
     {{if .SelectedBuiltIn}}
@@ -43,7 +43,7 @@
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <div class="scenario-editor-toolbar">
           <label>Pipeline mode<select name="pipeline_mode"><option value="phase_b_dispatch">Phase B — audit and dispatch</option><option value="phase_a_audit_only">Phase A — audit only</option></select></label>
-          <div class="button-row"><button class="secondary-button" type="submit" name="action" value="preview">Validate &amp; compile</button><button class="primary-button" type="submit" name="action" value="import">Import validated copy</button></div>
+          <div class="button-row"><button class="secondary-button" type="submit" name="action" value="preview">Validate &amp; compile</button><button class="primary-button" type="submit" name="action" value="import">{{if .SelectedDraft}}Save custom scenario{{else}}Save as new version{{end}}</button></div>
         </div>
       </form>
     {{end}}

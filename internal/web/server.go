@@ -58,37 +58,39 @@ type Options struct {
 }
 
 type pageData struct {
-	Nonce             string
-	Version           version.Info
-	Page              string
-	Targets           []domain.Target
-	Runs              []domain.Run
-	Run               *domain.Run
-	Events            []domain.RunEvent
-	Artifacts         []domain.ArtifactEvidence
-	Readiness         readinessView
-	CSRFToken         string
-	Error             string
-	Status            string
-	Verdict           string
-	Cleanup           string
-	Pattern           string
-	Scenarios         []scenario.Scenario
-	CanCancel         bool
-	CanDelete         bool
-	ImportedScenarios []domain.ScenarioRecord
-	ScenarioSource    string
-	ScenarioPlan      *compiler.Plan
-	Help              HelpTopic
-	ReferenceTopics   []HelpTopic
-	ScenarioCatalog   []scenarioCatalogItem
-	SelectedScenario  string
-	SelectedName      string
-	SelectedPattern   string
-	SelectedBuiltIn   bool
-	Operations        operations.Snapshot
-	OperationLogs     []applog.Record
-	OperationMessage  string
+	Nonce              string
+	Version            version.Info
+	Page               string
+	Targets            []domain.Target
+	Runs               []domain.Run
+	Run                *domain.Run
+	Events             []domain.RunEvent
+	Artifacts          []domain.ArtifactEvidence
+	Readiness          readinessView
+	CSRFToken          string
+	Error              string
+	Status             string
+	Verdict            string
+	Cleanup            string
+	Pattern            string
+	Scenarios          []scenario.Scenario
+	CanCancel          bool
+	CanDelete          bool
+	ImportedScenarios  []domain.ScenarioRecord
+	ScenarioSource     string
+	ScenarioPlan       *compiler.Plan
+	Help               HelpTopic
+	ReferenceTopics    []HelpTopic
+	ScenarioCatalog    []scenarioCatalogItem
+	SelectedScenario   string
+	SelectedScenarioID string
+	SelectedName       string
+	SelectedPattern    string
+	SelectedBuiltIn    bool
+	SelectedDraft      bool
+	Operations         operations.Snapshot
+	OperationLogs      []applog.Record
+	OperationMessage   string
 }
 
 type readinessView struct {
@@ -118,6 +120,10 @@ type scenarioManager interface {
 	ListScenarios(context.Context) ([]domain.ScenarioRecord, error)
 	PreviewScenario(context.Context, string, scenario.Scenario, string) (compiler.Plan, error)
 	ImportScenario(context.Context, []byte, scenario.Scenario) (domain.ScenarioRecord, error)
+}
+
+type scenarioDeleter interface {
+	DeleteScenario(context.Context, string) error
 }
 
 type scenarioInspector interface {
@@ -284,10 +290,13 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 			return
 		}
 		view.CSRFToken = csrfToken(w, r, csrfSecret)
+		if r.URL.Query().Get("message") == "scenario-deleted" {
+			view.Status = "Custom scenario deleted from the local catalog"
+		}
 		render(w, tmpl, nonce, view)
 	})
 	mux.HandleFunc("POST /scenarios/clone", func(w http.ResponseWriter, r *http.Request) {
-		manager, ok := data.(scenarioManager)
+		_, ok := data.(scenarioManager)
 		if !ok || csrfErr != nil {
 			http.Error(w, "scenario management unavailable", http.StatusServiceUnavailable)
 			return
@@ -306,37 +315,11 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 			http.Error(w, "only built-in scenarios can be cloned", http.StatusUnprocessableEntity)
 			return
 		}
-		document := scenario.Builtin(pattern)
-		if len(document.Cases) != 2 {
+		if document := scenario.Builtin(pattern); len(document.Cases) != 2 {
 			http.Error(w, "built-in scenario is unavailable", http.StatusUnprocessableEntity)
 			return
 		}
-		items, err := manager.ListScenarios(r.Context())
-		if err != nil {
-			http.Error(w, "scenario clone unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		names := make(map[string]bool, len(items))
-		for _, item := range items {
-			names[item.Name] = true
-		}
-		baseName := document.Name + "-custom"
-		document.Name = baseName
-		for suffix := 2; names[document.Name]; suffix++ {
-			document.Name = baseName + "-" + strconv.Itoa(suffix)
-		}
-		document.Suite = "custom"
-		source, err := scenario.Encode(document)
-		if err != nil {
-			http.Error(w, "scenario clone unavailable", http.StatusUnprocessableEntity)
-			return
-		}
-		record, err := manager.ImportScenario(r.Context(), source, document)
-		if err != nil {
-			http.Error(w, "scenario clone unavailable", http.StatusUnprocessableEntity)
-			return
-		}
-		http.Redirect(w, r, "/scenarios?selected="+url.QueryEscape("imported:"+record.ID), http.StatusSeeOther)
+		http.Redirect(w, r, "/scenarios?selected="+url.QueryEscape("draft:"+pattern), http.StatusSeeOther)
 	})
 	mux.HandleFunc("POST /scenarios", func(w http.ResponseWriter, r *http.Request) {
 		manager, ok := data.(scenarioManager)
@@ -406,11 +389,19 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 			}
 			selectedRef := "imported:" + record.ID
 			view.SelectedScenario = selectedRef
+			view.SelectedScenarioID = record.ID
+			view.SelectedDraft = false
 			found := false
+			catalog := make([]scenarioCatalogItem, 0, len(view.ScenarioCatalog))
 			for index := range view.ScenarioCatalog {
+				if view.ScenarioCatalog[index].Kind == "Unsaved draft" {
+					continue
+				}
 				view.ScenarioCatalog[index].Selected = view.ScenarioCatalog[index].Ref == selectedRef
 				found = found || view.ScenarioCatalog[index].Selected
+				catalog = append(catalog, view.ScenarioCatalog[index])
 			}
+			view.ScenarioCatalog = catalog
 			if !found {
 				view.ScenarioCatalog = append(view.ScenarioCatalog, scenarioCatalogItem{Ref: selectedRef, Name: record.Name, Pattern: document.Pattern, Kind: "Custom", Selected: true})
 			}
@@ -426,13 +417,38 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 					view.ScenarioPlan = &inspection.Plan
 				}
 			}
-			view.Status = "Imported scenario " + record.Name + " by source digest"
+			view.Status = "Saved custom scenario " + record.Name + " as an immutable version"
 		default:
 			view.Error = "scenario action is invalid"
 			renderStatus(w, tmpl, nonce, http.StatusUnprocessableEntity, view)
 			return
 		}
 		render(w, tmpl, nonce, view)
+	})
+	mux.HandleFunc("POST /scenarios/{id}/delete", func(w http.ResponseWriter, r *http.Request) {
+		deleter, ok := data.(scenarioDeleter)
+		if !ok || csrfErr != nil {
+			http.Error(w, "scenario deletion unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid scenario deletion form", http.StatusBadRequest)
+			return
+		}
+		if !sameOrigin(r) || !validCSRF(r, csrfSecret) {
+			http.Error(w, "request origin or CSRF token is invalid", http.StatusForbidden)
+			return
+		}
+		if r.FormValue("confirm") != "delete" {
+			http.Error(w, "scenario deletion requires explicit confirmation", http.StatusUnprocessableEntity)
+			return
+		}
+		if err := deleter.DeleteScenario(r.Context(), r.PathValue("id")); err != nil {
+			http.Error(w, "scenario was not deleted: "+err.Error(), http.StatusConflict)
+			return
+		}
+		http.Redirect(w, r, "/scenarios?message=scenario-deleted", http.StatusSeeOther)
 	})
 	mux.HandleFunc("POST /runs", func(w http.ResponseWriter, r *http.Request) {
 		starter, ok := data.(runStarter)
@@ -796,6 +812,29 @@ func scenarioWorkbench(ctx context.Context, info version.Info, data DataSource, 
 		if len(source) == 0 {
 			return pageData{}, fmt.Errorf("selected scenario is unavailable")
 		}
+		view.SelectedScenarioID = id
+	} else if pattern, ok := strings.CutPrefix(selected, "draft:"); ok {
+		document := scenario.Builtin(pattern)
+		if len(document.Cases) != 2 {
+			return pageData{}, fmt.Errorf("draft source is unavailable")
+		}
+		names := make(map[string]bool, len(imported))
+		for _, item := range imported {
+			names[item.Name] = true
+		}
+		baseName := document.Name + "-custom"
+		document.Name = baseName
+		for suffix := 2; names[document.Name]; suffix++ {
+			document.Name = baseName + "-" + strconv.Itoa(suffix)
+		}
+		document.Suite = "custom"
+		var err error
+		source, err = scenario.Encode(document)
+		if err != nil {
+			return pageData{}, err
+		}
+		view.SelectedDraft = true
+		view.ScenarioCatalog = append(view.ScenarioCatalog, scenarioCatalogItem{Ref: selected, Name: document.Name, Pattern: pattern, Kind: "Unsaved draft", Selected: true})
 	} else {
 		return pageData{}, fmt.Errorf("selected scenario reference is invalid")
 	}
