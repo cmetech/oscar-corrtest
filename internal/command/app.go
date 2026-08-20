@@ -62,7 +62,7 @@ func NewConfigured(stdout, stderr io.Writer, info version.Info, serve ServeFunc,
 // Run executes a command and returns its process exit code.
 func (a *App) Run(ctx context.Context, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(a.stderr, "usage: oscar-corrtest <version|serve|target|doctor|scenario|plan|run|runs|export|verify-bundle|backup>")
+		fmt.Fprintln(a.stderr, "usage: oscar-corrtest <version|serve|target|doctor|scenario|plan|run|runs|cleanup|export|verify-bundle|backup>")
 		return 2
 	}
 
@@ -78,6 +78,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.runRuns(ctx, args[1:])
 	case "doctor":
 		return a.runDoctor(ctx, args[1:])
+	case "cleanup":
+		return a.runCleanup(ctx, args[1:])
 	case "backup":
 		return a.runBackup(ctx, args[1:])
 	case "export":
@@ -91,10 +93,10 @@ func (a *App) Run(ctx context.Context, args []string) int {
 	case "run":
 		return a.runCorrelation(ctx, args[1:])
 	case "help", "--help", "-h":
-		fmt.Fprintln(a.stdout, "usage: oscar-corrtest <version|serve|target|doctor|scenario|plan|run|runs|export|verify-bundle|backup>")
+		fmt.Fprintln(a.stdout, "usage: oscar-corrtest <version|serve|target|doctor|scenario|plan|run|runs|cleanup|export|verify-bundle|backup>")
 		return 0
 	default:
-		fmt.Fprintf(a.stderr, "unknown command %q\nusage: oscar-corrtest <version|serve|target|doctor|scenario|plan|run|runs|export|verify-bundle|backup>\n", args[0])
+		fmt.Fprintf(a.stderr, "unknown command %q\nusage: oscar-corrtest <version|serve|target|doctor|scenario|plan|run|runs|cleanup|export|verify-bundle|backup>\n", args[0])
 		return 2
 	}
 }

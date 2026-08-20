@@ -148,6 +148,24 @@ func (c *Client) GetRule(ctx context.Context, id int) (Rule, error) {
 	return wire.normalized(), nil
 }
 
+// FindRules returns only exact-name matches from OSCAR's bounded quick-search page.
+func (c *Client) FindRules(ctx context.Context, name string) ([]Rule, error) {
+	values := url.Values{"page": {"1"}, "perPage": {"100"}, "column": {"id"}, "order": {"asc"}, "search": {name}}
+	var response struct {
+		Rows []ruleResponse `json:"rows"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, "/api/v1/correlation_rules", values, nil, &response); err != nil {
+		return nil, err
+	}
+	result := make([]Rule, 0, len(response.Rows))
+	for _, item := range response.Rows {
+		if item.Name == name {
+			result = append(result, item.normalized())
+		}
+	}
+	return result, nil
+}
+
 func (c *Client) DeleteRule(ctx context.Context, id int) error {
 	err := c.doJSON(ctx, http.MethodDelete, "/api/v1/correlation_rules/"+strconv.Itoa(id), nil, nil, nil)
 	var machine *MachineError

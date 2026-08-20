@@ -3,6 +3,7 @@ package runner_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -89,6 +90,29 @@ func TestRunnerCannotPassWhenPipelineModeIsPhaseA(t *testing.T) {
 	}
 }
 
+func TestRunnerReconcilesLostCreateResponseByExactOwnership(t *testing.T) {
+	database := openDatabase(t)
+	run := newRun()
+	if err := database.CreateRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	plan, _ := compiler.Compile(run, scenario.Builtin("flood"), compiler.Capabilities{PipelineMode: "phase_b_dispatch"})
+	api := &fakeAPI{createError: errors.New("response lost after create")}
+	engine := runner.New(database, api, runner.Options{PollInterval: time.Millisecond, ObservationWindow: time.Millisecond, Stabilization: time.Millisecond, Sleep: func(context.Context, time.Duration) error { return nil }})
+	if err := engine.Execute(context.Background(), run, plan, runner.CapabilitySnapshot{PipelineMode: "phase_b_dispatch", Ready: true, LabelsSurvived: true}); err != nil {
+		t.Fatal(err)
+	}
+	resources, err := database.ListResources(context.Background(), run.ID)
+	if err != nil || len(resources) != 2 {
+		t.Fatalf("resources=%+v err=%v", resources, err)
+	}
+	for _, resource := range resources {
+		if resource.ExternalID == "" || resource.LifecycleState != domain.ResourceDeleted {
+			t.Fatalf("lost create was not safely adopted and deleted: %+v", resource)
+		}
+	}
+}
+
 func TestRunnerUsesHistoryFingerprintNotDiagnosticHash(t *testing.T) {
 	database := openDatabase(t)
 	run := newRun()
@@ -146,6 +170,8 @@ type fakeAPI struct {
 	requiredAuditFingerprint string
 	sawRequiredFingerprint   bool
 	runID                    string
+	createError              error
+	reconciled               oscar.Rule
 }
 
 func (f *fakeAPI) ValidateRule(context.Context, compiler.RulePlan) error { return nil }
@@ -153,7 +179,18 @@ func (f *fakeAPI) CreateRule(_ context.Context, rule compiler.RulePlan) (oscar.R
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.created++
+	if f.createError != nil {
+		f.reconciled = oscar.Rule{ID: f.created, Name: rule.Name, Pattern: rule.Pattern, Description: rule.Description}
+		return oscar.Rule{}, f.createError
+	}
 	return oscar.Rule{ID: f.created, Name: rule.Name, Pattern: rule.Pattern, Description: rule.Description}, nil
+}
+
+func (f *fakeAPI) FindRules(_ context.Context, name string) ([]oscar.Rule, error) {
+	if f.reconciled.Name == name {
+		return []oscar.Rule{f.reconciled}, nil
+	}
+	return nil, nil
 }
 func (f *fakeAPI) GetRule(_ context.Context, id int) (oscar.Rule, error) {
 	return oscar.Rule{ID: id}, nil

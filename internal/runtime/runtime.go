@@ -4,9 +4,13 @@ package runtime
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -362,4 +366,105 @@ func (r *Runtime) ExportRun(ctx context.Context, runID, destination string) (evi
 // VerifyBundle validates an exported bundle without trusting its filenames or manifest.
 func (r *Runtime) VerifyBundle(ctx context.Context, path string) error {
 	return evidence.Verify(ctx, path)
+}
+
+// RetryCleanup deletes only resources whose exact full-run ownership can be read back.
+func (r *Runtime) RetryCleanup(ctx context.Context, runID string) (domain.Run, error) {
+	run, err := r.GetRun(ctx, runID)
+	if err != nil {
+		return domain.Run{}, err
+	}
+	if (run.Status != domain.RunCompleted && run.Status != domain.RunInterrupted) || (run.CleanupStatus != domain.CleanupDirty && run.CleanupStatus != domain.CleanupUnknown) {
+		return run, fmt.Errorf("run is not eligible for cleanup retry")
+	}
+	target, err := r.GetTarget(ctx, run.TargetID)
+	if err != nil {
+		return run, err
+	}
+	client, err := oscar.New(target, oscar.Options{HarnessVersion: r.version})
+	if err != nil {
+		return run, err
+	}
+	resources, err := r.database.ListResources(ctx, run.ID)
+	if err != nil {
+		return run, err
+	}
+	var failures []string
+	for _, resource := range resources {
+		if resource.DeletedAt != nil {
+			continue
+		}
+		if resource.OwnershipToken != run.ID || resource.Kind != "correlation_rule" {
+			failures = append(failures, resource.ExternalName+": ownership mismatch")
+			continue
+		}
+		if resource.ExternalID == "" {
+			matches, findErr := client.FindRules(ctx, resource.ExternalName)
+			if findErr != nil || len(matches) > 1 {
+				failures = append(failures, resource.ExternalName+": unresolved create outcome")
+				continue
+			}
+			if len(matches) == 0 {
+				if err := r.database.MarkResourceDeleted(ctx, resource.ID, time.Now().UTC()); err != nil {
+					failures = append(failures, resource.ExternalName+": ledger update failed")
+				}
+				continue
+			}
+			if !ownedRule(matches[0], resource, run.ID) {
+				failures = append(failures, resource.ExternalName+": lookalike rule refused")
+				continue
+			}
+			if err := r.database.AdoptResource(ctx, resource.ID, strconv.Itoa(matches[0].ID), time.Now().UTC()); err != nil {
+				failures = append(failures, resource.ExternalName+": adoption failed")
+				continue
+			}
+			resource.ExternalID = strconv.Itoa(matches[0].ID)
+		}
+		id, parseErr := strconv.Atoi(resource.ExternalID)
+		if parseErr != nil || id <= 0 {
+			failures = append(failures, resource.ExternalName+": invalid external ID")
+			continue
+		}
+		read, readErr := client.GetRule(ctx, id)
+		if readErr != nil {
+			var machine *oscar.MachineError
+			if errors.As(readErr, &machine) && machine.StatusCode == http.StatusNotFound {
+				if err := r.database.MarkResourceDeleted(ctx, resource.ID, time.Now().UTC()); err != nil {
+					failures = append(failures, resource.ExternalName+": ledger update failed")
+				}
+				continue
+			}
+			failures = append(failures, resource.ExternalName+": read-back failed")
+			continue
+		}
+		if !ownedRule(read, resource, run.ID) {
+			failures = append(failures, resource.ExternalName+": read-back ownership mismatch")
+			continue
+		}
+		if err := client.DeleteRule(ctx, id); err != nil {
+			_ = r.database.MarkResourceCleanupError(ctx, resource.ID, "cleanup retry delete failed")
+			failures = append(failures, resource.ExternalName+": delete failed")
+			continue
+		}
+		if err := r.database.MarkResourceDeleted(ctx, resource.ID, time.Now().UTC()); err != nil {
+			failures = append(failures, resource.ExternalName+": ledger update failed")
+		}
+	}
+	status := domain.CleanupClean
+	summary := "Owned temporary rules were deleted"
+	if len(failures) > 0 {
+		status, summary = domain.CleanupDirty, "Cleanup retry remains dirty: "+strings.Join(failures, "; ")
+	}
+	if err := r.database.SetTerminalRunCleanup(ctx, run.ID, status, time.Now().UTC(), summary); err != nil {
+		return run, err
+	}
+	updated, getErr := r.GetRun(ctx, run.ID)
+	if len(failures) > 0 {
+		return updated, fmt.Errorf("%s", summary)
+	}
+	return updated, getErr
+}
+
+func ownedRule(rule oscar.Rule, resource domain.Resource, runID string) bool {
+	return rule.ID > 0 && rule.Name == resource.ExternalName && strings.Contains(rule.Description, "run="+runID)
 }

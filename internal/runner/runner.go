@@ -18,6 +18,7 @@ type API interface {
 	ValidateRule(context.Context, compiler.RulePlan) error
 	CreateRule(context.Context, compiler.RulePlan) (oscar.Rule, error)
 	GetRule(context.Context, int) (oscar.Rule, error)
+	FindRules(context.Context, string) ([]oscar.Rule, error)
 	DeleteRule(context.Context, int) error
 	Inject(context.Context, compiler.AlertPlan) (oscar.InjectionResult, error)
 	FindHistory(context.Context, oscar.HistoryQuery) ([]oscar.HistoryRecord, error)
@@ -134,8 +135,12 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 		}
 		created, err := r.api.CreateRule(ctx, item.Rule)
 		if err != nil {
-			_ = r.store.MarkResourceCleanupError(ctx, resource.ID, "rule create outcome unknown")
-			return r.failAndCleanup(ctx, run, plan, capabilities, resources, err)
+			candidates, reconcileErr := r.api.FindRules(ctx, item.Rule.Name)
+			if reconcileErr != nil || len(candidates) != 1 || candidates[0].Name != item.Rule.Name || candidates[0].Pattern != item.Rule.Pattern || candidates[0].Description != item.Rule.Description {
+				_ = r.store.MarkResourceCleanupError(ctx, resource.ID, "rule create outcome unknown")
+				return r.failAndCleanup(ctx, run, plan, capabilities, resources, fmt.Errorf("rule create outcome could not be safely reconciled: %w", err))
+			}
+			created = candidates[0]
 		}
 		if created.Name != item.Rule.Name || created.Description != item.Rule.Description {
 			_ = r.store.MarkResourceCleanupError(ctx, resource.ID, "created rule ownership did not round-trip")

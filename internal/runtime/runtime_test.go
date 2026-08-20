@@ -3,9 +3,14 @@ package runtime
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
@@ -131,5 +136,56 @@ func TestStartBuiltinRejectsUnknownTargetWithoutCreatingRun(t *testing.T) {
 	runs, err := runtime.ListRuns(context.Background(), domain.RunFilter{})
 	if err != nil || len(runs) != 0 {
 		t.Fatalf("failed start created run: %+v err=%v", runs, err)
+	}
+}
+
+func TestRetryCleanupRequiresReadBackOwnershipBeforeDelete(t *testing.T) {
+	var deletes int
+	var ownedRunID string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.Method == http.MethodGet && request.URL.Path == "/api/v1/correlation_rules/71":
+			_, _ = fmt.Fprintf(w, `{"id":71,"name":"corrtest-flood-p01-00000001","pattern":"flood","description":"Temporary OSCAR correlation test rule; run=%s"}`, ownedRunID)
+		case request.Method == http.MethodDelete && request.URL.Path == "/api/v1/correlation_rules/71":
+			deletes++
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+	runtime, err := Open(context.Background(), config.Settings{DataDir: t.TempDir(), ListenAddress: "127.0.0.1:8787"}, version.Info{Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	target, err := runtime.CreateTarget(context.Background(), domain.TargetInput{DisplayName: "Lab", BaseURL: server.URL, APIProfile: "public-v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := runtime.CreateRun(context.Background(), target.ID, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownedRunID = run.ID
+	now := time.Now().UTC()
+	for _, state := range []domain.RunStatus{domain.RunPreflight, domain.RunSettingUp, domain.RunInjecting, domain.RunObserving, domain.RunAsserting, domain.RunCleaningUp, domain.RunCompleted} {
+		if err := runtime.database.TransitionRun(context.Background(), run.ID, state, now, "test transition"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := runtime.database.CompleteRun(context.Background(), run.ID, domain.VerdictPass, domain.CleanupDirty, json.RawMessage(`{}`), "cleanup failed", now); err != nil {
+		t.Fatal(err)
+	}
+	resource := domain.Resource{ID: "res_00000001_001", RunID: run.ID, Kind: "correlation_rule", ExternalName: "corrtest-flood-p01-00000001", OwnershipToken: run.ID, LifecycleState: domain.ResourceProposed}
+	if err := runtime.database.CreateResource(context.Background(), resource); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.database.AdoptResource(context.Background(), resource.ID, "71", now); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := runtime.RetryCleanup(context.Background(), run.ID)
+	if err != nil || updated.CleanupStatus != domain.CleanupClean || deletes != 1 {
+		t.Fatalf("updated=%+v deletes=%d err=%v", updated, deletes, err)
 	}
 }

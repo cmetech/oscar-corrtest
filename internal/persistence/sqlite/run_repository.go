@@ -213,6 +213,32 @@ func (d *Database) CompleteRun(ctx context.Context, id string, verdict domain.Ve
 	return nil
 }
 
+// SetTerminalRunCleanup updates only the independent cleanup dimension and appends evidence.
+func (d *Database) SetTerminalRunCleanup(ctx context.Context, id string, cleanup domain.CleanupStatus, at time.Time, summary string) error {
+	if !cleanup.Valid() || at.IsZero() || summary == "" {
+		return fmt.Errorf("cleanup update metadata is invalid")
+	}
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE runs SET cleanup_status=?, updated_at=? WHERE id=? AND status IN ('COMPLETED','INTERRUPTED')`, string(cleanup), formatTime(at), id)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	count, _ := result.RowsAffected()
+	if count != 1 {
+		_ = tx.Rollback()
+		return fmt.Errorf("run is not eligible for cleanup recovery")
+	}
+	if _, err := appendEvent(ctx, tx, domain.RunEvent{RunID: id, Type: "cleanup.retry", Level: "info", OccurredAt: at, Summary: summary}); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
 // RecoverInterruptedRuns marks active runs interrupted exactly once.
 func (d *Database) RecoverInterruptedRuns(ctx context.Context, at time.Time) (int, error) {
 	if err := d.Ready(); err != nil {

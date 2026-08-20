@@ -51,7 +51,7 @@ func (d *Database) MarkResourceDeleted(ctx context.Context, id string, at time.T
 		return fmt.Errorf("resource deletion time is required")
 	}
 	result, err := d.db.ExecContext(ctx, `UPDATE resources SET lifecycle_state='DELETED', deleted_at=?, cleanup_error=NULL
-		WHERE id=? AND lifecycle_state IN ('CREATED','UNKNOWN')`, formatTime(at), id)
+		WHERE id=? AND lifecycle_state IN ('PROPOSED','CREATED','UNKNOWN')`, formatTime(at), id)
 	if err != nil {
 		return fmt.Errorf("mark resource deleted: %w", err)
 	}

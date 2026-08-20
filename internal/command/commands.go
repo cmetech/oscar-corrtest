@@ -291,6 +291,47 @@ type evidenceRuntime interface {
 	VerifyBundle(context.Context, string) error
 }
 
+type cleanupRuntime interface {
+	RetryCleanup(context.Context, string) (domain.Run, error)
+}
+
+func (a *App) runCleanup(ctx context.Context, args []string) int {
+	if len(args) == 0 || args[0] != "retry" {
+		fmt.Fprintln(a.stderr, "usage: oscar-corrtest cleanup retry <run-id>")
+		return 2
+	}
+	flags := flag.NewFlagSet("cleanup retry", flag.ContinueOnError)
+	flags.SetOutput(a.stderr)
+	configPath, dataDir := commonConfigFlags(flags)
+	if err := flags.Parse(args[1:]); err != nil {
+		return 2
+	}
+	if flags.NArg() != 1 {
+		fmt.Fprintln(a.stderr, "usage: oscar-corrtest cleanup retry <run-id>")
+		return 2
+	}
+	runtime, code := a.openRuntime(ctx, config.Overrides{ConfigPath: *configPath, DataDir: *dataDir})
+	if code != 0 {
+		return code
+	}
+	defer runtime.Close()
+	cleanup, ok := runtime.(cleanupRuntime)
+	if !ok {
+		fmt.Fprintln(a.stderr, "cleanup retry is unavailable")
+		return 1
+	}
+	run, err := cleanup.RetryCleanup(ctx, flags.Arg(0))
+	if err != nil {
+		fmt.Fprintf(a.stderr, "cleanup retry: %v\n", err)
+		if run.CleanupStatus == domain.CleanupDirty || run.CleanupStatus == domain.CleanupUnknown {
+			return 4
+		}
+		return 1
+	}
+	fmt.Fprintf(a.stdout, "Run %s cleanup: %s\n", run.ID, run.CleanupStatus)
+	return 0
+}
+
 func (a *App) runExport(ctx context.Context, args []string) int {
 	flags := flag.NewFlagSet("export", flag.ContinueOnError)
 	flags.SetOutput(a.stderr)
