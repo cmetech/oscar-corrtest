@@ -813,3 +813,21 @@ func TestRunRejectsMissingListenAddress(t *testing.T) {
 		t.Fatalf("error=%v", err)
 	}
 }
+
+func TestStreamingResponsesDisableServerWriteDeadline(t *testing.T) {
+	writer := &deadlineResponseWriter{ResponseRecorder: httptest.NewRecorder()}
+	disableStreamingDeadline(writer)
+	if len(writer.deadlines) != 1 || !writer.deadlines[0].IsZero() {
+		t.Fatalf("deadlines=%v", writer.deadlines)
+	}
+}
+
+type deadlineResponseWriter struct {
+	*httptest.ResponseRecorder
+	deadlines []time.Time
+}
+
+func (w *deadlineResponseWriter) SetWriteDeadline(deadline time.Time) error {
+	w.deadlines = append(w.deadlines, deadline)
+	return nil
+}

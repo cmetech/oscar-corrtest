@@ -43,7 +43,7 @@ WantedBy=default.target
 `, html.EscapeString(executable), html.EscapeString(paths.StateDir), html.EscapeString(paths.BootstrapLog), html.EscapeString(paths.BootstrapLog))), nil
 	case "windows":
 		arguments := fmt.Sprintf(`/d /s /c ""%s" serve >> "%s" 2>&amp;1"`, html.EscapeString(executable), html.EscapeString(paths.BootstrapLog))
-		return []byte(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-16"?>
+		return []byte(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger></Triggers>
   <Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><RestartOnFailure><Interval>PT3S</Interval><Count>3</Count></RestartOnFailure></Settings>

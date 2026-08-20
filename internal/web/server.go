@@ -545,6 +545,7 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		disableStreamingDeadline(w)
 		flusher, _ := w.(http.Flusher)
 		for {
 			events, listErr := data.ListRunEvents(r.Context(), r.PathValue("id"))
@@ -680,7 +681,10 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		disableStreamingDeadline(w)
 		flusher, _ := w.(http.Flusher)
+		subscription := controller.SubscribeLogs()
+		defer subscription.Cancel()
 		if snapshot, err := controller.Snapshot(r.Context()); err == nil {
 			writeSSE(w, "service", snapshot.Service)
 		}
@@ -690,8 +694,6 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 		if flusher != nil {
 			flusher.Flush()
 		}
-		subscription := controller.SubscribeLogs()
-		defer subscription.Cancel()
 		serviceTicker := time.NewTicker(5 * time.Second)
 		defer serviceTicker.Stop()
 		heartbeat := time.NewTicker(15 * time.Second)
@@ -793,6 +795,12 @@ func writeSSE(w io.Writer, event string, value any) {
 		return
 	}
 	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, encoded)
+}
+
+func disableStreamingDeadline(w http.ResponseWriter) {
+	// The server has a bounded WriteTimeout for ordinary responses. Streaming
+	// endpoints own their lifetime through the request context and heartbeats.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 }
 
 func render(w http.ResponseWriter, tmpl *template.Template, nonce nonceFunc, data pageData) {

@@ -87,6 +87,22 @@ func TestManagerNormalizesStatusAndLifecycleCommands(t *testing.T) {
 	}
 }
 
+func TestDarwinMissingLoadedServiceIsStoppedWhenDefinitionExists(t *testing.T) {
+	runner := &recordingRunner{responses: [][]byte{[]byte("Could not find service io.cmetech.oscar-corrtest in domain for user")}, err: errors.New("exit status 113")}
+	options := testOptions(t, "darwin", runner)
+	if err := os.WriteFile(options.Paths.ServiceDefinition, []byte("plist"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := manager.Status(context.Background())
+	if err != nil || status.State != StateStopped {
+		t.Fatalf("status=%+v err=%v", status, err)
+	}
+}
+
 func TestUninstallPreservesState(t *testing.T) {
 	runner := &recordingRunner{}
 	options := testOptions(t, "linux", runner)

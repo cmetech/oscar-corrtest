@@ -40,3 +40,38 @@ func TestRotatingWriterRetainsFiveBackups(t *testing.T) {
 		t.Fatalf("unexpected sixth backup: %v", err)
 	}
 }
+
+func TestRenameReplacingPreservesDestinationWhenSourceIsAbsent(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "missing")
+	destination := filepath.Join(root, "destination")
+	if err := os.WriteFile(destination, []byte("existing"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := renameReplacing(source, destination); !os.IsNotExist(err) {
+		t.Fatalf("error=%v", err)
+	}
+	data, err := os.ReadFile(destination)
+	if err != nil || string(data) != "existing" {
+		t.Fatalf("destination=%q err=%v", data, err)
+	}
+}
+
+func TestRenameReplacingOverwritesExistingDestination(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	destination := filepath.Join(root, "destination")
+	if err := os.WriteFile(source, []byte("new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(destination, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := renameReplacing(source, destination); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(destination)
+	if err != nil || string(data) != "new" {
+		t.Fatalf("destination=%q err=%v", data, err)
+	}
+}

@@ -284,7 +284,7 @@ func writeTail(path string, output io.Writer, count int) (int64, error) {
 
 func isNotFound(value string) bool {
 	lower := strings.ToLower(value)
-	return strings.Contains(lower, "not found") || strings.Contains(lower, "could not be found") || strings.Contains(lower, "no such process") || strings.Contains(lower, "does not exist")
+	return strings.Contains(lower, "not found") || strings.Contains(lower, "could not be found") || strings.Contains(lower, "could not find service") || strings.Contains(lower, "no such process") || strings.Contains(lower, "does not exist")
 }
 
 func isAlreadyLoaded(value string) bool {

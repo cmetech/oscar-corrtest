@@ -72,7 +72,7 @@ func (w *rotatingWriter) rotate() error {
 			source = fmt.Sprintf("%s.%d", w.path, index-1)
 		}
 		destination := fmt.Sprintf("%s.%d", w.path, index)
-		if err := os.Rename(source, destination); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := renameReplacing(source, destination); err != nil && !errors.Is(err, os.ErrNotExist) {
 			_ = w.open()
 			return err
 		}
@@ -85,6 +85,19 @@ func (w *rotatingWriter) rotate() error {
 	}
 	w.size = 0
 	return w.open()
+}
+
+func renameReplacing(source, destination string) error {
+	if _, err := os.Stat(source); err != nil {
+		return err
+	}
+	// Windows does not allow os.Rename to replace an existing file. Check the
+	// source first so a missing/corrupt rotation chain cannot erase a surviving
+	// older backup.
+	if err := os.Remove(destination); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return os.Rename(source, destination)
 }
 
 func (w *rotatingWriter) Close() error {
