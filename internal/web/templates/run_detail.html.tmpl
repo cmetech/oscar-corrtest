@@ -7,7 +7,9 @@
   <div class="summary-card"><span>Cleanup</span><strong>{{.Run.CleanupStatus}}</strong></div>
   <div class="summary-card"><span>Short token</span><strong><code>{{.Run.ShortToken}}</code></strong></div>
 </section>
+{{if eq .Run.Status "COMPLETED"}}<p><a class="primary-button" href="/runs/{{.Run.ID}}/export">Download verified evidence bundle</a></p>{{end}}
 <section class="panel"><h2>Timeline</h2><p class="muted" data-stream-state aria-live="polite">{{if eq .Run.Status "COMPLETED"}}Terminal{{else}}Connecting to live events{{end}}</p><ol class="timeline" data-run-timeline data-run-id="{{.Run.ID}}">{{range .Events}}<li data-sequence="{{.Sequence}}"><time>{{.OccurredAt}}</time><strong>{{.Summary}}</strong><code>{{.Type}}</code></li>{{else}}<li class="muted" data-empty>Waiting for lifecycle events.</li>{{end}}</ol></section>
 <section class="panel"><h2>Evidence integrity</h2>{{if .Artifacts}}<div class="data-table-wrapper"><table><caption>Artifact integrity</caption><thead><tr><th>Artifact</th><th>State</th><th>Details</th></tr></thead><tbody>{{range .Artifacts}}<tr><td><code>{{.Artifact.RelativePath}}</code></td><td>{{.Integrity}}</td><td>{{if eq .Integrity "valid"}}Verified{{else}}<strong>Integrity warning</strong>{{if .Error}}: {{.Error}}{{end}}{{end}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="muted">No artifacts recorded.</p>{{end}}</section>
 {{if .Run.CanonicalReportJSON}}<section class="panel"><h2>Canonical report JSON</h2><pre>{{printf "%s" .Run.CanonicalReportJSON}}</pre></section>{{end}}
+{{if .Run.CompiledPlanJSON}}<section class="panel"><h2>Inspect in OSCAR</h2><p>Use the exact run, alert names, category, case, role, and temporary-rule filters in this immutable plan when manually inspecting OSCAR.</p><pre>{{printf "%s" .Run.CompiledPlanJSON}}</pre></section>{{end}}
 {{end}}

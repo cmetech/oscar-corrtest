@@ -14,10 +14,13 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/domain"
+	"github.com/cmetech/oscar-corrtest/internal/evidence"
 	"github.com/cmetech/oscar-corrtest/internal/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/version"
 )
@@ -73,6 +76,10 @@ type nonceFunc func() (string, error)
 
 type runStarter interface {
 	StartBuiltin(context.Context, string, string, string) (domain.Run, error)
+}
+
+type runExporter interface {
+	ExportRun(context.Context, string, string) (evidence.Result, error)
 }
 
 // NewHandler returns the Plan-1 shell with no durable data source.
@@ -254,6 +261,35 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 			return
 		}
 		render(w, tmpl, nonce, pageData{Version: info, Page: "run-detail", Run: &run, Events: events, Artifacts: artifacts, Readiness: readiness(data)})
+	})
+	mux.HandleFunc("GET /runs/{id}/export", func(w http.ResponseWriter, r *http.Request) {
+		exporter, ok := data.(runExporter)
+		if !ok {
+			http.Error(w, "evidence export unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		directory, err := os.MkdirTemp("", "oscar-corrtest-export-*")
+		if err != nil {
+			http.Error(w, "evidence export unavailable", http.StatusInternalServerError)
+			return
+		}
+		defer os.RemoveAll(directory)
+		destination := filepath.Join(directory, "evidence.zip")
+		if _, err := exporter.ExportRun(r.Context(), r.PathValue("id"), destination); err != nil {
+			http.Error(w, "evidence export failed", http.StatusUnprocessableEntity)
+			return
+		}
+		data, err := os.ReadFile(destination) // #nosec G304 -- destination is a server-generated file in a fresh private directory.
+		if err != nil || len(data) > 64<<20 {
+			http.Error(w, "evidence export unavailable", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="oscar-corrtest-%s.zip"`, r.PathValue("id")))
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
 	})
 	mux.HandleFunc("GET /runs/{id}/events", func(w http.ResponseWriter, r *http.Request) {
 		if data == nil {
