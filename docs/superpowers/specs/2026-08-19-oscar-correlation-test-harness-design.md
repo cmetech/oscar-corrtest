@@ -7,9 +7,19 @@
 **Post-read action:** run the focused remediation confirmation, execute the repository-foundation plan, then plan the SQLite-ledger slice
 **Review record:** `docs/reviews/2026-08-19-oscar-corrtest-adversarial-plan-review.md`
 
+**Listener/distribution amendment (2026-08-20):**
+`2026-08-20-oscar-corrtest-distribution-and-open-listener-design.md`
+supersedes this document's original Linux-only distribution scope and its
+loopback-only/no-unauthenticated-remote clauses in §§17, 19.2, 23.1, and 24.
+
 ## 1. Decision summary
 
-Build a standalone Go application named **OSCAR Correlation Test Harness**. It ships as one Linux executable with an embedded web UI and a complete CLI. The harness creates temporary correlation rules through OSCAR's public API, sends deterministic synthetic alerts, observes OSCAR's public evidence surfaces, evaluates explicit assertions, cleans up every resource it created, and preserves a durable report.
+Build a standalone Go application named **OSCAR Correlation Test Harness**. It
+ships as one self-contained executable per supported Linux, macOS, and Windows
+platform, with an embedded web UI and a complete CLI. The harness creates
+temporary correlation rules through OSCAR's public API, sends deterministic
+synthetic alerts, observes OSCAR's public evidence surfaces, evaluates explicit
+assertions, cleans up every resource it created, and preserves a durable report.
 
 The application uses:
 
@@ -801,7 +811,9 @@ oscar-corrtest backup --output ./corrtest-backup.db
 
 Human output defaults to concise tables and progress lines. `--output json` produces versioned machine-readable envelopes. `--no-color` and the `NO_COLOR` convention are supported. Destructive commands require an exact run or resource identifier and an explicit confirmation unless `--yes` is supplied.
 
-`serve` binds to `127.0.0.1:8787` by default. The repository-foundation release rejects non-loopback, wildcard, and empty-host listeners. A later remote-serving feature may permit them only with an explicit remote-mode flag and configured UI authentication or a declared authenticated reverse proxy; there is no unauthenticated override.
+Superseded by the 2026-08-20 amendment: `serve` binds to `0.0.0.0:8787` by
+default and prints an unauthenticated-network warning. Explicit loopback,
+bearer/TLS, and trusted-proxy modes remain available.
 
 ## 18. Configuration and credentials
 
@@ -840,7 +852,10 @@ TLS verification defaults to enabled. A custom CA file is supported. An insecure
 - Security headers include a restrictive Content Security Policy, frame denial, MIME sniffing prevention, and a conservative referrer policy.
 - Templates auto-escape dynamic content. Evidence is rendered as text, never injected HTML.
 - Download filenames and artifact paths are server-generated and traversal-safe.
-- The default loopback bind exposes no unauthenticated remote service.
+- The intentional wildcard default warns that every reachable peer can use the
+  harness's configured mutation authority; operators supply the lab-network or
+  firewall boundary. This supersedes the original loopback-only threat-model
+  invariant.
 
 ### 19.3 Local data safety
 
@@ -1007,20 +1022,23 @@ The six product slices are delivered by seven implementation plans because Slice
 
 | Plan | Product-slice ownership | Mandatory gate before completion |
 |---|---|---|
-| Plan 1 | Slice 1A: repository, executable/HTTP shell, theme, builds, packages, dual CI | Standalone archive build, loopback-only listener tests, reproducible-package check |
+| Plan 1 | Slice 1A: repository, executable/HTTP shell, theme, builds, packages, dual CI | Historical foundation gate; its loopback-only clause is superseded by the 2026-08-20 listener/distribution amendment |
 | Plan 2 | Slice 1B: configuration, SQLite ledger, artifact/report history | Migration/WAL/recovery/backup tests and durable interrupted-run evidence |
 | Plan 3 | Slice 2: first live flood vertical slice | Pipeline-mode/readiness snapshot, label-survival probe, history fingerprint read-back, safe create-only rule lifecycle, Phase-A false-pass tests |
 | Plan 4 | Slice 3: window/order patterns | Per-pattern positive/negative fixtures matching current OSCAR ordering, source, and distinct-value semantics |
 | Plan 5 | Slice 4: timer patterns | Fake-clock coverage plus live persistence/absence timing qualification |
 | Plan 6 | Slice 5: parent-child/notifier evidence | Phase-B qualification and notification-evidence contract verification |
-| Plan 7 | Slice 6: custom scenarios and operational hardening | Remote serving may be introduced only with authentication or an explicitly declared authenticated reverse proxy; full browser/security and all-pattern qualification |
+| Plan 7 | Slice 6: custom scenarios and operational hardening | Historical remote-serving clause superseded by the 2026-08-20 amendment; full browser/security and all-pattern qualification remains required |
 
 ## 24. Acceptance criteria
 
 The version 1 design is complete when all of the following are true:
 
-- One executable starts the CLI and embedded UI on a supported Linux VM without Python, Node, CGO, or an external database.
-- The foundation release refuses non-loopback, wildcard, and empty-host listeners; any later remote-serving mode is authenticated or explicitly deployed behind an authenticated reverse proxy.
+- One executable starts the CLI and embedded UI on each supported release
+  platform without Python, Node, CGO, or an external database.
+- The default unauthenticated wildcard listener is directly reachable and
+  warns about its mutation authority; explicit loopback and authenticated
+  modes retain their respective Host/authentication protections.
 - A user can configure an OSCAR target without storing its secret value in SQLite.
 - The harness can validate, create, read, and delete a uniquely owned correlation rule through public APIs.
 - Temporary rule setup uses create/read/delete only, never import/upsert, and unknown create outcomes are reconciled without modifying a pre-existing same-name rule.

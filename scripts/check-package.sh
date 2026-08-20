@@ -8,6 +8,7 @@ fi
 
 required_members='oscar-corrtest/bin/OSCAR_CORRTEST_BINARY
 oscar-corrtest/README.md
+oscar-corrtest/docs/install.md
 oscar-corrtest/docs/operator.md
 oscar-corrtest/docs/builtins.md
 oscar-corrtest/docs/live-qualification.md

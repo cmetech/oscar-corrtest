@@ -7,7 +7,8 @@ The harness is a single CGO-free executable with embedded UI assets and a local 
 Store only a credential reference:
 
 ```bash
-oscar-corrtest target add --name lab-a --url https://oscar.example/ext/mw --credential-env OSCAR_API_TOKEN
+export OSCAR_API_KEY='...'
+oscar-corrtest target add --name lab-a --url https://oscar.example/ext/mw --credential-env OSCAR_API_KEY
 oscar-corrtest doctor --target <target-id> --pipeline-mode phase_b_dispatch
 ```
 
@@ -49,7 +50,19 @@ The Scenarios UI accepts bounded strict YAML/JSON source. Preview compiles throu
 
 ## Serving modes
 
-Loopback mode needs no UI authentication:
+The default starts an unauthenticated HTTP listener on every interface:
+
+```bash
+oscar-corrtest serve
+```
+
+Open `http://<server-ip>:8787`. No OSCAR API key, UI token, certificate, proxy,
+or tunnel is needed to start or browse the UI. Because any reachable peer can
+view evidence and initiate mutations through configured targets, constrain
+port 8787 with the lab network/firewall boundary.
+
+Loopback mode remains available for local-only access and applies the strict
+loopback Host allowlist:
 
 ```bash
 oscar-corrtest serve --listen 127.0.0.1:8787
@@ -73,23 +86,26 @@ oscar-corrtest serve --listen 0.0.0.0:8787 --remote-mode trusted-proxy \
 
 Never expose trusted-proxy mode directly to untrusted networks. Firewall the listener so only the declared proxy networks can connect.
 
-The scratch container defaults to `help` so it never starts an unreachable or
-unauthenticated service implicitly. Its `/var/lib/oscar-corrtest` directory is
-owned by UID/GID 65532. On a Linux host, either keep loopback semantics with
-host networking:
+The scratch container defaults to `help`, so it never starts a network service
+implicitly. Its `/var/lib/oscar-corrtest` directory is owned by UID/GID 65532.
+For the directly reachable default:
 
 ```bash
-docker run --rm --network host -v corrtest-data:/var/lib/oscar-corrtest \
-  oscar-corrtest serve --listen 127.0.0.1:8787 --data-dir /var/lib/oscar-corrtest
+docker run --rm -p 8787:8787 -v corrtest-data:/var/lib/oscar-corrtest \
+  oscar-corrtest serve --data-dir /var/lib/oscar-corrtest
 ```
 
-or bind non-loopback only with the same bearer/TLS or restricted trusted-proxy
-policy required by the native binary. Do not publish a loopback-bound container
-port and assume it is reachable through Docker's port forwarding.
+The same firewall warning applies. Add bearer/TLS or restricted trusted-proxy
+mode when the UI needs its own authentication boundary. Do not publish a
+loopback-bound container port and assume it is reachable through Docker's port
+forwarding.
 
 ## systemd credentials
 
-The included unit runs loopback-only by default. For bearer mode, provision a credential without placing its value in the unit or environment:
+The included example unit listens on `0.0.0.0:8787`, matching the application
+default. It is not installed by either user-scoped installer. For optional
+bearer mode, provision a credential without placing its value in the unit or
+environment:
 
 ```bash
 systemd-creds encrypt --name=corrtest-ui-token - /etc/credstore.encrypted/corrtest-ui-token

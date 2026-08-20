@@ -26,9 +26,11 @@ No Python, Node, Docker, frontend toolchain, OSCAR source checkout, or CGO is re
 | `plan2-gate` | Run focused configuration, migration/WAL/recovery, artifact/report, backup, runtime, and UI tests |
 | `plan3-gate` … `plan7-gate` | Run focused qualification for each correlation delivery plan |
 | `build` | Build the host binary in `bin/` with linker metadata |
-| `cross` | Build CGO-free Linux AMD64 and ARM64 executables |
-| `package` | Produce deterministic Linux archives using GNU tar and `gzip -n` |
+| `cross` | Build CGO-free Linux amd64/arm64, macOS amd64/arm64, and Windows amd64 executables |
+| `package` | Produce deterministic tar/gzip and Windows ZIP release archives |
 | `checksums` | Write a deterministically ordered `dist/SHA256SUMS` |
+| `installer-posix-check` | Exercise the checksum-verifying installer against a real host archive |
+| `release-script-check` | Exercise guarded tagging against disposable Git repositories and remotes |
 | `archive-mod-check` | Verify and check module tidiness without requiring Git metadata |
 | `standalone-check` | Build and test from `git archive` with isolated caches and no parent source dependency |
 | `ci-core` | Run formatting, module, vet, security, test, race, and host-build gates |
@@ -41,7 +43,12 @@ Both GitHub Actions and GitLab CI/CD call these Make targets rather than duplica
 
 ## Reproducible builds
 
-Build metadata is derived from the current Git commit. `SOURCE_DATE_EPOCH` uses the commit timestamp. Release archives stage the executable, README, operator/built-in/schema documentation, systemd unit, and Containerfile beneath an `oscar-corrtest/` directory, normalize member order, ownership, and timestamps with GNU tar, and remove gzip timestamps with `gzip -n`.
+Build metadata is derived from the current Git commit. `SOURCE_DATE_EPOCH` uses
+the commit timestamp. Release archives stage the executable, README,
+installation/operator/built-in/schema documentation, systemd unit, and
+Containerfile beneath an `oscar-corrtest/` directory. GNU tar/gzip normalizes
+the Linux/macOS archives; the repository's Go ZIP writer normalizes Windows
+member order, modes, and timestamps.
 
 ```bash
 make package checksums
@@ -56,7 +63,10 @@ make build
 ./bin/oscar-corrtest serve --listen 127.0.0.1:8787 --data-dir /tmp/oscar-corrtest-state
 ```
 
-Literal IPv4 or IPv6 loopback is the no-auth default. Non-loopback serving requires either TLS-protected bearer/session authentication or an explicit trusted-proxy policy with restricted peer CIDRs and an exact identity header/value. See `docs/operator.md`.
+Omit `--listen` to use the unauthenticated, directly reachable
+`0.0.0.0:8787` default. The explicit loopback command above is useful for
+local-only development. Optional TLS-protected bearer/session authentication
+and trusted-proxy policy remain available. See `docs/operator.md`.
 
 ## SQLite and evidence development
 
@@ -88,7 +98,29 @@ The database backup excludes evidence directories. Back up the complete state di
 
 ## Service and release gates
 
-The example `packaging/oscar-corrtest.service` requires operators to provision an `oscar-corrtest` system user and group. Its loopback listener is deliberate. `StateDirectory=` and `ConfigurationDirectory=` provide the only writable service locations while `ProtectSystem=strict` remains enabled.
+The example `packaging/oscar-corrtest.service` requires operators to provision
+an `oscar-corrtest` system user and group. Its wildcard listener matches the
+application default and requires an appropriate test-network firewall.
+`StateDirectory=` and `ConfigurationDirectory=` provide the only writable
+service locations while `ProtectSystem=strict` remains enabled. The user-scoped
+installers do not install this unit.
+
+## Creating a GitHub release
+
+Configure `origin` to the public `cmetech/oscar-corrtest` GitHub repository,
+merge the intended release commit to protected `main`, and keep the worktree
+clean. Then run:
+
+```bash
+./scripts/release.sh v1.2.3
+```
+
+The script fetches `origin`, requires local `HEAD` to equal `origin/main`,
+checks local/remote tag and GitHub Release collisions, runs
+`make clean release-gate VERSION=v1.2.3`, verifies the complete release set,
+creates an annotated tag, and pushes only that tag. GitHub Actions independently
+rebuilds the assets, runs the Windows installer smoke, and publishes the
+release. The script never pushes application commits or removes a failed tag.
 
 Before creating the first real semantic tag on either remote, confirm GitHub release permissions and branch protection, then confirm the GitLab `CI_JOB_TOKEN` can upload package-registry assets and create release links. Local workflow validation cannot prove those remote settings.
 

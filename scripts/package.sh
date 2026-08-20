@@ -71,6 +71,7 @@ if [ "$os_name" = windows ]; then
 fi
 install -m 0755 "$binary" "$package_root/bin/$binary_name"
 install -m 0644 "$root_dir/README.md" "$package_root/README.md"
+install -m 0644 "$root_dir/docs/install.md" "$package_root/docs/install.md"
 install -m 0644 "$root_dir/docs/operator.md" "$package_root/docs/operator.md"
 install -m 0644 "$root_dir/docs/builtins.md" "$package_root/docs/builtins.md"
 install -m 0644 "$root_dir/docs/live-qualification.md" "$package_root/docs/live-qualification.md"

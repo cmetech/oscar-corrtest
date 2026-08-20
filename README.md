@@ -4,29 +4,49 @@
 
 ## Quick start
 
-Go 1.27.0 or newer is required to build. Released Linux binaries are CGO-free and need no Go, Python, Node, external database, or OSCAR source checkout.
+Install the latest Linux or macOS release into `$HOME/.local/bin`:
 
 ```bash
-make build
-export OSCAR_API_TOKEN='...'
-./bin/oscar-corrtest target add \
-  --name lab-a --url https://oscar.example/ext/mw \
-  --credential-env OSCAR_API_TOKEN --output json
-
-./bin/oscar-corrtest doctor \
-  --target <target-id> --pipeline-mode phase_b_dispatch
-
-./bin/oscar-corrtest plan builtin:flood \
-  --target <target-id> --pipeline-mode phase_b_dispatch
-
-./bin/oscar-corrtest run builtin:flood \
-  --target <target-id> --pipeline-mode phase_b_dispatch
-
-./bin/oscar-corrtest serve
+curl -fsSL https://raw.githubusercontent.com/cmetech/oscar-corrtest/main/scripts/install.sh | sh
 ```
 
-Open <http://127.0.0.1:8787>. Runs started from the browser continue if the browser disconnects; reconnecting replays persisted events.
+Then start the UI explicitly—no certificate, UI token, SSH tunnel, or OSCAR
+API key is required to start it:
+
+```bash
+oscar-corrtest serve
+```
+
+Open `http://<server-ip>:8787`. The default listener is directly reachable and
+unauthenticated; use it only where network access is appropriate for a test
+tool that can create temporary rules and inject alerts. The installer never
+starts a background service.
+
+Configure an OSCAR target when you are ready to run tests:
+
+```bash
+export OSCAR_API_KEY='...'
+oscar-corrtest target add \
+  --name lab-a --url https://oscar.example/ext/mw \
+  --credential-env OSCAR_API_KEY --output json
+
+oscar-corrtest doctor \
+  --target <target-id> --pipeline-mode phase_b_dispatch
+
+oscar-corrtest plan builtin:flood \
+  --target <target-id> --pipeline-mode phase_b_dispatch
+
+oscar-corrtest run builtin:flood \
+  --target <target-id> --pipeline-mode phase_b_dispatch
+```
+
+Only the API-key reference is stored; the value remains in the environment.
+Runs started from the browser continue if the browser disconnects; reconnecting replays persisted events.
 The Scenarios page validates, previews, and imports strict YAML/JSON. Active run pages provide cancellation with bounded cleanup; cleanup-safe terminal runs can be deleted only after local artifact verification.
+
+Windows amd64 and version-pinned installation are also supported. See the
+[installation guide](docs/install.md) for Windows PowerShell, upgrades,
+configuration, backup, and uninstall.
 
 ## What is tested
 
@@ -79,7 +99,11 @@ SQLite uses WAL, foreign keys, a busy timeout, and full synchronous writes. Keep
 
 ## Serving securely
 
-Default serving accepts only literal loopback IPs. Direct non-loopback bearer mode requires TLS and an environment/file/systemd credential reference. Trusted-proxy mode requires explicit proxy CIDRs plus an exact identity header/value and rejects direct or spoofed requests.
+Default serving uses unauthenticated HTTP on `0.0.0.0:8787`. Startup prints a
+warning because any reachable peer can use the harness's configured mutation
+authority. Bind `127.0.0.1:8787` for local-only use. Optional direct bearer
+mode requires TLS and a separate UI credential reference; trusted-proxy mode
+requires explicit proxy CIDRs plus an exact identity header/value.
 
 ```bash
 oscar-corrtest serve --listen 0.0.0.0:8787 \
@@ -101,7 +125,11 @@ make release-gate
 make live-qualification
 ```
 
-`make package checksums` writes deterministic Linux AMD64 and ARM64 archives to `dist/`. Archives include the executable, operator docs, scenario schema, systemd unit, and scratch-based `Containerfile`. Both CI systems use immutable action/image pins and publish packaged archives rather than raw binaries.
+`make package checksums` writes deterministic Linux amd64/arm64, macOS
+amd64/arm64, and Windows amd64 archives plus `SHA256SUMS` to `dist/`. Archives
+include the executable, installation/operator docs, scenario schema, systemd
+unit, and scratch-based `Containerfile`. Both CI systems use immutable
+action/image pins and publish packaged archives rather than raw binaries.
 
 Configuration precedence is flags, `OSCAR_CORRTEST_*` environment variables, a versioned JSON file, then XDG defaults:
 
@@ -109,8 +137,12 @@ Configuration precedence is flags, `OSCAR_CORRTEST_*` environment variables, a v
 {
   "apiVersion": "corrtest.oscar/v1alpha1",
   "dataDir": "/var/lib/oscar-corrtest",
-  "listenAddress": "127.0.0.1:8787"
+  "listenAddress": "0.0.0.0:8787"
 }
 ```
 
 Targets persist credential references only. Secret values are resolved in memory for a request and are excluded from SQLite, reports, HTML, SSE, and evidence bundles.
+
+Go 1.27.0 or newer is required only to build from source; released binaries
+are CGO-free and need no Go, Python, Node, external database, or OSCAR source
+checkout.
