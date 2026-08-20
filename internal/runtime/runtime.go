@@ -37,6 +37,7 @@ type Runtime struct {
 	readiness Readiness
 	version   string
 	runMu     sync.Mutex
+	rootCtx   context.Context
 }
 
 // Open initializes local state, migrations, artifact storage, and interrupted-run recovery.
@@ -64,7 +65,7 @@ func Open(ctx context.Context, settings config.Settings, info version.Info) (*Ru
 	service := history.New(database, nil, nil)
 	result := &Runtime{
 		settings: settings, database: database, history: service, artifacts: artifacts,
-		readiness: Readiness{Ready: database.Ready() == nil, DatabasePath: databasePath}, version: info.Version,
+		readiness: Readiness{Ready: database.Ready() == nil, DatabasePath: databasePath}, version: info.Version, rootCtx: ctx,
 	}
 	if readyErr := database.Ready(); readyErr != nil {
 		result.readiness.Error = readyErr.Error()
@@ -117,6 +118,37 @@ func (r *Runtime) ExecuteBuiltin(ctx context.Context, targetID, pattern, pipelin
 		return run, getErr
 	}
 	return stored, executeErr
+}
+
+// StartBuiltin validates and persists a queued run, then executes independently
+// from the initiating browser request. The process root context still controls shutdown.
+func (r *Runtime) StartBuiltin(ctx context.Context, targetID, pattern, pipelineMode string, labelsSurvived bool) (domain.Run, error) {
+	target, err := r.GetTarget(ctx, targetID)
+	if err != nil {
+		return domain.Run{}, err
+	}
+	if _, err := r.PreviewBuiltin(ctx, targetID, pattern, pipelineMode); err != nil {
+		return domain.Run{}, err
+	}
+	client, err := oscar.New(target, oscar.Options{HarnessVersion: r.version})
+	if err != nil {
+		return domain.Run{}, err
+	}
+	run, err := r.history.CreateRun(ctx, targetID, "", r.version)
+	if err != nil {
+		return domain.Run{}, err
+	}
+	plan, err := compiler.Compile(run, scenario.Builtin(pattern), compiler.Capabilities{PipelineMode: pipelineMode})
+	if err != nil {
+		return domain.Run{}, err
+	}
+	go func() {
+		r.runMu.Lock()
+		defer r.runMu.Unlock()
+		engine := runner.New(r.database, client, runner.Options{})
+		_ = engine.Execute(r.rootCtx, run, plan, runner.CapabilitySnapshot{APIProfile: target.APIProfile, PipelineMode: pipelineMode, Ready: true, LabelsSurvived: labelsSurvived, Compatibility: true})
+	}()
+	return run, nil
 }
 
 // Readiness returns the immutable startup readiness snapshot.

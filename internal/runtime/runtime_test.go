@@ -118,3 +118,18 @@ func TestPreviewBuiltinUsesStoredTargetWithoutMutation(t *testing.T) {
 		t.Fatalf("preview persisted a run: %+v err=%v", runs, err)
 	}
 }
+
+func TestStartBuiltinRejectsUnknownTargetWithoutCreatingRun(t *testing.T) {
+	runtime, err := Open(context.Background(), config.Settings{DataDir: t.TempDir(), ListenAddress: "127.0.0.1:8787"}, version.Info{Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runtime.Close() })
+	if _, err := runtime.StartBuiltin(context.Background(), "tgt_missing", "flood", "phase_b_dispatch", true); err == nil {
+		t.Fatal("unknown target accepted")
+	}
+	runs, err := runtime.ListRuns(context.Background(), domain.RunFilter{})
+	if err != nil || len(runs) != 0 {
+		t.Fatalf("failed start created run: %+v err=%v", runs, err)
+	}
+}

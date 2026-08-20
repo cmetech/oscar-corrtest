@@ -1,0 +1,15 @@
+{{define "run-test"}}
+<section class="page-heading"><p class="eyebrow">Deterministic black-box proof</p><h1>Run correlation test</h1><p>Review the target, pipeline mode, label-survival qualification, and mutation scope before starting.</p></section>
+{{if .Error}}<div class="notice notice--error" role="alert">{{.Error}}</div>{{end}}
+<section class="panel">
+  <form method="post" action="/runs" class="form-grid">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <label>Target<select name="target_id" required>{{range .Targets}}<option value="{{.ID}}">{{.DisplayName}} — {{.BaseURL}}</option>{{end}}</select></label>
+    <label>Pattern<select name="pattern" required>{{range .Scenarios}}<option value="{{.Pattern}}">{{.Pattern}} — {{len .Cases}} cases</option>{{end}}</select></label>
+    <label>Pipeline mode<select name="pipeline_mode" required><option value="phase_b_dispatch">Phase B — audit and dispatch</option><option value="phase_a_audit_only">Phase A — audit only (cannot pass dispatch assertions)</option></select></label>
+    <label><input type="checkbox" name="labels_survived" required> Reserved labels survived a public-v1 injection/history probe</label>
+    <button type="submit">Start run</button>
+  </form>
+</section>
+<section class="panel"><h2>Built-in coverage</h2><div class="data-table-wrapper"><table><caption>Positive and negative scenarios</caption><thead><tr><th>Pattern</th><th>Scenario</th><th>Cases</th></tr></thead><tbody>{{range .Scenarios}}<tr><td><code>{{.Pattern}}</code></td><td>{{.Name}}</td><td>{{len .Cases}}</td></tr>{{end}}</tbody></table></div></section>
+{{end}}

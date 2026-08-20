@@ -14,9 +14,11 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/domain"
+	"github.com/cmetech/oscar-corrtest/internal/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/version"
 )
 
@@ -56,6 +58,7 @@ type pageData struct {
 	Verdict   string
 	Cleanup   string
 	Pattern   string
+	Scenarios []scenario.Scenario
 }
 
 type readinessView struct {
@@ -64,6 +67,10 @@ type readinessView struct {
 }
 
 type nonceFunc func() (string, error)
+
+type runStarter interface {
+	StartBuiltin(context.Context, string, string, string, bool) (domain.Run, error)
+}
 
 // NewHandler returns the Plan-1 shell with no durable data source.
 func NewHandler(info version.Info) http.Handler {
@@ -169,6 +176,48 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 		}
 		render(w, tmpl, nonce, view)
 	})
+	mux.HandleFunc("GET /run-test", func(w http.ResponseWriter, r *http.Request) {
+		view := pageData{Version: info, Page: "run-test", Readiness: readiness(data), Scenarios: scenario.AllBuiltins()}
+		if data != nil {
+			targets, err := data.ListTargets(r.Context())
+			if err != nil {
+				renderStatus(w, tmpl, nonce, http.StatusServiceUnavailable, pageData{Version: info, Page: "run-test", Error: err.Error(), Readiness: readiness(data)})
+				return
+			}
+			view.Targets = targets
+			if csrfErr == nil {
+				view.CSRFToken = csrfToken(w, r, csrfSecret)
+			}
+		}
+		render(w, tmpl, nonce, view)
+	})
+	mux.HandleFunc("POST /runs", func(w http.ResponseWriter, r *http.Request) {
+		starter, ok := data.(runStarter)
+		if !ok || csrfErr != nil {
+			http.Error(w, "run execution unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid run form", http.StatusBadRequest)
+			return
+		}
+		if !sameOrigin(r) || !validCSRF(r, csrfSecret) {
+			http.Error(w, "request origin or CSRF token is invalid", http.StatusForbidden)
+			return
+		}
+		mode := r.FormValue("pipeline_mode")
+		if mode != "phase_a_audit_only" && mode != "phase_b_dispatch" {
+			http.Error(w, "pipeline mode is invalid", http.StatusUnprocessableEntity)
+			return
+		}
+		run, err := starter.StartBuiltin(r.Context(), r.FormValue("target_id"), r.FormValue("pattern"), mode, r.FormValue("labels_survived") == "on")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+		http.Redirect(w, r, "/runs/"+url.PathEscape(run.ID), http.StatusSeeOther)
+	})
 	mux.HandleFunc("GET /runs/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if data == nil {
 			http.NotFound(w, r)
@@ -190,6 +239,47 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 			return
 		}
 		render(w, tmpl, nonce, pageData{Version: info, Page: "run-detail", Run: &run, Events: events, Artifacts: artifacts, Readiness: readiness(data)})
+	})
+	mux.HandleFunc("GET /runs/{id}/events", func(w http.ResponseWriter, r *http.Request) {
+		if data == nil {
+			http.NotFound(w, r)
+			return
+		}
+		after, err := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+		if err != nil && r.URL.Query().Get("after") != "" {
+			http.Error(w, "after must be an event sequence", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		flusher, _ := w.(http.Flusher)
+		for {
+			events, listErr := data.ListRunEvents(r.Context(), r.PathValue("id"))
+			if listErr != nil {
+				return
+			}
+			for _, event := range events {
+				if event.Sequence <= after {
+					continue
+				}
+				encoded, _ := json.Marshal(event)
+				_, _ = fmt.Fprintf(w, "id: %d\nevent: run-event\ndata: %s\n\n", event.Sequence, encoded)
+				after = event.Sequence
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+			run, getErr := data.GetRun(r.Context(), r.PathValue("id"))
+			if getErr != nil || run.Status == domain.RunCompleted || run.Status == domain.RunInterrupted {
+				return
+			}
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(time.Second):
+			}
+		}
 	})
 	mux.HandleFunc("GET /settings", func(w http.ResponseWriter, _ *http.Request) {
 		render(w, tmpl, nonce, pageData{Version: info, Page: "settings", Readiness: readiness(data)})

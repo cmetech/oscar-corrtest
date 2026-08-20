@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
@@ -80,7 +81,7 @@ func TestDurableTargetsRunsAndSettingsPages(t *testing.T) {
 	}{
 		{"/targets", []string{"Targets", "Lab A", "OSCAR_API_TOKEN"}},
 		{"/runs?status=INTERRUPTED", []string{"Runs", run.ID, "INTERRUPTED"}},
-		{"/runs/" + run.ID, []string{"Run detail", run.ID, "NOT_REQUIRED"}},
+		{"/runs/" + run.ID, []string{"Run detail", run.ID, "NOT_REQUIRED", "data-run-timeline"}},
 		{"/settings", []string{"Settings", "corrtest.db", "Ready"}},
 	}
 	for _, test := range tests {
@@ -196,6 +197,48 @@ func TestRunDetailKeepsMissingArtifactVisible(t *testing.T) {
 	}
 }
 
+func TestRunTestPageStartsBackgroundRunWithCSRF(t *testing.T) {
+	data := &runUIData{}
+	handler := NewHandlerWithData(version.Info{Version: "test"}, data)
+	get := httptest.NewRequest(http.MethodGet, "http://example.com/run-test", nil)
+	getResponse := httptest.NewRecorder()
+	handler.ServeHTTP(getResponse, get)
+	if getResponse.Code != http.StatusOK || !strings.Contains(getResponse.Body.String(), "Run correlation test") || !strings.Contains(getResponse.Body.String(), "parent_child") {
+		t.Fatalf("GET status=%d body=%s", getResponse.Code, getResponse.Body.String())
+	}
+	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(getResponse.Body.String())
+	if len(match) != 2 {
+		t.Fatal("CSRF token missing")
+	}
+	values := url.Values{"csrf_token": {match[1]}, "target_id": {"tgt_lab"}, "pattern": {"flood"}, "pipeline_mode": {"phase_b_dispatch"}, "labels_survived": {"on"}}
+	post := httptest.NewRequest(http.MethodPost, "http://example.com/runs", strings.NewReader(values.Encode()))
+	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	post.Header.Set("Origin", "http://example.com")
+	post.AddCookie(getResponse.Result().Cookies()[0])
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, post)
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/runs/crt_ui" {
+		t.Fatalf("POST status=%d location=%q body=%s", response.Code, response.Header().Get("Location"), response.Body.String())
+	}
+	if data.pattern != "flood" || !data.labelsSurvived {
+		t.Fatalf("start args=%+v", data)
+	}
+}
+
+func TestRunEventsSSEReplaysAfterSequence(t *testing.T) {
+	handler := NewHandlerWithData(version.Info{}, &sseData{runUIData: runUIData{}})
+	request := httptest.NewRequest(http.MethodGet, "/runs/crt_ui/events?after=1", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.HasPrefix(response.Header().Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("status=%d headers=%v", response.Code, response.Header())
+	}
+	body := response.Body.String()
+	if strings.Contains(body, "id: 1") || !strings.Contains(body, "id: 2") || !strings.Contains(body, `"summary":"completed"`) {
+		t.Fatalf("SSE body=%q", body)
+	}
+}
+
 type diagnosticData struct{}
 
 func (diagnosticData) ReadyStatus() (bool, string) { return false, "migration checksum mismatch" }
@@ -224,6 +267,30 @@ func (missingArtifactData) GetRun(context.Context, string) (domain.Run, error) {
 		ID: "crt_00000000000000000000000000", ShortToken: "00000000", Status: domain.RunInterrupted,
 		CleanupStatus: domain.CleanupNotRequired,
 	}, nil
+}
+
+type runUIData struct {
+	diagnosticData
+	pattern        string
+	labelsSurvived bool
+}
+
+func (d *runUIData) ReadyStatus() (bool, string) { return true, "" }
+func (d *runUIData) ListTargets(context.Context) ([]domain.Target, error) {
+	return []domain.Target{{ID: "tgt_lab", DisplayName: "Lab", BaseURL: "https://oscar.example"}}, nil
+}
+func (d *runUIData) StartBuiltin(_ context.Context, targetID, pattern, mode string, labelsSurvived bool) (domain.Run, error) {
+	d.pattern, d.labelsSurvived = pattern, labelsSurvived
+	return domain.Run{ID: "crt_ui", ShortToken: "00000001", Status: domain.RunQueued, CleanupStatus: domain.CleanupNotRequired}, nil
+}
+
+type sseData struct{ runUIData }
+
+func (sseData) GetRun(context.Context, string) (domain.Run, error) {
+	return domain.Run{ID: "crt_ui", ShortToken: "00000001", Status: domain.RunCompleted, Verdict: domain.VerdictPass, CleanupStatus: domain.CleanupClean}, nil
+}
+func (sseData) ListRunEvents(context.Context, string) ([]domain.RunEvent, error) {
+	return []domain.RunEvent{{RunID: "crt_ui", Sequence: 1, Type: "old", Level: "info", OccurredAt: time.Now(), Summary: "old"}, {RunID: "crt_ui", Sequence: 2, Type: "done", Level: "info", OccurredAt: time.Now(), Summary: "completed"}}, nil
 }
 func (missingArtifactData) ListArtifactEvidence(context.Context, string) ([]domain.ArtifactEvidence, error) {
 	return []domain.ArtifactEvidence{{

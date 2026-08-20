@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="/static/css/components.css">
   <link rel="stylesheet" href="/static/css/pages.css">
   <script defer src="/static/js/theme.js"></script>
+	<script defer src="/static/js/run-stream.js"></script>
 </head>
 <body>
   <header class="app-header">
@@ -27,7 +28,7 @@
   <div class="app-shell">
     <nav class="primary-nav" aria-label="Primary">
       <a href="/"{{if eq .Page "dashboard"}} aria-current="page"{{end}}>Dashboard</a>
-      <a href="#" aria-disabled="true">Run test</a>
+	  <a href="/run-test"{{if eq .Page "run-test"}} aria-current="page"{{end}}>Run test</a>
       <a href="/runs"{{if or (eq .Page "runs") (eq .Page "run-detail")}} aria-current="page"{{end}}>Runs</a>
       <a href="#" aria-disabled="true">Scenarios</a>
       <a href="/targets"{{if eq .Page "targets"}} aria-current="page"{{end}}>Targets</a>
@@ -35,6 +36,7 @@
     </nav>
     <main>
       {{if eq .Page "targets"}}{{template "targets" .}}
+	  {{else if eq .Page "run-test"}}{{template "run-test" .}}
       {{else if eq .Page "runs"}}{{template "runs" .}}
       {{else if eq .Page "run-detail"}}{{template "run-detail" .}}
       {{else if eq .Page "settings"}}{{template "settings" .}}
