@@ -31,6 +31,9 @@ oscar-corrtest verify-bundle ./evidence.zip
 
 `PASS` and cleanup status are independent. A cleanup-dirty run exits with code 4 and remains available for `oscar-corrtest cleanup retry <run-id>`. Retry reads the exact returned rule ID and verifies full run ownership before deletion. Manual deletion requires an exact terminal run ID, verified artifacts, clean/not-required cleanup, and `--yes`.
 
+For a release qualification against a disposable Phase-B OSCAR deployment,
+use the separately gated procedure in [live-qualification.md](live-qualification.md).
+
 Browser runs can be cancelled from their run-detail page. The process detaches a bounded cleanup context from the cancelled operation, persists terminal cleanup evidence, and waits for active cleanup before closing SQLite during shutdown.
 
 Preview retention before applying it:

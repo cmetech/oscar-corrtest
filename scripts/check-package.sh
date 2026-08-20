@@ -18,6 +18,7 @@ for architecture in amd64 arm64; do
     oscar-corrtest/README.md \
     oscar-corrtest/docs/operator.md \
     oscar-corrtest/docs/builtins.md \
+    oscar-corrtest/docs/live-qualification.md \
     oscar-corrtest/docs/schema/correlation-scenario.schema.json \
     oscar-corrtest/packaging/oscar-corrtest.service \
     oscar-corrtest/Containerfile

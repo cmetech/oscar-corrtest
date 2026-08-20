@@ -27,3 +27,12 @@ if printf '%s\n' "$timer_output" | grep -q '\[no tests to run\]'; then
   printf '%s\n' 'timer gate selected no tests in at least one package' >&2
   exit 1
 fi
+
+if sed -n '/^release-gate:/,/^$/p' Makefile | grep -q 'live-qualification'; then
+  printf '%s\n' 'offline release gate must not depend on live qualification' >&2
+  exit 1
+fi
+if (unset OSCAR_CORRTEST_LIVE_TARGET_ID OSCAR_CORRTEST_LIVE_PHASE_B_ACK OSCAR_CORRTEST_LIVE_DISPOSABLE_ACK; OSCAR_CORRTEST_BIN=/bin/false ./scripts/live-qualification.sh >/dev/null 2>&1); then
+  printf '%s\n' 'live qualification did not fail closed before network access' >&2
+  exit 1
+fi

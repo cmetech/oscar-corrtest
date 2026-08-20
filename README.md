@@ -40,6 +40,8 @@ Built-in positive and negative cases cover:
 Physical alert names use `CORRTEST_<PATTERN_CODE>_<CASE_CODE>_<ROLE>_<RUN_SHORT>`. Every source and expected synthetic alert carries `category=corrtest_<pattern>`, the full `oscar_test_run_id`, scenario, pattern, case, polarity, class, role, and temporary-rule labels. These values are included in the compiled plan, run UI's “Inspect in OSCAR” panel, canonical report, and evidence bundle.
 
 See [docs/builtins.md](docs/builtins.md) for the case catalog and [docs/operator.md](docs/operator.md) for deployment and recovery.
+Live target qualification is deliberately separate from offline CI; see
+[docs/live-qualification.md](docs/live-qualification.md).
 
 ## Safety and proof model
 
@@ -95,6 +97,8 @@ make test-race
 make plan7-gate
 make ci
 make release-gate
+# Explicit opt-in only; contacts a disposable OSCAR target:
+make live-qualification
 ```
 
 `make package checksums` writes deterministic Linux AMD64 and ARM64 archives to `dist/`. Archives include the executable, operator docs, scenario schema, systemd unit, and scratch-based `Containerfile`. Both CI systems use immutable action/image pins and publish packaged archives rather than raw binaries.

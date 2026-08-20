@@ -34,6 +34,7 @@ No Python, Node, Docker, frontend toolchain, OSCAR source checkout, or CGO is re
 | `ci-core` | Run formatting, module, vet, security, test, race, and host-build gates |
 | `ci` | Install tools, run core and standalone gates, package, and checksum sequentially |
 | `release-gate` | Run CI plus every plan gate, archive-content checks, and package reproducibility |
+| `live-qualification` | Explicitly opt in to all-eight-pattern testing against a disposable Phase-B OSCAR target; never runs from offline CI |
 | `clean` | Remove generated files beneath `bin/` and `dist/` |
 
 Both GitHub Actions and GitLab CI/CD call these Make targets rather than duplicating Go commands in YAML.
