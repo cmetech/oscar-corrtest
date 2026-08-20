@@ -25,6 +25,26 @@ func TestLoadUsesXDGDefaults(t *testing.T) {
 	if got.ListenAddress != "0.0.0.0:8787" {
 		t.Fatalf("ListenAddress=%q", got.ListenAddress)
 	}
+	if got.EnvFile != "/tmp/config-home/oscar-corrtest/.env" {
+		t.Fatalf("EnvFile=%q", got.EnvFile)
+	}
+	if got.LogDir != "/tmp/state-home/oscar-corrtest/logs" {
+		t.Fatalf("LogDir=%q", got.LogDir)
+	}
+}
+
+func TestLoadForOSUsesWindowsUserPaths(t *testing.T) {
+	got, err := LoadForOS("windows", mapEnv(map[string]string{
+		"LOCALAPPDATA": `C:\Users\alex\AppData\Local`,
+	}), Overrides{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ConfigPath != `C:\Users\alex\AppData\Local\oscar-corrtest\config.json` ||
+		got.EnvFile != `C:\Users\alex\AppData\Local\oscar-corrtest\.env` ||
+		got.DataDir != `C:\Users\alex\AppData\Local\oscar-corrtest\data` {
+		t.Fatalf("settings=%+v", got)
+	}
 }
 
 func TestLoadAppliesFileEnvironmentAndCLIOrder(t *testing.T) {

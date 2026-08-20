@@ -9,6 +9,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
+
+	"github.com/cmetech/oscar-corrtest/internal/platformpaths"
 )
 
 const apiVersion = "corrtest.oscar/v1alpha1"
@@ -17,6 +21,8 @@ const apiVersion = "corrtest.oscar/v1alpha1"
 type Settings struct {
 	ConfigPath    string
 	DataDir       string
+	EnvFile       string
+	LogDir        string
 	ListenAddress string
 }
 
@@ -35,22 +41,42 @@ type fileConfig struct {
 
 // Load applies command, environment, file, and default configuration in order.
 func Load(getenv func(string) string, overrides Overrides) (Settings, error) {
+	return LoadForOS(runtime.GOOS, getenv, overrides)
+}
+
+// LoadForOS is Load with an explicit platform for cross-platform contract tests.
+func LoadForOS(goos string, getenv func(string) string, overrides Overrides) (Settings, error) {
 	if getenv == nil {
 		getenv = os.Getenv
 	}
+	paths, err := platformpaths.Resolve(goos, func(key string) (string, bool) {
+		value := getenv(key)
+		return value, value != ""
+	})
+	if err != nil {
+		return Settings{}, err
+	}
 	configPath := overrides.ConfigPath
 	if configPath == "" {
-		configPath = defaultConfigPath(getenv)
+		configPath = paths.ConfigFile
 	}
-	absConfigPath, err := filepath.Abs(configPath)
-	if err != nil {
-		return Settings{}, fmt.Errorf("resolve config path: %w", err)
+	absConfigPath := configPath
+	if goos != "windows" {
+		absConfigPath, err = filepath.Abs(configPath)
+		if err != nil {
+			return Settings{}, fmt.Errorf("resolve config path: %w", err)
+		}
 	}
 
 	settings := Settings{
 		ConfigPath:    filepath.Clean(absConfigPath),
-		DataDir:       defaultDataDir(getenv),
+		DataDir:       paths.StateDir,
+		EnvFile:       paths.EnvFile,
+		LogDir:        paths.LogDir,
 		ListenAddress: "0.0.0.0:8787",
+	}
+	if goos == "windows" {
+		settings.ConfigPath = strings.ReplaceAll(absConfigPath, "/", `\`)
 	}
 	fileValues, err := readFile(settings.ConfigPath)
 	if err != nil {
@@ -76,7 +102,7 @@ func Load(getenv func(string) string, overrides Overrides) (Settings, error) {
 	if overrides.ListenAddress != "" {
 		settings.ListenAddress = overrides.ListenAddress
 	}
-	if !filepath.IsAbs(settings.DataDir) {
+	if !isAbsForOS(goos, settings.DataDir) {
 		return Settings{}, fmt.Errorf("data directory %q must be absolute", settings.DataDir)
 	}
 	settings.DataDir = filepath.Clean(settings.DataDir)
@@ -84,6 +110,13 @@ func Load(getenv func(string) string, overrides Overrides) (Settings, error) {
 		return Settings{}, fmt.Errorf("invalid listen address %q: %w", settings.ListenAddress, err)
 	}
 	return settings, nil
+}
+
+func isAbsForOS(goos, value string) bool {
+	if goos != "windows" {
+		return filepath.IsAbs(value)
+	}
+	return len(value) >= 3 && ((value[0] >= 'A' && value[0] <= 'Z') || (value[0] >= 'a' && value[0] <= 'z')) && value[1] == ':' && (value[2] == '\\' || value[2] == '/') || strings.HasPrefix(value, `\\`)
 }
 
 func readFile(path string) (*fileConfig, error) {
@@ -114,20 +147,4 @@ func readFile(path string) (*fileConfig, error) {
 		return nil, fmt.Errorf("unsupported config apiVersion %q", values.APIVersion)
 	}
 	return &values, nil
-}
-
-func defaultConfigPath(getenv func(string) string) string {
-	base := getenv("XDG_CONFIG_HOME")
-	if base == "" {
-		base = filepath.Join(getenv("HOME"), ".config")
-	}
-	return filepath.Join(base, "oscar-corrtest", "config.json")
-}
-
-func defaultDataDir(getenv func(string) string) string {
-	base := getenv("XDG_STATE_HOME")
-	if base == "" {
-		base = filepath.Join(getenv("HOME"), ".local", "state")
-	}
-	return filepath.Join(base, "oscar-corrtest")
 }
