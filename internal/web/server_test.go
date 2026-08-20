@@ -264,6 +264,13 @@ func TestBearerSecurityProtectsEveryApplicationRoute(t *testing.T) {
 	}
 }
 
+func TestBearerSecurityRefusesInsecureSessionCookies(t *testing.T) {
+	t.Parallel()
+	if _, err := NewHandlerWithOptions(version.Info{}, nil, Security{Mode: SecurityBearer, BearerToken: []byte("correct horse battery staple")}); err == nil {
+		t.Fatal("bearer mode accepted insecure session cookies")
+	}
+}
+
 func TestBearerLoginCreatesSecureSessionWithoutReflectingSecret(t *testing.T) {
 	t.Parallel()
 	handler, err := NewHandlerWithOptions(version.Info{}, nil, Security{Mode: SecurityBearer, BearerToken: []byte("correct horse battery staple"), SecureCookies: true})

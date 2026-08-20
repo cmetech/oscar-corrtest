@@ -38,6 +38,9 @@ func (security Security) validate() error {
 		if len(security.BearerToken) < 16 {
 			return fmt.Errorf("bearer credential must contain at least 16 bytes")
 		}
+		if !security.SecureCookies {
+			return fmt.Errorf("bearer mode requires TLS-secure session cookies")
+		}
 	case SecurityTrustedProxy:
 		if security.ProxyHeader == "" || http.CanonicalHeaderKey(security.ProxyHeader) != security.ProxyHeader || security.ProxyValue == "" || len(security.TrustedProxies) == 0 {
 			return fmt.Errorf("trusted-proxy mode requires a canonical identity header, exact value, and trusted proxy networks")
@@ -127,7 +130,7 @@ func (handler authHandler) login(w http.ResponseWriter, r *http.Request) {
 	mac := hmac.New(sha256.New, handler.security.BearerToken)
 	_, _ = mac.Write([]byte(nonce))
 	value := nonce + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-	http.SetCookie(w, &http.Cookie{Name: "corrtest_session", Value: value, Path: "/", MaxAge: 8 * 60 * 60, HttpOnly: true, Secure: handler.security.SecureCookies, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: "corrtest_session", Value: value, Path: "/", MaxAge: 8 * 60 * 60, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
@@ -136,7 +139,7 @@ func (handler authHandler) logout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid logout request", http.StatusForbidden)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: "corrtest_session", Path: "/", MaxAge: -1, HttpOnly: true, Secure: handler.security.SecureCookies, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: "corrtest_session", Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
