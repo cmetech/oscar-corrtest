@@ -46,17 +46,30 @@ type App struct {
 	getenv func(string) string
 }
 
+// Dependencies contains process-owned integrations used by commands.
+type Dependencies struct {
+	Serve  ServeFunc
+	Open   OpenRuntimeFunc
+	Getenv func(string) string
+}
+
+// NewApplication constructs the complete CLI from explicit dependencies.
+func NewApplication(stdout, stderr io.Writer, info version.Info, dependencies Dependencies) *App {
+	getenv := dependencies.Getenv
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	return &App{stdout: stdout, stderr: stderr, info: info, serve: dependencies.Serve, open: dependencies.Open, getenv: getenv}
+}
+
 // New constructs an application using the supplied output streams and build metadata.
 func New(stdout, stderr io.Writer, info version.Info, serve ServeFunc) *App {
-	return &App{stdout: stdout, stderr: stderr, info: info, serve: serve, getenv: os.Getenv}
+	return NewApplication(stdout, stderr, info, Dependencies{Serve: serve})
 }
 
 // NewConfigured constructs the complete CLI with durable runtime initialization.
 func NewConfigured(stdout, stderr io.Writer, info version.Info, serve ServeFunc, open OpenRuntimeFunc, getenv func(string) string) *App {
-	if getenv == nil {
-		getenv = os.Getenv
-	}
-	return &App{stdout: stdout, stderr: stderr, info: info, serve: serve, open: open, getenv: getenv}
+	return NewApplication(stdout, stderr, info, Dependencies{Serve: serve, Open: open, Getenv: getenv})
 }
 
 // Run executes a command and returns its process exit code.

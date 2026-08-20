@@ -13,11 +13,53 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
+	"github.com/cmetech/oscar-corrtest/internal/envfile"
 	"github.com/cmetech/oscar-corrtest/internal/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/version"
 )
+
+func TestNewOSCARClientUsesManagedEnvironmentReplacement(t *testing.T) {
+	var received []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		received = append(received, request.Header.Get("X-API-Key"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"valid":true,"errors":[]}`))
+	}))
+	defer server.Close()
+	store, err := envfile.Open(filepath.Join(t.TempDir(), ".env"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := OpenWithOptions(context.Background(), config.Settings{DataDir: t.TempDir(), ListenAddress: "127.0.0.1:8787"}, version.Info{Version: "test"}, Options{Environment: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runtime.Close() })
+	target := domain.Target{BaseURL: server.URL, APIProfile: "public-v1"}
+	first, err := runtime.newOSCARClient(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Replace("OSCAR_API_KEY", "replacement"); err != nil {
+		t.Fatal(err)
+	}
+	second, err := runtime.newOSCARClient(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.ValidateRule(context.Background(), compiler.RulePlan{Name: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.ValidateRule(context.Background(), compiler.RulePlan{Name: "second"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(received) != 2 || received[0] != "" || received[1] != "replacement" {
+		t.Fatalf("received headers=%v", received)
+	}
+}
 
 const runtimeScenarioSource = `apiVersion: corrtest.oscar/v1alpha1
 kind: CorrelationScenario

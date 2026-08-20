@@ -4,10 +4,13 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 
 	"github.com/cmetech/oscar-corrtest/internal/command"
 	"github.com/cmetech/oscar-corrtest/internal/config"
+	"github.com/cmetech/oscar-corrtest/internal/envfile"
+	"github.com/cmetech/oscar-corrtest/internal/platformpaths"
 	appruntime "github.com/cmetech/oscar-corrtest/internal/runtime"
 	"github.com/cmetech/oscar-corrtest/internal/version"
 	"github.com/cmetech/oscar-corrtest/internal/web"
@@ -18,9 +21,19 @@ func main() {
 	defer stop()
 
 	info := version.Current()
-	open := func(ctx context.Context, settings config.Settings) (command.ApplicationRuntime, error) {
-		return appruntime.Open(ctx, settings, info)
+	paths, err := platformpaths.Resolve(runtime.GOOS, os.LookupEnv)
+	if err != nil {
+		_, _ = os.Stderr.WriteString("oscar-corrtest: resolve user paths: " + err.Error() + "\n")
+		os.Exit(1)
 	}
-	app := command.NewConfigured(os.Stdout, os.Stderr, info, web.Run, open, os.Getenv)
+	environment, err := envfile.Open(paths.EnvFile, os.LookupEnv)
+	if err != nil {
+		_, _ = os.Stderr.WriteString("oscar-corrtest: open managed environment: " + err.Error() + "\n")
+		os.Exit(1)
+	}
+	open := func(ctx context.Context, settings config.Settings) (command.ApplicationRuntime, error) {
+		return appruntime.OpenWithOptions(ctx, settings, info, appruntime.Options{Environment: environment})
+	}
+	app := command.NewApplication(os.Stdout, os.Stderr, info, command.Dependencies{Serve: web.Run, Open: open, Getenv: environment.Getenv})
 	os.Exit(app.Run(ctx, os.Args[1:]))
 }

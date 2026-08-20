@@ -40,6 +40,30 @@ func TestVersionCommand(t *testing.T) {
 	}
 }
 
+func TestNewApplicationUsesDependencyEnvironment(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	app := NewApplication(&stdout, &stderr, version.Info{}, Dependencies{
+		Getenv: func(key string) string {
+			if key == "HOME" {
+				return t.TempDir()
+			}
+			if key == "OSCAR_CORRTEST_LISTEN" {
+				return "127.0.0.1:9191"
+			}
+			return ""
+		},
+		Serve: func(_ context.Context, options web.Options) error {
+			if options.ListenAddress != "127.0.0.1:9191" {
+				t.Fatalf("listen=%q", options.ListenAddress)
+			}
+			return nil
+		},
+	})
+	if code := app.Run(context.Background(), []string{"serve"}); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+}
+
 func TestScenarioListPlanAndRunCommandsShareRuntimeContracts(t *testing.T) {
 	now := time.Date(2026, 8, 20, 2, 0, 0, 0, time.UTC)
 	completed := domain.Run{ID: "crt_00000000000000000000000099", ShortToken: "00000099", Status: domain.RunCompleted,

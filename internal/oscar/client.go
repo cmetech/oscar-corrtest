@@ -90,7 +90,7 @@ func resolveCredential(reference domain.CredentialRef, getenv func(string) strin
 	}
 	switch reference.Kind {
 	case "":
-		return "", nil
+		return strings.TrimSpace(getenv("OSCAR_API_KEY")), nil
 	case domain.CredentialEnvironment:
 		value := getenv(reference.Reference)
 		if value == "" {

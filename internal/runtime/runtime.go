@@ -21,6 +21,7 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
+	"github.com/cmetech/oscar-corrtest/internal/envfile"
 	"github.com/cmetech/oscar-corrtest/internal/evidence"
 	"github.com/cmetech/oscar-corrtest/internal/history"
 	"github.com/cmetech/oscar-corrtest/internal/oscar"
@@ -56,6 +57,7 @@ type Runtime struct {
 	artifacts *artifact.Store
 	readiness Readiness
 	version   string
+	getenv    func(string) string
 	runMu     sync.Mutex
 	activeMu  sync.Mutex
 	active    map[string]context.CancelFunc
@@ -63,8 +65,18 @@ type Runtime struct {
 	rootCtx   context.Context
 }
 
+// Options supplies process-scoped application dependencies.
+type Options struct {
+	Environment *envfile.Store
+}
+
 // Open initializes local state, migrations, artifact storage, and interrupted-run recovery.
 func Open(ctx context.Context, settings config.Settings, info version.Info) (*Runtime, error) {
+	return OpenWithOptions(ctx, settings, info, Options{})
+}
+
+// OpenWithOptions initializes local state with explicit process dependencies.
+func OpenWithOptions(ctx context.Context, settings config.Settings, info version.Info, options Options) (*Runtime, error) {
 	if settings.DataDir == "" || !filepath.IsAbs(settings.DataDir) {
 		return nil, fmt.Errorf("data directory %q must be absolute", settings.DataDir)
 	}
@@ -86,9 +98,13 @@ func Open(ctx context.Context, settings config.Settings, info version.Info) (*Ru
 		return nil, err
 	}
 	service := history.New(database, nil, nil)
+	getenv := os.Getenv
+	if options.Environment != nil {
+		getenv = options.Environment.Getenv
+	}
 	result := &Runtime{
 		settings: settings, database: database, history: service, artifacts: artifacts,
-		readiness: Readiness{Ready: database.Ready() == nil, DatabasePath: databasePath}, version: info.Version, rootCtx: ctx,
+		readiness: Readiness{Ready: database.Ready() == nil, DatabasePath: databasePath}, version: info.Version, getenv: getenv, rootCtx: ctx,
 		active: make(map[string]context.CancelFunc),
 	}
 	if readyErr := database.Ready(); readyErr != nil {
@@ -100,6 +116,10 @@ func Open(ctx context.Context, settings config.Settings, info version.Info) (*Ru
 		return nil, fmt.Errorf("recover interrupted runs: %w", err)
 	}
 	return result, nil
+}
+
+func (r *Runtime) newOSCARClient(target domain.Target) (*oscar.Client, error) {
+	return oscar.New(target, oscar.Options{HarnessVersion: r.version, Getenv: r.getenv})
 }
 
 // PreviewBuiltin compiles an isolated plan without creating a durable run or contacting OSCAR.
@@ -143,7 +163,7 @@ func (r *Runtime) ExecuteBuiltin(ctx context.Context, targetID, pattern, pipelin
 	if err != nil {
 		return run, err
 	}
-	client, err := oscar.New(target, oscar.Options{HarnessVersion: r.version})
+	client, err := r.newOSCARClient(target)
 	if err != nil {
 		return run, err
 	}
@@ -173,7 +193,7 @@ func (r *Runtime) ExecuteScenario(ctx context.Context, targetID string, document
 	if err != nil {
 		return run, err
 	}
-	client, err := oscar.New(target, oscar.Options{HarnessVersion: r.version})
+	client, err := r.newOSCARClient(target)
 	if err != nil {
 		return run, err
 	}
@@ -196,7 +216,7 @@ func (r *Runtime) StartBuiltin(ctx context.Context, targetID, pattern, pipelineM
 	if _, err := r.PreviewBuiltin(ctx, targetID, pattern, pipelineMode); err != nil {
 		return domain.Run{}, err
 	}
-	client, err := oscar.New(target, oscar.Options{HarnessVersion: r.version})
+	client, err := r.newOSCARClient(target)
 	if err != nil {
 		return domain.Run{}, err
 	}
@@ -265,7 +285,7 @@ func (r *Runtime) Doctor(ctx context.Context, targetID, pipelineMode string) (Di
 	if err != nil {
 		return Diagnostic{}, err
 	}
-	client, err := oscar.New(target, oscar.Options{HarnessVersion: r.version})
+	client, err := r.newOSCARClient(target)
 	if err != nil {
 		return Diagnostic{}, err
 	}
@@ -452,7 +472,7 @@ func (r *Runtime) RetryCleanup(ctx context.Context, runID string) (domain.Run, e
 	if err != nil {
 		return run, err
 	}
-	client, err := oscar.New(target, oscar.Options{HarnessVersion: r.version})
+	client, err := r.newOSCARClient(target)
 	if err != nil {
 		return run, err
 	}

@@ -42,6 +42,53 @@ func TestClientUsesExternalAPIKeyHeader(t *testing.T) {
 	}
 }
 
+func TestEmptyCredentialUsesGlobalAPIKey(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if got := request.Header.Get("X-API-Key"); got != "global-secret" {
+			t.Errorf("X-API-Key=%q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"valid":true,"errors":[]}`))
+	}))
+	defer server.Close()
+	client, err := oscar.New(domain.Target{BaseURL: server.URL, APIProfile: "public-v1"}, oscar.Options{
+		Getenv: func(key string) string {
+			if key == "OSCAR_API_KEY" {
+				return "global-secret"
+			}
+			return ""
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.ValidateRule(context.Background(), compiler.RulePlan{Name: "rule"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExplicitCredentialOverridesGlobalAPIKey(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if got := request.Header.Get("X-API-Key"); got != "target-secret" {
+			t.Errorf("X-API-Key=%q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"valid":true,"errors":[]}`))
+	}))
+	defer server.Close()
+	client, err := oscar.New(domain.Target{BaseURL: server.URL, APIProfile: "public-v1", Credential: domain.CredentialRef{Kind: domain.CredentialEnvironment, Reference: "TARGET_KEY"}}, oscar.Options{
+		Getenv: func(key string) string {
+			return map[string]string{"OSCAR_API_KEY": "global-secret", "TARGET_KEY": "target-secret"}[key]
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.ValidateRule(context.Background(), compiler.RulePlan{Name: "rule"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPublicV1RuleLifecycleUsesCreateReadDeleteOnly(t *testing.T) {
 	server := testoscar.New(t)
 	server.Enqueue(testoscar.Response{Status: 200, Body: `{"valid":true,"errors":[]}`})
