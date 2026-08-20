@@ -23,6 +23,7 @@ No Python, Node, Docker, frontend toolchain, OSCAR source checkout, or CGO is re
 | `security` | Run the pinned static and vulnerability scanners |
 | `test` | Run the complete test suite without cached results |
 | `test-race` | Run the complete suite with the race detector |
+| `plan2-gate` | Run focused configuration, migration/WAL/recovery, artifact/report, backup, runtime, and UI tests |
 | `build` | Build the host binary in `bin/` with linker metadata |
 | `cross` | Build CGO-free Linux AMD64 and ARM64 executables |
 | `package` | Produce deterministic Linux archives using GNU tar and `gzip -n` |
@@ -49,13 +50,41 @@ Running the command again at the same commit must produce identical archive chec
 
 ```bash
 make build
-./bin/oscar-corrtest serve --listen 127.0.0.1:8787
+./bin/oscar-corrtest serve --listen 127.0.0.1:8787 --data-dir /tmp/oscar-corrtest-state
 ```
 
-Only literal IPv4 or IPv6 loopback addresses are accepted in the foundation. Hostnames, wildcard listeners, unspecified addresses, empty hosts, and non-loopback addresses are rejected because authenticated remote serving is not implemented yet.
+Only literal IPv4 or IPv6 loopback addresses are accepted. Hostnames, wildcard listeners, unspecified addresses, empty hosts, and non-loopback addresses are rejected because authenticated remote serving is not implemented yet.
+
+## SQLite and evidence development
+
+The pinned `modernc.org/sqlite` driver is CGO-free and embeds a SQLite release newer than the required 3.51.3 floor. Its coupled `modernc.org/libc` version must remain exactly aligned with the driver's `go.mod`. Both CI systems cache from `go.sum`.
+
+Runtime state has this layout:
+
+```text
+data-dir/
+  corrtest.db
+  corrtest.db-wal
+  corrtest.db-shm
+  runs/<run-id>/...
+```
+
+SQLite uses WAL, `foreign_keys=ON`, `busy_timeout=5000`, and `synchronous=FULL`. Keep it on a local filesystem. Migrations are embedded, ordered, transactionally applied, and checksum-verified. Do not edit an applied migration; add the next numbered file.
+
+Artifact paths are application-generated, relative, traversal-checked, atomically published, and SHA-256 verified. Missing, pending, or changed files remain visible as integrity warnings. Canonical report JSON is durable now; standalone HTML, JUnit, and ZIP projections belong to Plan 3.
+
+At process startup, any active run is marked `INTERRUPTED` and receives one recovery event. Alert injection is never silently resumed. Plan 2 does not yet create OSCAR rules or send alerts.
+
+The supported online backup command coordinates with WAL and refuses overwrite:
+
+```bash
+./bin/oscar-corrtest backup --data-dir /tmp/oscar-corrtest-state --output /tmp/corrtest-backup.db
+```
+
+The database backup excludes evidence directories. Back up those separately until per-run portable bundles are implemented.
 
 ## Service and release gates
 
-The example `packaging/oscar-corrtest.service` requires operators to provision an `oscar-corrtest` system user and group. Its loopback listener is deliberate. The SQLite plan will add and document the writable state directory; do not weaken `ProtectSystem=strict` to invent one in this foundation.
+The example `packaging/oscar-corrtest.service` requires operators to provision an `oscar-corrtest` system user and group. Its loopback listener is deliberate. `StateDirectory=` and `ConfigurationDirectory=` provide the only writable service locations while `ProtectSystem=strict` remains enabled.
 
 Before creating the first real semantic tag on either remote, confirm GitHub release permissions and branch protection, then confirm the GitLab `CI_JOB_TOKEN` can upload package-registry assets and create release links. Local workflow validation cannot prove those remote settings.

@@ -129,4 +129,23 @@ mkdir -p "$archive_dir/.cache/go-build" "$archive_dir/.cache/go-mod"
     GOMODCACHE="$archive_dir/.cache/go-mod" \
     make archive-mod-check test build
   ./bin/oscar-corrtest version
+  smoke_dir="$archive_dir/.smoke"
+  mkdir -p "$smoke_dir"
+  OSCAR_CORRTEST_STANDALONE_SECRET='must-not-be-persisted' \
+    ./bin/oscar-corrtest target add \
+      --data-dir "$smoke_dir/state" \
+      --name standalone \
+      --url https://oscar.invalid \
+      --credential-env OSCAR_CORRTEST_STANDALONE_SECRET \
+      --output json > "$smoke_dir/target.json"
+  ./bin/oscar-corrtest target list --data-dir "$smoke_dir/state" --output json \
+    | grep -F '"displayName":"standalone"'
+  ./bin/oscar-corrtest runs list --data-dir "$smoke_dir/state" --output json \
+    | grep -F '"apiVersion":"corrtest.oscar/v1alpha1"'
+  ./bin/oscar-corrtest backup --data-dir "$smoke_dir/state" --output "$smoke_dir/backup.db"
+  test -s "$smoke_dir/backup.db"
+  if grep -R -a -F 'must-not-be-persisted' "$smoke_dir"; then
+    printf '%s\n' 'standalone smoke test persisted a credential value' >&2
+    exit 1
+  fi
 )

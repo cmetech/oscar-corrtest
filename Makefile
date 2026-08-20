@@ -16,7 +16,7 @@ GOVULNCHECK_VERSION := v1.6.0
 
 .DEFAULT_GOAL := build
 
-.PHONY: tools fmt-check mod-check archive-mod-check vet security test test-race build cross package checksums standalone-check ci-core ci clean
+.PHONY: tools fmt-check mod-check archive-mod-check vet security test test-race plan2-gate build cross package checksums standalone-check ci-core ci clean
 
 tools:
 	mkdir -p "$(TOOLS_DIR)"
@@ -49,6 +49,9 @@ test:
 
 test-race:
 	CGO_ENABLED=1 go test -race -count=1 ./...
+
+plan2-gate:
+	go test -count=1 ./internal/config ./internal/domain ./internal/persistence/sqlite ./internal/artifact ./internal/report ./internal/runtime ./internal/web
 
 build:
 	mkdir -p "$(BUILD_DIR)"
@@ -83,6 +86,7 @@ ci-core:
 	$(MAKE) mod-check
 	$(MAKE) vet
 	$(MAKE) security
+	$(MAKE) plan2-gate
 	$(MAKE) test
 	$(MAKE) test-race
 	$(MAKE) build
