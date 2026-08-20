@@ -8,6 +8,38 @@ for workflow in .github/workflows/ci.yml .github/workflows/release.yml; do
   }
 done
 
+release_workflow=.github/workflows/release.yml
+for contract in \
+  '^  verify:' \
+  '^  windows-smoke:' \
+  '^    runs-on: windows-2025$' \
+  '^    needs: verify$' \
+  '^  publish:' \
+  '^    needs: \[verify, windows-smoke\]$' \
+  'scripts/test-install-windows.ps1' \
+  'actions/upload-artifact@[0-9a-f]\{40\}' \
+  'actions/download-artifact@[0-9a-f]\{40\}'
+do
+  grep -q "$contract" "$release_workflow" || {
+    printf 'release workflow is missing contract: %s\n' "$contract" >&2
+    exit 1
+  }
+done
+for asset in \
+  linux_amd64.tar.gz \
+  linux_arm64.tar.gz \
+  darwin_amd64.tar.gz \
+  darwin_arm64.tar.gz \
+  windows_amd64.zip \
+  SHA256SUMS
+do
+  count=$(grep -c "$asset" "$release_workflow" || true)
+  if [ "$count" -lt 2 ]; then
+    printf 'release workflow does not transfer and publish %s\n' "$asset" >&2
+    exit 1
+  fi
+done
+
 grep -q 'make clean release-gate' .gitlab-ci.yml || {
   printf '%s\n' 'GitLab verify job does not run the clean release gate' >&2
   exit 1
