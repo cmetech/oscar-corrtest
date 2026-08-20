@@ -1,12 +1,75 @@
 package compiler_test
 
 import (
+	"reflect"
 	"testing"
+	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/scenario"
 )
+
+func TestCompiledObservationWindowsCoverDecisionAndEvidenceLag(t *testing.T) {
+	run := domain.Run{ID: "crt_0123456789ABCDEFGHJKMNPQRS", ShortToken: "7Q9K2M4A"}
+	compile := func(pattern string) compiler.Plan {
+		t.Helper()
+		plan, err := compiler.Compile(run, scenario.Builtin(pattern), compiler.Capabilities{PipelineMode: "phase_b_dispatch"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return plan
+	}
+	if got := compile("flood").Cases[1].ObservationWindow; got != 45*time.Second {
+		t.Fatalf("flood observation=%s", got)
+	}
+	absence := compile("absence")
+	if got := absence.Cases[0].ObservationWindow; got != 55*time.Second {
+		t.Fatalf("absence observation=%s", got)
+	}
+	negative := absence.Cases[1].Alerts
+	if len(negative) != 7 || negative[len(negative)-1].Delay != 48*time.Second {
+		t.Fatalf("absence negative timeline=%+v", negative)
+	}
+}
+
+func TestFloodEventsHaveFiveDistinctStableLabelIdentities(t *testing.T) {
+	run := domain.Run{ID: "crt_0123456789ABCDEFGHJKMNPQRS", ShortToken: "7Q9K2M4A"}
+	plan, err := compiler.Compile(run, scenario.Builtin("flood"), compiler.Capabilities{PipelineMode: "phase_b_dispatch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, alert := range plan.Cases[0].Alerts {
+		id := alert.Labels["oscar_test_event_id"]
+		index := alert.Labels["oscar_test_event_index"]
+		if id == "" || index == "" || seen[id] {
+			t.Fatalf("event identity id=%q index=%q seen=%v", id, index, seen)
+		}
+		if alert.Labels["site"] != "corrtest-p01" {
+			t.Fatalf("group label changed: %v", alert.Labels)
+		}
+		seen[id] = true
+	}
+	if len(seen) != 5 {
+		t.Fatalf("identities=%d", len(seen))
+	}
+}
+
+func TestResolvedAttemptReusesFiringIdentity(t *testing.T) {
+	run := domain.Run{ID: "crt_0123456789ABCDEFGHJKMNPQRS", ShortToken: "7Q9K2M4A"}
+	plan, err := compiler.Compile(run, scenario.Builtin("persistence"), compiler.Capabilities{PipelineMode: "phase_b_dispatch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firing, resolved := plan.Cases[1].Alerts[0], plan.Cases[1].Alerts[1]
+	if !reflect.DeepEqual(firing.Labels, resolved.Labels) {
+		t.Fatalf("firing labels=%v resolved labels=%v", firing.Labels, resolved.Labels)
+	}
+	if firing.Annotations["oscar_test_attempt_index"] == resolved.Annotations["oscar_test_attempt_index"] {
+		t.Fatalf("attempt indexes must remain distinct: %v %v", firing.Annotations, resolved.Annotations)
+	}
+}
 
 func TestAllBuiltinsCompilePositiveAndNegativeCases(t *testing.T) {
 	run := domain.Run{ID: "crt_0123456789ABCDEFGHJKMNPQRS", ShortToken: "7Q9K2M4A"}

@@ -1,0 +1,1 @@
+{"status":"rate_limited","message":"Request rate limit exceeded. Processing may be delayed.","retry_after_seconds":4,"details":"Request accepted but rate-limited. No retries needed."}

@@ -44,7 +44,14 @@ func Builtin(pattern string) Scenario {
 	case "persistence":
 		base.Cases = []Case{positive("emits-after-unresolved-duration", event("service_down")), negative("resolution-cancels-persistence", event("service_down"), Event{Role: "service_down", Status: "resolved", Delay: 10 * time.Second})}
 	case "absence":
-		base.Cases = []Case{positive("emits-when-heartbeat-absent", event("heartbeat")), negative("continued-heartbeat-prevents-parent", event("heartbeat"), Event{Role: "heartbeat", Status: "firing", Delay: 15 * time.Second})}
+		base.Cases = []Case{positive("emits-when-heartbeat-absent", event("heartbeat")), negative("continued-heartbeat-prevents-parent",
+			event("heartbeat"),
+			Event{Role: "heartbeat", Status: "firing", Delay: 8 * time.Second},
+			Event{Role: "heartbeat", Status: "firing", Delay: 16 * time.Second},
+			Event{Role: "heartbeat", Status: "firing", Delay: 24 * time.Second},
+			Event{Role: "heartbeat", Status: "firing", Delay: 32 * time.Second},
+			Event{Role: "heartbeat", Status: "firing", Delay: 40 * time.Second},
+			Event{Role: "heartbeat", Status: "firing", Delay: 48 * time.Second})}
 	case "parent_child":
 		base.Cases = []Case{
 			{Name: "links-child-to-active-parent", Code: "P01", Polarity: "positive", Window: 30 * time.Second, GroupBy: []string{"site"}, Labels: map[string]string{"site": "corrtest-p01"}, SuppressForNotifiers: []string{"email"}, Events: []Event{event("parent"), {Role: "child", Status: "firing", Delay: time.Second}}, Assertions: []Assertion{{Kind: "parent-link-count", Outcome: "suppressed_per_notifier", Equals: 1}}},

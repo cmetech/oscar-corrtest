@@ -1,0 +1,1 @@
+{"rows":[{"id":9,"created_at":"2026-08-20T00:00:02Z","alert_fingerprint":"abc123def456","rule_id":71,"rule_name":"corrtest-flood-p01-7q9k2m4a","pattern":"flood","outcome":"parent_emitted"}],"total":1,"page":1,"perPage":100}

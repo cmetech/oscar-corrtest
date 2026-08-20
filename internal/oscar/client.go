@@ -24,6 +24,7 @@ import (
 )
 
 const maxResponseBytes = 4 << 20
+const maxListPages = 100
 
 type Options struct {
 	Getenv         func(string) string
@@ -148,22 +149,33 @@ func (c *Client) GetRule(ctx context.Context, id int) (Rule, error) {
 	return wire.normalized(), nil
 }
 
-// FindRules returns only exact-name matches from OSCAR's bounded quick-search page.
+// FindRules returns only exact-name matches after exhausting OSCAR's bounded quick-search pages.
 func (c *Client) FindRules(ctx context.Context, name string) ([]Rule, error) {
-	values := url.Values{"page": {"1"}, "perPage": {"100"}, "column": {"id"}, "order": {"asc"}, "search": {name}}
-	var response struct {
-		Rows []ruleResponse `json:"rows"`
-	}
-	if err := c.doJSON(ctx, http.MethodGet, "/api/v1/correlation_rules", values, nil, &response); err != nil {
-		return nil, err
-	}
-	result := make([]Rule, 0, len(response.Rows))
-	for _, item := range response.Rows {
-		if item.Name == name {
-			result = append(result, item.normalized())
+	values := url.Values{"perPage": {"100"}, "column": {"id"}, "order": {"asc"}, "search": {name}}
+	var result []Rule
+	seen := 0
+	for page := 1; page <= maxListPages; page++ {
+		values.Set("page", strconv.Itoa(page))
+		var response struct {
+			Rows    []ruleResponse `json:"rows"`
+			Total   int            `json:"total"`
+			Page    int            `json:"page"`
+			PerPage int            `json:"perPage"`
+		}
+		if err := c.doJSON(ctx, http.MethodGet, "/api/v1/correlation_rules", values, nil, &response); err != nil {
+			return nil, err
+		}
+		seen += len(response.Rows)
+		for _, item := range response.Rows {
+			if item.Name == name {
+				result = append(result, item.normalized())
+			}
+		}
+		if listComplete(seen, response.Total, len(response.Rows), response.PerPage) {
+			return result, nil
 		}
 	}
-	return result, nil
+	return nil, paginationLimitError("GET /api/v1/correlation_rules")
 }
 
 func (c *Client) DeleteRule(ctx context.Context, id int) error {
@@ -192,6 +204,8 @@ func (c *Client) Inject(ctx context.Context, alert compiler.AlertPlan) (Injectio
 	result := InjectionResult{StatusCode: status, Body: raw, Class: InjectionIndeterminate}
 	var response struct {
 		Status   string `json:"status"`
+		Message  string `json:"message"`
+		Details  string `json:"details"`
 		TaskID   string `json:"task_id"`
 		ID       string `json:"id"`
 		Accepted *int   `json:"accepted"`
@@ -220,6 +234,13 @@ func (c *Client) Inject(ctx context.Context, alert compiler.AlertPlan) (Injectio
 			result.Class = InjectionPartial
 		}
 		if response.Queued != nil && *response.Queued {
+			result.Class = InjectionQueued
+		}
+		text := strings.ToLower(strings.Join([]string{response.Status, response.Message, response.Details}, " "))
+		switch {
+		case strings.Contains(text, "alert rate limited"), strings.Contains(text, "acl filtered"), strings.Contains(text, "filtered by acl"), strings.Contains(text, "dropped"):
+			result.Class = InjectionRejected
+		case strings.Contains(text, "rate_limited") && (strings.Contains(text, "accepted") || strings.Contains(text, "processing may be delayed")):
 			result.Class = InjectionQueued
 		}
 	}
@@ -252,60 +273,101 @@ func alertmanagerTransportFingerprint(labels map[string]string) (string, error) 
 
 func (c *Client) FindHistory(ctx context.Context, query HistoryQuery) ([]HistoryRecord, error) {
 	filter, _ := json.Marshal(map[string]any{"items": []any{map[string]any{"field": "alertname", "operator": "equals", "value": query.AlertName}}})
-	values := url.Values{"page": {"1"}, "perPage": {"100"}, "order": {"asc"}, "column": {"createdAt"},
+	values := url.Values{"perPage": {"100"}, "order": {"asc"}, "column": {"createdAt"},
 		"start_datetime": {query.Start.UTC().Format(time.RFC3339Nano)}, "end_datetime": {query.End.UTC().Format(time.RFC3339Nano)}, "filter": {string(filter)}}
-	var response historyListResponse
-	if err := c.doJSON(ctx, http.MethodGet, "/api/v1/alerts/history", values, nil, &response); err != nil {
-		return nil, err
-	}
-	result := make([]HistoryRecord, 0, len(response.Records))
-	for _, record := range response.Records {
-		if record.AlertName != query.AlertName {
-			continue
+	var result []HistoryRecord
+	seen := 0
+	for page := 1; page <= maxListPages; page++ {
+		values.Set("page", strconv.Itoa(page))
+		var response historyListResponse
+		if err := c.doJSON(ctx, http.MethodGet, "/api/v1/alerts/history", values, nil, &response); err != nil {
+			return nil, err
 		}
-		result = append(result, record.normalized())
+		seen += len(response.Records)
+		for _, record := range response.Records {
+			if record.AlertName != query.AlertName {
+				continue
+			}
+			result = append(result, record.normalized())
+		}
+		if listComplete(seen, response.TotalRecords, len(response.Records), response.PerPage) || (response.TotalPages > 0 && page >= response.TotalPages) {
+			return result, nil
+		}
 	}
-	return result, nil
+	return nil, paginationLimitError("GET /api/v1/alerts/history")
 }
 
 func (c *Client) CorrelationAudit(ctx context.Context, fingerprint string) ([]AuditRecord, error) {
-	values := url.Values{"fingerprint": {fingerprint}, "page": {"1"}, "perPage": {"100"}}
-	var response auditListResponse
-	if err := c.doJSON(ctx, http.MethodGet, "/api/v1/correlation_rules/audit", values, nil, &response); err != nil {
-		return nil, err
+	values := url.Values{"fingerprint": {fingerprint}, "perPage": {"100"}}
+	var result []AuditRecord
+	seen := 0
+	for page := 1; page <= maxListPages; page++ {
+		values.Set("page", strconv.Itoa(page))
+		var response auditListResponse
+		if err := c.doJSON(ctx, http.MethodGet, "/api/v1/correlation_rules/audit", values, nil, &response); err != nil {
+			return nil, err
+		}
+		seen += len(response.Rows)
+		for _, record := range response.Rows {
+			result = append(result, record.normalized())
+		}
+		if listComplete(seen, response.Total, len(response.Rows), response.PerPage) {
+			return result, nil
+		}
 	}
-	result := make([]AuditRecord, 0, len(response.Rows))
-	for _, record := range response.Rows {
-		result = append(result, record.normalized())
-	}
-	return result, nil
+	return nil, paginationLimitError("GET /api/v1/correlation_rules/audit")
 }
 
 func (c *Client) NotificationAudit(ctx context.Context, fingerprint string, start, end time.Time) ([]NotificationRecord, error) {
-	values := url.Values{"alert_fingerprint": {fingerprint}, "page": {"1"}, "per_page": {"100"},
+	values := url.Values{"alert_fingerprint": {fingerprint}, "per_page": {"100"},
 		"date_from": {start.UTC().Format(time.RFC3339Nano)}, "date_to": {end.UTC().Format(time.RFC3339Nano)}}
-	var response struct {
-		Items   []notificationWire `json:"items"`
-		Rows    []notificationWire `json:"rows"`
-		Records []notificationWire `json:"records"`
-	}
-	if err := c.doJSON(ctx, http.MethodGet, "/api/v1/notification-audit/", values, nil, &response); err != nil {
-		return nil, err
-	}
-	wires := response.Items
-	if len(wires) == 0 {
-		wires = response.Rows
-	}
-	if len(wires) == 0 {
-		wires = response.Records
-	}
-	result := make([]NotificationRecord, 0, len(wires))
-	for _, wire := range wires {
-		if wire.AlertFingerprint == fingerprint {
-			result = append(result, NotificationRecord{ID: wire.ID, AlertFingerprint: wire.AlertFingerprint, NotifierType: wire.NotifierType, Status: wire.Status, CreatedAt: wire.CreatedAt, Labels: wire.Labels})
+	var result []NotificationRecord
+	seen := 0
+	for page := 1; page <= maxListPages; page++ {
+		values.Set("page", strconv.Itoa(page))
+		var response struct {
+			Items   []notificationWire `json:"items"`
+			Rows    []notificationWire `json:"rows"`
+			Records []notificationWire `json:"records"`
+			Total   int                `json:"total"`
+			PerPage int                `json:"per_page"`
+		}
+		if err := c.doJSON(ctx, http.MethodGet, "/api/v1/notification-audit/", values, nil, &response); err != nil {
+			return nil, err
+		}
+		wires := response.Items
+		if len(wires) == 0 {
+			wires = response.Rows
+		}
+		if len(wires) == 0 {
+			wires = response.Records
+		}
+		seen += len(wires)
+		for _, wire := range wires {
+			if wire.AlertFingerprint == fingerprint {
+				result = append(result, NotificationRecord{ID: wire.ID, AlertFingerprint: wire.AlertFingerprint, NotifierType: wire.NotifierType, Status: wire.Status, CreatedAt: wire.CreatedAt, Labels: wire.Labels})
+			}
+		}
+		if listComplete(seen, response.Total, len(wires), response.PerPage) {
+			return result, nil
 		}
 	}
-	return result, nil
+	return nil, paginationLimitError("GET /api/v1/notification-audit/")
+}
+
+func listComplete(seen, total, pageRows, declaredPerPage int) bool {
+	if total > 0 {
+		return seen >= total
+	}
+	pageSize := declaredPerPage
+	if pageSize <= 0 {
+		pageSize = 100
+	}
+	return pageRows < pageSize
+}
+
+func paginationLimitError(operation string) error {
+	return &MachineError{Operation: operation, Code: "pagination_limit", Detail: "OSCAR list exceeded the 100-page safety bound"}
 }
 
 // ProbeLabelSurvival injects one diagnostic alert and reads its server identity
@@ -394,7 +456,7 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 		request.Header.Set("Content-Type", "application/json")
 	}
 	if c.credential != "" {
-		request.Header.Set("Authorization", "Bearer "+c.credential)
+		request.Header.Set("X-API-Key", c.credential)
 	}
 	response, err := c.http.Do(request)
 	if err != nil {
@@ -454,14 +516,19 @@ type labelWire struct {
 	Value string `json:"Value"`
 }
 
+type annotationWire struct {
+	Annotation string `json:"Annotation"`
+	Value      string `json:"Value"`
+}
+
 type historyWire struct {
-	ID          any         `json:"id"`
-	AlertName   string      `json:"alertname"`
-	Fingerprint string      `json:"fingerprint"`
-	Status      string      `json:"status"`
-	CreatedAt   time.Time   `json:"createdAt"`
-	Labels      []labelWire `json:"labels"`
-	Annotations []labelWire `json:"annotations"`
+	ID          any              `json:"id"`
+	AlertName   string           `json:"alertname"`
+	Fingerprint string           `json:"fingerprint"`
+	Status      string           `json:"status"`
+	CreatedAt   time.Time        `json:"createdAt"`
+	Labels      []labelWire      `json:"labels"`
+	Annotations []annotationWire `json:"annotations"`
 }
 
 func (r historyWire) normalized() HistoryRecord {
@@ -470,13 +537,17 @@ func (r historyWire) normalized() HistoryRecord {
 		result.Labels[item.Label] = item.Value
 	}
 	for _, item := range r.Annotations {
-		result.Annotations[item.Label] = item.Value
+		result.Annotations[item.Annotation] = item.Value
 	}
 	return result
 }
 
 type historyListResponse struct {
-	Records []historyWire `json:"records"`
+	TotalRecords int           `json:"total_records"`
+	TotalPages   int           `json:"total_pages"`
+	Page         int           `json:"page"`
+	PerPage      int           `json:"per_page"`
+	Records      []historyWire `json:"records"`
 }
 
 type auditWire struct {
@@ -499,7 +570,10 @@ func (r auditWire) normalized() AuditRecord {
 }
 
 type auditListResponse struct {
-	Rows []auditWire `json:"rows"`
+	Rows    []auditWire `json:"rows"`
+	Total   int         `json:"total"`
+	Page    int         `json:"page"`
+	PerPage int         `json:"perPage"`
 }
 
 type notificationWire struct {

@@ -10,7 +10,7 @@ Go 1.27.0 or newer is required to build. Released Linux binaries are CGO-free an
 make build
 export OSCAR_API_TOKEN='...'
 ./bin/oscar-corrtest target add \
-  --name lab-a --url https://oscar.example \
+  --name lab-a --url https://oscar.example/ext/mw \
   --credential-env OSCAR_API_TOKEN --output json
 
 ./bin/oscar-corrtest doctor \

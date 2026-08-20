@@ -7,11 +7,16 @@ The harness is a single CGO-free executable with embedded UI assets and a local 
 Store only a credential reference:
 
 ```bash
-oscar-corrtest target add --name lab-a --url https://oscar.example --credential-env OSCAR_API_TOKEN
+oscar-corrtest target add --name lab-a --url https://oscar.example/ext/mw --credential-env OSCAR_API_TOKEN
 oscar-corrtest doctor --target <target-id> --pipeline-mode phase_b_dispatch
 ```
 
 Until OSCAR exposes pipeline mode publicly, `publication_disabled`, `phase_a_audit_only`, and `phase_b_dispatch` are operator declarations captured in each run. Only Phase B can prove synthetic-parent and notifier outcomes. Doctor validates a real rule payload, injects one diagnostic alert, resolves its OSCAR fingerprint from history, and verifies every reserved label before any temporary rule is created.
+
+The `public-v1` profile targets OSCAR's external middleware root (normally
+`/ext/mw`) and sends the referenced credential using OSCAR's `X-API-Key`
+contract. Pointing the harness at an internal service URL bypasses the external
+authentication/RBAC surface and is not a valid production qualification.
 
 ## Run and evidence
 

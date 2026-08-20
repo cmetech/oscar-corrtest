@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,13 +36,14 @@ type Plan struct {
 	Digest         string         `json:"digest"`
 }
 type CasePlan struct {
-	Name       string               `json:"name"`
-	Code       string               `json:"code"`
-	Polarity   string               `json:"polarity"`
-	Rule       RulePlan             `json:"rule"`
-	Alerts     []AlertPlan          `json:"alerts"`
-	Assertions []scenario.Assertion `json:"assertions"`
-	Inspection Inspection           `json:"inspection"`
+	Name              string               `json:"name"`
+	Code              string               `json:"code"`
+	Polarity          string               `json:"polarity"`
+	Rule              RulePlan             `json:"rule"`
+	Alerts            []AlertPlan          `json:"alerts"`
+	Assertions        []scenario.Assertion `json:"assertions"`
+	ObservationWindow time.Duration        `json:"observationWindow"`
+	Inspection        Inspection           `json:"inspection"`
 }
 type RulePlan struct {
 	Name          string            `json:"name"`
@@ -68,7 +70,7 @@ type Inspection struct {
 	Filters         map[string]string `json:"filters"`
 }
 
-var reservedLabels = map[string]struct{}{"alertname": {}, "category": {}, "oscar_test": {}, "oscar_test_harness": {}, "oscar_test_schema_version": {}, "oscar_test_run_id": {}, "oscar_test_run_short": {}, "oscar_test_suite": {}, "oscar_test_scenario": {}, "oscar_test_pattern": {}, "oscar_test_case": {}, "oscar_test_case_code": {}, "oscar_test_polarity": {}, "oscar_test_alert_class": {}, "oscar_test_alert_role": {}, "oscar_test_rule_name": {}}
+var reservedLabels = map[string]struct{}{"alertname": {}, "category": {}, "oscar_test": {}, "oscar_test_harness": {}, "oscar_test_schema_version": {}, "oscar_test_run_id": {}, "oscar_test_run_short": {}, "oscar_test_suite": {}, "oscar_test_scenario": {}, "oscar_test_pattern": {}, "oscar_test_case": {}, "oscar_test_case_code": {}, "oscar_test_polarity": {}, "oscar_test_alert_class": {}, "oscar_test_alert_role": {}, "oscar_test_rule_name": {}, "oscar_test_event_id": {}, "oscar_test_event_index": {}}
 
 func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities) (Plan, error) {
 	if run.ID == "" || len(run.ShortToken) != 8 {
@@ -132,22 +134,50 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 		if input.Pattern == "parent_child" {
 			syntheticName = ""
 		}
-		item := CasePlan{Name: source.Name, Code: caseCode, Polarity: source.Polarity, Assertions: source.Assertions}
+		observationWindow := source.Window + 15*time.Second
+		if input.Pattern == "absence" {
+			observationWindow = 55 * time.Second
+		}
+		item := CasePlan{Name: source.Name, Code: caseCode, Polarity: source.Polarity, Assertions: source.Assertions, ObservationWindow: observationWindow}
 		item.Rule = RulePlan{Name: ruleName, Pattern: input.Pattern, WindowSeconds: int(source.Window / time.Second), GroupBy: source.GroupBy, MatchCriteria: matchCriteria(input.Pattern, names, source), EmitAlertName: syntheticName, EmitLabels: identityLabels(run, input, source, ruleName, "synthetic", "synthetic_parent"), Description: fmt.Sprintf("Temporary OSCAR correlation test rule; run=%s scenario=%s case=%s", run.ID, input.Name, source.Name)}
+		activeByRole := map[string]map[string]string{}
+		eventSequence := 0
 		for index, event := range events {
-			labels := identityLabels(run, input, source, ruleName, "source", event.Role)
-			for key, value := range source.Labels {
-				labels[key] = value
-			}
-			for key, value := range event.Labels {
-				if _, reserved := reservedLabels[key]; reserved {
-					return Plan{}, fmt.Errorf("case %q event overrides reserved label %q", source.Name, key)
+			var labels map[string]string
+			if strings.EqualFold(event.Status, "resolved") {
+				firing, ok := activeByRole[event.Role]
+				if !ok {
+					return Plan{}, fmt.Errorf("case %q resolves role %q without a preceding firing event", source.Name, event.Role)
 				}
-				labels[key] = value
+				if len(event.Labels) != 0 {
+					return Plan{}, fmt.Errorf("case %q resolution for role %q cannot change identity labels", source.Name, event.Role)
+				}
+				labels = cloneLabels(firing)
+				delete(activeByRole, event.Role)
+			} else {
+				eventSequence++
+				labels = identityLabels(run, input, source, ruleName, "source", event.Role)
+				for key, value := range source.Labels {
+					labels[key] = value
+				}
+				for key, value := range event.Labels {
+					if _, reserved := reservedLabels[key]; reserved {
+						return Plan{}, fmt.Errorf("case %q event overrides reserved label %q", source.Name, key)
+					}
+					labels[key] = value
+				}
+				labels["oscar_test_event_id"] = fmt.Sprintf("%s-%s-%03d", run.ID, caseCode, eventSequence)
+				labels["oscar_test_event_index"] = strconv.Itoa(eventSequence)
 			}
 			name := names[event.Role]
 			labels["alertname"] = name
-			item.Alerts = append(item.Alerts, AlertPlan{Name: name, Status: event.Status, Labels: labels, Delay: event.Delay, Annotations: map[string]string{"oscar_test_event_id": fmt.Sprintf("%s-%s-%03d", run.ID, caseCode, index+1), "oscar_test_event_index": fmt.Sprintf("%d", index+1), "summary": fmt.Sprintf("[CORRTEST][%s][%s][%s] source alert %d of %d", patternCode, caseCode, short, index+1, len(events))}})
+			if !strings.EqualFold(event.Status, "resolved") {
+				activeByRole[event.Role] = cloneLabels(labels)
+			}
+			item.Alerts = append(item.Alerts, AlertPlan{Name: name, Status: event.Status, Labels: labels, Delay: event.Delay, Annotations: map[string]string{"oscar_test_event_id": labels["oscar_test_event_id"], "oscar_test_event_index": labels["oscar_test_event_index"], "oscar_test_attempt_index": strconv.Itoa(index + 1), "summary": fmt.Sprintf("[CORRTEST][%s][%s][%s] source alert %d of %d", patternCode, caseCode, short, index+1, len(events))}})
+			if event.Delay > item.ObservationWindow || event.Delay > input.MaxDuration {
+				return Plan{}, fmt.Errorf("case %q event delay exceeds its observation budget", source.Name)
+			}
 		}
 		alertNames := uniqueNames(names)
 		if syntheticName != "" {
@@ -226,5 +256,13 @@ func uniqueNames(names map[string]string) []string {
 	return result
 }
 func identityLabels(run domain.Run, input scenario.Scenario, item scenario.Case, ruleName, class, role string) map[string]string {
-	return map[string]string{"category": "corrtest_" + input.Pattern, "oscar_test": "true", "oscar_test_harness": "corrtest", "oscar_test_schema_version": "v1", "oscar_test_run_id": run.ID, "oscar_test_run_short": strings.ToUpper(run.ShortToken), "oscar_test_suite": input.Suite, "oscar_test_scenario": input.Name, "oscar_test_pattern": input.Pattern, "oscar_test_case": item.Name, "oscar_test_case_code": strings.ToUpper(item.Code), "oscar_test_polarity": item.Polarity, "oscar_test_alert_class": class, "oscar_test_alert_role": role, "oscar_test_rule_name": ruleName}
+	return map[string]string{"category": "corrtest_" + input.Pattern, "oscar_test": "true", "oscar_test_harness": "corrtest", "oscar_test_schema_version": "v1", "oscar_test_run_id": run.ID, "oscar_test_run_short": strings.ToUpper(run.ShortToken), "oscar_test_suite": input.Suite, "oscar_test_scenario": input.Name, "oscar_test_pattern": input.Pattern, "oscar_test_case": item.Name, "oscar_test_case_code": strings.ToUpper(item.Code), "oscar_test_polarity": item.Polarity, "oscar_test_alert_class": class, "oscar_test_alert_role": role, "oscar_test_rule_name": ruleName, "severity": "warning"}
+}
+
+func cloneLabels(input map[string]string) map[string]string {
+	result := make(map[string]string, len(input))
+	for key, value := range input {
+		result[key] = value
+	}
+	return result
 }
