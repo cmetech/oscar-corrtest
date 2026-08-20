@@ -178,6 +178,41 @@ func (d *Database) TransitionRun(ctx context.Context, id string, next domain.Run
 	return nil
 }
 
+// SetRunExecutionDocuments persists preflight facts before external mutation.
+func (d *Database) SetRunExecutionDocuments(ctx context.Context, id string, capabilities, plan json.RawMessage, at time.Time) error {
+	if !json.Valid(capabilities) || !json.Valid(plan) || at.IsZero() {
+		return fmt.Errorf("run execution documents are invalid")
+	}
+	result, err := d.db.ExecContext(ctx, `UPDATE runs SET capability_snapshot_json=?, compiled_plan_json=?, started_at=COALESCE(started_at,?), updated_at=? WHERE id=?`,
+		string(capabilities), string(plan), formatTime(at), formatTime(at), id)
+	if err != nil {
+		return fmt.Errorf("persist run execution documents: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil || count != 1 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// CompleteRun stores verdict, cleanup, and the canonical report after the
+// lifecycle has already entered COMPLETED.
+func (d *Database) CompleteRun(ctx context.Context, id string, verdict domain.Verdict, cleanup domain.CleanupStatus, report json.RawMessage, terminalError string, at time.Time) error {
+	if !verdict.Valid() || !cleanup.Valid() || !json.Valid(report) || at.IsZero() {
+		return fmt.Errorf("run completion metadata is invalid")
+	}
+	result, err := d.db.ExecContext(ctx, `UPDATE runs SET verdict=?, cleanup_status=?, canonical_report_json=?, terminal_error=?, ended_at=?, updated_at=?
+		WHERE id=? AND status='COMPLETED'`, string(verdict), string(cleanup), string(report), nullable(terminalError), formatTime(at), formatTime(at), id)
+	if err != nil {
+		return fmt.Errorf("complete run: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil || count != 1 {
+		return fmt.Errorf("run is not eligible for completion")
+	}
+	return nil
+}
+
 // RecoverInterruptedRuns marks active runs interrupted exactly once.
 func (d *Database) RecoverInterruptedRuns(ctx context.Context, at time.Time) (int, error) {
 	if err := d.Ready(); err != nil {
