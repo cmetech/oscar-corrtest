@@ -2,6 +2,7 @@
 /dist/
 /.tools/
 /.cache/
+/.worktrees/
 *.db
 *.db-shm
 *.db-wal
