@@ -91,11 +91,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "$GITHUB_REF_NAME" \
-            "dist/oscar-corrtest_${GITHUB_REF_NAME}_linux_amd64.tar.gz" \
-            "dist/oscar-corrtest_${GITHUB_REF_NAME}_linux_arm64.tar.gz" \
-            "dist/oscar-corrtest_${GITHUB_REF_NAME}_darwin_amd64.tar.gz" \
-            "dist/oscar-corrtest_${GITHUB_REF_NAME}_darwin_arm64.tar.gz" \
-            "dist/oscar-corrtest_${GITHUB_REF_NAME}_windows_amd64.zip" \
-            dist/SHA256SUMS \
-            --verify-tag --generate-notes
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists; replacing its verified assets."
+            gh release upload "$GITHUB_REF_NAME" \
+              "dist/oscar-corrtest_${GITHUB_REF_NAME}_linux_amd64.tar.gz" \
+              "dist/oscar-corrtest_${GITHUB_REF_NAME}_linux_arm64.tar.gz" \
+              "dist/oscar-corrtest_${GITHUB_REF_NAME}_darwin_amd64.tar.gz" \
+              "dist/oscar-corrtest_${GITHUB_REF_NAME}_darwin_arm64.tar.gz" \
+              "dist/oscar-corrtest_${GITHUB_REF_NAME}_windows_amd64.zip" \
+              dist/SHA256SUMS \
+              --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              "dist/oscar-corrtest_${GITHUB_REF_NAME}_linux_amd64.tar.gz" \
+              "dist/oscar-corrtest_${GITHUB_REF_NAME}_linux_arm64.tar.gz" \
+              "dist/oscar-corrtest_${GITHUB_REF_NAME}_darwin_amd64.tar.gz" \
+              "dist/oscar-corrtest_${GITHUB_REF_NAME}_darwin_arm64.tar.gz" \
+              "dist/oscar-corrtest_${GITHUB_REF_NAME}_windows_amd64.zip" \
+              dist/SHA256SUMS \
+              --verify-tag --generate-notes
+          fi

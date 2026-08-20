@@ -109,18 +109,32 @@ installers do not install this unit.
 
 Configure `origin` to the public `cmetech/oscar-corrtest` GitHub repository,
 merge the intended release commit to protected `main`, and keep the worktree
-clean. Then run:
+clean. The normal release path is an annotated semantic-version tag pushed to
+GitHub:
+
+```bash
+git switch main
+git pull --ff-only origin main
+git tag -a v1.2.3 -m "OSCAR Correlation Test Harness v1.2.3"
+git push origin refs/tags/v1.2.3
+```
+
+The tag push triggers GitHub Actions. CI independently runs the complete release
+gate, cross-compiles every supported platform archive, runs the Windows
+installer smoke test, verifies checksums, and creates the GitHub Release. A
+workflow retry safely replaces the verified assets on an existing release.
+
+`scripts/release.sh` remains available as an optional guarded preflight. It
+checks that local `HEAD` equals `origin/main`, rejects tag and release
+collisions, runs the same release gate locally, verifies the complete asset set,
+then creates and pushes only the annotated tag:
 
 ```bash
 ./scripts/release.sh v1.2.3
 ```
 
-The script fetches `origin`, requires local `HEAD` to equal `origin/main`,
-checks local/remote tag and GitHub Release collisions, runs
-`make clean release-gate VERSION=v1.2.3`, verifies the complete release set,
-creates an annotated tag, and pushes only that tag. GitHub Actions independently
-rebuilds the assets, runs the Windows installer smoke, and publishes the
-release. The script never pushes application commits or removes a failed tag.
+Neither path pushes application commits. If the direct tag path is used, no
+local build or packaging command is required.
 
 Before creating the first real semantic tag on either remote, confirm GitHub release permissions and branch protection, then confirm the GitLab `CI_JOB_TOKEN` can upload package-registry assets and create release links. Local workflow validation cannot prove those remote settings.
 

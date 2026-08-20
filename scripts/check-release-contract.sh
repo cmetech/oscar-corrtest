@@ -27,6 +27,14 @@ for gate in installer-posix-check release-script-check package-content-check rep
 done
 
 release_workflow=.github/workflows/release.yml
+grep -q '^    tags:$' "$release_workflow" || {
+  printf '%s\n' 'release workflow is not triggered by pushed tags' >&2
+  exit 1
+}
+grep -Fq '      - "v*.*.*"' "$release_workflow" || {
+  printf '%s\n' 'release workflow does not accept semantic version tag candidates' >&2
+  exit 1
+}
 for contract in \
   '^  verify:' \
   '^  windows-smoke:' \
@@ -40,6 +48,16 @@ for contract in \
 do
   grep -q "$contract" "$release_workflow" || {
     printf 'release workflow is missing contract: %s\n' "$contract" >&2
+    exit 1
+  }
+done
+for contract in \
+  'gh release view "$GITHUB_REF_NAME"' \
+  'gh release upload "$GITHUB_REF_NAME"' \
+  '--clobber'
+do
+  grep -Fq -- "$contract" "$release_workflow" || {
+    printf 'release workflow is not retry-safe; missing: %s\n' "$contract" >&2
     exit 1
   }
 done

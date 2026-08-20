@@ -146,3 +146,19 @@ Targets persist credential references only. Secret values are resolved in memory
 Go 1.27.0 or newer is required only to build from source; released binaries
 are CGO-free and need no Go, Python, Node, external database, or OSCAR source
 checkout.
+
+## Creating a release
+
+Pushing an annotated `vMAJOR.MINOR.PATCH` tag starts the GitHub Actions release
+pipeline; no local build or packaging script is required:
+
+```bash
+git tag -a v1.2.3 -m "OSCAR Correlation Test Harness v1.2.3"
+git push origin refs/tags/v1.2.3
+```
+
+The pipeline runs the complete release gate, cross-compiles Linux, macOS, and
+Windows assets, tests the Windows installer, verifies checksums, and publishes
+the GitHub Release. The guarded `scripts/release.sh v1.2.3` command remains an
+optional local preflight. See [the development guide](docs/development.md#creating-a-github-release)
+for the complete operator procedure.
