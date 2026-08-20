@@ -16,7 +16,7 @@ GOVULNCHECK_VERSION := v1.6.0
 
 .DEFAULT_GOAL := build
 
-.PHONY: tools fmt-check mod-check archive-mod-check vet security test test-race plan2-gate plan3-gate plan4-gate plan5-gate plan6-gate plan7-gate container-check release-contract-check package-content-check reproducible-check installer-posix-check release-script-check release-gate live-qualification build cross package checksums standalone-check ci-core ci clean
+.PHONY: tools fmt-check mod-check archive-mod-check vet security test test-race plan2-gate plan3-gate plan4-gate plan5-gate plan6-gate plan7-gate operator-experience-gate container-check release-contract-check package-content-check reproducible-check installer-posix-check release-script-check release-gate live-qualification build cross package checksums standalone-check ci-core ci clean
 
 tools:
 	mkdir -p "$(TOOLS_DIR)"
@@ -67,6 +67,10 @@ plan6-gate:
 
 plan7-gate:
 	go test -count=1 ./internal/scenario ./internal/evidence ./internal/artifact ./internal/runtime ./internal/command ./internal/web
+
+operator-experience-gate:
+	@set -eu; for package in internal/platformpaths internal/envfile internal/service internal/applog internal/operations internal/scenario internal/runtime internal/web internal/command internal/integration scripts internal/docs; do test -d "$$package"; done
+	go test -count=1 ./internal/platformpaths ./internal/envfile ./internal/service ./internal/applog ./internal/operations ./internal/scenario ./internal/runtime ./internal/web ./internal/command ./internal/integration ./scripts ./internal/docs
 
 container-check:
 	grep -q '^FROM scratch$$' Containerfile
@@ -141,7 +145,7 @@ ci:
 	$(MAKE) checksums
 
 release-gate: ci
-	$(MAKE) plan3-gate plan4-gate plan5-gate plan6-gate plan7-gate
+	$(MAKE) plan3-gate plan4-gate plan5-gate plan6-gate plan7-gate operator-experience-gate
 	$(MAKE) container-check
 	$(MAKE) installer-posix-check release-script-check
 	$(MAKE) clean package checksums package-content-check

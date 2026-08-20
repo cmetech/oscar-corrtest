@@ -12,6 +12,8 @@ oscar-corrtest/docs/install.md
 oscar-corrtest/docs/operator.md
 oscar-corrtest/docs/builtins.md
 oscar-corrtest/docs/live-qualification.md
+oscar-corrtest/docs/scenario-authoring.md
+oscar-corrtest/docs/service-management.md
 oscar-corrtest/docs/schema/correlation-scenario.schema.json
 oscar-corrtest/packaging/oscar-corrtest.service
 oscar-corrtest/Containerfile'
