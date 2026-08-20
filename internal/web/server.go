@@ -640,12 +640,16 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 		}
 		action := r.PathValue("action")
 		if action == "stop" || action == "restart" {
+			actionContext, cancelAction := detachedServiceActionContext(r)
 			w.Header().Set("Location", "/operations?message=service-"+action+"-requested")
 			w.WriteHeader(http.StatusSeeOther)
 			if flusher, ok := w.(http.Flusher); ok {
 				flusher.Flush()
 			}
-			go func() { _, _ = controller.ServiceAction(context.Background(), action) }()
+			go func() {
+				defer cancelAction()
+				_, _ = controller.ServiceAction(actionContext, action)
+			}()
 			return
 		}
 		if _, err := controller.ServiceAction(r.Context(), action); err != nil {
@@ -801,6 +805,13 @@ func disableStreamingDeadline(w http.ResponseWriter) {
 	// The server has a bounded WriteTimeout for ordinary responses. Streaming
 	// endpoints own their lifetime through the request context and heartbeats.
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+}
+
+func detachedServiceActionContext(request *http.Request) (context.Context, context.CancelFunc) {
+	// Stopping the service closes the request that initiated the stop. Preserve
+	// request values while detaching cancellation, then keep the platform call
+	// bounded so a failed service manager cannot leak a goroutine.
+	return context.WithTimeout(context.WithoutCancel(request.Context()), 15*time.Second)
 }
 
 func render(w http.ResponseWriter, tmpl *template.Template, nonce nonceFunc, data pageData) {

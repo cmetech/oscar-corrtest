@@ -33,6 +33,13 @@ func TestRenderDefinitionsContainResolvedPathsAndNoSecrets(t *testing.T) {
 	}
 }
 
+func TestExecRunnerRejectsCommandsOutsideServiceManagerAllowlist(t *testing.T) {
+	_, err := (ExecRunner{}).Run(context.Background(), "operator-controlled-command")
+	if err == nil || !strings.Contains(err.Error(), "unsupported service manager command") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestInstallEnablesWithoutStarting(t *testing.T) {
 	for _, tt := range []struct {
 		goos      string

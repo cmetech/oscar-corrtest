@@ -822,6 +822,21 @@ func TestStreamingResponsesDisableServerWriteDeadline(t *testing.T) {
 	}
 }
 
+func TestDetachedServiceActionContextIsBoundedAndSurvivesRequestCancellation(t *testing.T) {
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	request := httptest.NewRequest(http.MethodPost, "/operations/service/stop", nil).WithContext(requestContext)
+	ctx, cancel := detachedServiceActionContext(request)
+	defer cancel()
+	cancelRequest()
+	if err := ctx.Err(); err != nil {
+		t.Fatalf("detached context inherited request cancellation: %v", err)
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok || time.Until(deadline) <= 0 || time.Until(deadline) > 15*time.Second {
+		t.Fatalf("deadline=%v ok=%t", deadline, ok)
+	}
+}
+
 type deadlineResponseWriter struct {
 	*httptest.ResponseRecorder
 	deadlines []time.Time
