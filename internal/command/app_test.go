@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
+	"github.com/cmetech/oscar-corrtest/internal/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/version"
 	"github.com/cmetech/oscar-corrtest/internal/web"
 )
@@ -49,6 +52,39 @@ func TestScenarioListPlanAndRunCommandsShareRuntimeContracts(t *testing.T) {
 		if !strings.Contains(stdout.String(), test.want) {
 			t.Fatalf("args=%v stdout=%q missing %q", test.args, stdout.String(), test.want)
 		}
+	}
+}
+
+func TestScenarioValidateAcceptsStrictCustomDocument(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "scenario.yaml")
+	if err := os.WriteFile(path, []byte("apiVersion: corrtest.oscar/v1alpha1\nkind: CorrelationScenario\nname: sample\nsuite: custom\npattern: flood\nmaxDuration: 90s\ncases: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	app := New(&stdout, &stderr, version.Info{}, nil)
+	if code := app.Run(context.Background(), []string{"scenario", "validate", path, "--output", "json"}); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"valid":true`) || !strings.Contains(stdout.String(), `"name":"sample"`) {
+		t.Fatalf("stdout=%q", stdout.String())
+	}
+}
+
+func TestPlanAcceptsCustomScenarioFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "scenario.yaml")
+	content := "apiVersion: corrtest.oscar/v1alpha1\nkind: CorrelationScenario\nname: sample\nsuite: custom\npattern: flood\nmaxDuration: 90s\ncases: []\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	fake := &fakeRuntime{}
+	open := func(context.Context, config.Settings) (ApplicationRuntime, error) { return fake, nil }
+	app := NewConfigured(&stdout, &stderr, version.Info{}, nil, open, testGetenv)
+	if code := app.Run(context.Background(), []string{"plan", path, "--target", "tgt_lab", "--pipeline-mode", "phase_b_dispatch", "--output", "json"}); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+	}
+	if fake.customScenario.Name != "sample" || !strings.Contains(stdout.String(), `"pattern":"flood"`) {
+		t.Fatalf("scenario=%+v stdout=%q", fake.customScenario, stdout.String())
 	}
 }
 
@@ -122,13 +158,14 @@ func TestRunsListShowAndBackupCommands(t *testing.T) {
 }
 
 type fakeRuntime struct {
-	createdTarget domain.TargetInput
-	targets       []domain.Target
-	runs          []domain.Run
-	lastFilter    domain.RunFilter
-	backupPath    string
-	closed        bool
-	executedRun   domain.Run
+	createdTarget  domain.TargetInput
+	targets        []domain.Target
+	runs           []domain.Run
+	lastFilter     domain.RunFilter
+	backupPath     string
+	closed         bool
+	executedRun    domain.Run
+	customScenario scenario.Scenario
 }
 
 func (f *fakeRuntime) CreateTarget(_ context.Context, input domain.TargetInput) (domain.Target, error) {
@@ -161,6 +198,14 @@ func (f *fakeRuntime) PreviewBuiltin(_ context.Context, targetID, pattern, mode 
 	return compiler.Plan{APIVersion: outputAPIVersion, Pattern: pattern, RunID: "preview", MutationBudget: compiler.MutationBudget{Rules: 2, Alerts: 9}}, nil
 }
 func (f *fakeRuntime) ExecuteBuiltin(_ context.Context, targetID, pattern, mode string, labelsSurvived bool) (domain.Run, error) {
+	return f.executedRun, nil
+}
+func (f *fakeRuntime) PreviewScenario(_ context.Context, targetID string, document scenario.Scenario, mode string) (compiler.Plan, error) {
+	f.customScenario = document
+	return compiler.Plan{APIVersion: outputAPIVersion, Pattern: document.Pattern, RunID: "preview"}, nil
+}
+func (f *fakeRuntime) ExecuteScenario(_ context.Context, targetID string, document scenario.Scenario, mode string, labelsSurvived bool) (domain.Run, error) {
+	f.customScenario = document
 	return f.executedRun, nil
 }
 

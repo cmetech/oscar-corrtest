@@ -91,6 +91,18 @@ func (r *Runtime) PreviewBuiltin(ctx context.Context, targetID, pattern, pipelin
 	return compiler.Compile(preview, scenario.Builtin(pattern), compiler.Capabilities{PipelineMode: pipelineMode})
 }
 
+// PreviewScenario compiles a strict custom document without persistence or network activity.
+func (r *Runtime) PreviewScenario(ctx context.Context, targetID string, document scenario.Scenario, pipelineMode string) (compiler.Plan, error) {
+	if _, err := r.GetTarget(ctx, targetID); err != nil {
+		return compiler.Plan{}, err
+	}
+	id, err := domain.NewRunID(rand.Reader)
+	if err != nil {
+		return compiler.Plan{}, fmt.Errorf("create preview identity: %w", err)
+	}
+	return compiler.Compile(domain.Run{ID: id.String(), ShortToken: id.Short()}, document, compiler.Capabilities{PipelineMode: pipelineMode})
+}
+
 // ExecuteBuiltin serializes live mutation runs through the same durable runtime used by CLI and UI.
 func (r *Runtime) ExecuteBuiltin(ctx context.Context, targetID, pattern, pipelineMode string, labelsSurvived bool) (domain.Run, error) {
 	r.runMu.Lock()
@@ -113,6 +125,34 @@ func (r *Runtime) ExecuteBuiltin(ctx context.Context, targetID, pattern, pipelin
 	}
 	engine := runner.New(r.database, client, runner.Options{})
 	executeErr := engine.Execute(ctx, run, plan, runner.CapabilitySnapshot{APIProfile: target.APIProfile, PipelineMode: pipelineMode, Ready: true, LabelsSurvived: labelsSurvived, Compatibility: true})
+	stored, getErr := r.GetRun(context.Background(), run.ID)
+	if getErr != nil {
+		return run, getErr
+	}
+	return stored, executeErr
+}
+
+// ExecuteScenario runs a strict custom document through the identical safety lifecycle as built-ins.
+func (r *Runtime) ExecuteScenario(ctx context.Context, targetID string, document scenario.Scenario, pipelineMode string, labelsSurvived bool) (domain.Run, error) {
+	r.runMu.Lock()
+	defer r.runMu.Unlock()
+	target, err := r.GetTarget(ctx, targetID)
+	if err != nil {
+		return domain.Run{}, err
+	}
+	run, err := r.history.CreateRun(ctx, targetID, "", r.version)
+	if err != nil {
+		return domain.Run{}, err
+	}
+	plan, err := compiler.Compile(run, document, compiler.Capabilities{PipelineMode: pipelineMode})
+	if err != nil {
+		return run, err
+	}
+	client, err := oscar.New(target, oscar.Options{HarnessVersion: r.version})
+	if err != nil {
+		return run, err
+	}
+	executeErr := runner.New(r.database, client, runner.Options{}).Execute(ctx, run, plan, runner.CapabilitySnapshot{APIProfile: target.APIProfile, PipelineMode: pipelineMode, Ready: true, LabelsSurvived: labelsSurvived, Compatibility: true})
 	stored, getErr := r.GetRun(context.Background(), run.ID)
 	if getErr != nil {
 		return run, getErr

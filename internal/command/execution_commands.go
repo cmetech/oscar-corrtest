@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/cmetech/oscar-corrtest/internal/compiler"
@@ -17,9 +18,21 @@ type correlationRuntime interface {
 	ExecuteBuiltin(context.Context, string, string, string, bool) (domain.Run, error)
 }
 
+type customCorrelationRuntime interface {
+	PreviewScenario(context.Context, string, scenario.Scenario, string) (compiler.Plan, error)
+	ExecuteScenario(context.Context, string, scenario.Scenario, string, bool) (domain.Run, error)
+}
+
 func (a *App) runScenario(_ context.Context, args []string) int {
-	if len(args) == 0 || args[0] != "list" {
-		fmt.Fprintln(a.stderr, "usage: oscar-corrtest scenario list [--output human|json]")
+	if len(args) == 0 {
+		fmt.Fprintln(a.stderr, "usage: oscar-corrtest scenario <list|validate>")
+		return 2
+	}
+	if args[0] == "validate" {
+		return a.runScenarioValidate(args[1:])
+	}
+	if args[0] != "list" {
+		fmt.Fprintln(a.stderr, "usage: oscar-corrtest scenario <list|validate>")
 		return 2
 	}
 	flags := flag.NewFlagSet("scenario list", flag.ContinueOnError)
@@ -43,6 +56,42 @@ func (a *App) runScenario(_ context.Context, args []string) int {
 	for _, item := range values {
 		fmt.Fprintf(a.stdout, "%s\t%s\t%d cases\n", item.Pattern, item.Name, item.CaseCount)
 	}
+	return 0
+}
+
+func (a *App) runScenarioValidate(args []string) int {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		fmt.Fprintln(a.stderr, "usage: oscar-corrtest scenario validate <file> [--output human|json]")
+		return 2
+	}
+	path := args[0]
+	flags := flag.NewFlagSet("scenario validate", flag.ContinueOnError)
+	flags.SetOutput(a.stderr)
+	output := flags.String("output", "human", "human or json")
+	if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 || !validOutput(*output) {
+		return 2
+	}
+	// #nosec G304 -- the command intentionally validates an operator-selected scenario file.
+	file, err := os.Open(path)
+	if err != nil {
+		fmt.Fprintf(a.stderr, "scenario validate: %v\n", err)
+		return 3
+	}
+	defer file.Close()
+	document, err := scenario.Decode(file)
+	if err != nil {
+		fmt.Fprintf(a.stderr, "scenario validate: %v\n", err)
+		return 3
+	}
+	result := struct {
+		Valid   bool   `json:"valid"`
+		Name    string `json:"name"`
+		Pattern string `json:"pattern"`
+	}{true, document.Name, document.Pattern}
+	if *output == "json" {
+		return a.writeJSON(result)
+	}
+	fmt.Fprintf(a.stdout, "Valid scenario: %s (%s)\n", document.Name, document.Pattern)
 	return 0
 }
 
@@ -77,11 +126,28 @@ func (a *App) runPlanOrExecute(ctx context.Context, args []string, execute bool)
 	if source == "" && flags.NArg() == 1 {
 		source = flags.Arg(0)
 	}
-	if flags.NArg() > 1 || source == "" || *target == "" || !validOutput(*output) || !strings.HasPrefix(source, "builtin:") {
-		fmt.Fprintf(a.stderr, "usage: oscar-corrtest %s builtin:<pattern> --target <id> --pipeline-mode <mode> [--labels-survived]\n", name)
+	if flags.NArg() > 1 || source == "" || *target == "" || !validOutput(*output) {
+		fmt.Fprintf(a.stderr, "usage: oscar-corrtest %s <builtin:pattern|scenario-file> --target <id> --pipeline-mode <mode> [--labels-survived]\n", name)
 		return 2
 	}
+	builtin := strings.HasPrefix(source, "builtin:")
 	pattern := strings.TrimPrefix(source, "builtin:")
+	var custom scenario.Scenario
+	if !builtin {
+		// #nosec G304 -- plan/run intentionally consumes an operator-selected scenario file.
+		file, err := os.Open(source)
+		if err != nil {
+			fmt.Fprintf(a.stderr, "%s: %v\n", name, err)
+			return 3
+		}
+		custom, err = scenario.Decode(file)
+		_ = file.Close()
+		if err != nil {
+			fmt.Fprintf(a.stderr, "%s: %v\n", name, err)
+			return 3
+		}
+		pattern = custom.Pattern
+	}
 	if !validPipelineMode(*mode) {
 		fmt.Fprintln(a.stderr, "pipeline mode must be publication_disabled, phase_a_audit_only, phase_b_dispatch, or unknown")
 		return 2
@@ -97,7 +163,15 @@ func (a *App) runPlanOrExecute(ctx context.Context, args []string, execute bool)
 		return 3
 	}
 	if !execute {
-		plan, err := execution.PreviewBuiltin(ctx, *target, pattern, *mode)
+		var plan compiler.Plan
+		var err error
+		if builtin {
+			plan, err = execution.PreviewBuiltin(ctx, *target, pattern, *mode)
+		} else if customExecution, ok := application.(customCorrelationRuntime); ok {
+			plan, err = customExecution.PreviewScenario(ctx, *target, custom, *mode)
+		} else {
+			err = fmt.Errorf("custom scenario execution is unavailable")
+		}
 		if err != nil {
 			fmt.Fprintf(a.stderr, "plan: %v\n", err)
 			return 3
@@ -108,7 +182,15 @@ func (a *App) runPlanOrExecute(ctx context.Context, args []string, execute bool)
 		fmt.Fprintf(a.stdout, "Pattern: %s\nRules: %d\nAlerts: %d\nMaximum duration: %s\n", plan.Pattern, plan.MutationBudget.Rules, plan.MutationBudget.Alerts, plan.MaxDuration)
 		return 0
 	}
-	run, err := execution.ExecuteBuiltin(ctx, *target, pattern, *mode, *labelsSurvived)
+	var run domain.Run
+	var err error
+	if builtin {
+		run, err = execution.ExecuteBuiltin(ctx, *target, pattern, *mode, *labelsSurvived)
+	} else if customExecution, ok := application.(customCorrelationRuntime); ok {
+		run, err = customExecution.ExecuteScenario(ctx, *target, custom, *mode, *labelsSurvived)
+	} else {
+		err = fmt.Errorf("custom scenario execution is unavailable")
+	}
 	if err != nil {
 		fmt.Fprintf(a.stderr, "run: %v\n", err)
 		return 3
