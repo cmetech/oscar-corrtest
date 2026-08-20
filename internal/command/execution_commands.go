@@ -25,8 +25,7 @@ type customCorrelationRuntime interface {
 
 func (a *App) runScenario(ctx context.Context, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(a.stderr, "usage: oscar-corrtest scenario <list|validate|import>")
-		return 2
+		return a.commandUsageError("scenario", "missing scenario action")
 	}
 	if args[0] == "validate" {
 		return a.runScenarioValidate(args[1:])
@@ -35,8 +34,7 @@ func (a *App) runScenario(ctx context.Context, args []string) int {
 		return a.runScenarioImport(ctx, args[1:])
 	}
 	if args[0] != "list" {
-		fmt.Fprintln(a.stderr, "usage: oscar-corrtest scenario <list|validate|import>")
-		return 2
+		return a.commandUsageError("scenario", fmt.Sprintf("unknown scenario action %q", args[0]))
 	}
 	flags := flag.NewFlagSet("scenario list", flag.ContinueOnError)
 	flags.SetOutput(a.stderr)

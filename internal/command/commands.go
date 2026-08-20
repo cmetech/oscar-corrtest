@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/config"
@@ -23,8 +24,11 @@ type retentionRuntime interface {
 
 func (a *App) runRetention(ctx context.Context, args []string) int {
 	if len(args) == 0 || (args[0] != "preview" && args[0] != "apply") {
-		fmt.Fprintln(a.stderr, "usage: oscar-corrtest retention <preview|apply> --before <RFC3339> [--yes]")
-		return 2
+		message := "missing retention action"
+		if len(args) > 0 {
+			message = fmt.Sprintf("unknown retention action %q", args[0])
+		}
+		return a.commandUsageError("retention", message)
 	}
 	action := args[0]
 	flags := flag.NewFlagSet("retention "+action, flag.ContinueOnError)
@@ -81,8 +85,7 @@ func (a *App) runRetention(ctx context.Context, args []string) int {
 
 func (a *App) runTarget(ctx context.Context, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(a.stderr, "usage: oscar-corrtest target <add|list>")
-		return 2
+		return a.commandUsageError("target", "missing target action")
 	}
 	switch args[0] {
 	case "add":
@@ -90,8 +93,7 @@ func (a *App) runTarget(ctx context.Context, args []string) int {
 	case "list":
 		return a.runTargetList(ctx, args[1:])
 	default:
-		fmt.Fprintf(a.stderr, "unknown target command %q\n", args[0])
-		return 2
+		return a.commandUsageError("target", fmt.Sprintf("unknown target action %q", args[0]))
 	}
 }
 
@@ -235,8 +237,7 @@ func (a *App) runTargetList(ctx context.Context, args []string) int {
 
 func (a *App) runRuns(ctx context.Context, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(a.stderr, "usage: oscar-corrtest runs <list|show|delete>")
-		return 2
+		return a.commandUsageError("runs", "missing runs action")
 	}
 	switch args[0] {
 	case "list":
@@ -246,8 +247,7 @@ func (a *App) runRuns(ctx context.Context, args []string) int {
 	case "delete":
 		return a.runRunsDelete(ctx, args[1:])
 	default:
-		fmt.Fprintf(a.stderr, "unknown runs command %q\n", args[0])
-		return 2
+		return a.commandUsageError("runs", fmt.Sprintf("unknown runs action %q", args[0]))
 	}
 }
 
@@ -260,10 +260,11 @@ func (a *App) runRunsDelete(ctx context.Context, args []string) int {
 	flags.SetOutput(a.stderr)
 	configPath, dataDir := commonConfigFlags(flags)
 	yes := flags.Bool("yes", false, "confirm exact run deletion")
-	if err := flags.Parse(args); err != nil {
+	runID, err := parseSinglePositional(flags, args)
+	if err != nil {
 		return 2
 	}
-	if flags.NArg() != 1 || !*yes {
+	if runID == "" || !*yes {
 		fmt.Fprintln(a.stderr, "usage: oscar-corrtest runs delete <exact-run-id> --yes")
 		return 2
 	}
@@ -277,11 +278,11 @@ func (a *App) runRunsDelete(ctx context.Context, args []string) int {
 		fmt.Fprintln(a.stderr, "run deletion is unavailable")
 		return 1
 	}
-	if err := deletion.DeleteRun(ctx, flags.Arg(0)); err != nil {
+	if err := deletion.DeleteRun(ctx, runID); err != nil {
 		fmt.Fprintf(a.stderr, "runs delete: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(a.stdout, "Deleted run %s and its verified local evidence\n", flags.Arg(0))
+	fmt.Fprintf(a.stdout, "Deleted run %s and its verified local evidence\n", runID)
 	return 0
 }
 
@@ -332,10 +333,11 @@ func (a *App) runRunsShow(ctx context.Context, args []string) int {
 	flags.SetOutput(a.stderr)
 	configPath, dataDir := commonConfigFlags(flags)
 	output := flags.String("output", "human", "human or json")
-	if err := flags.Parse(args); err != nil {
+	runID, err := parseSinglePositional(flags, args)
+	if err != nil {
 		return 2
 	}
-	if flags.NArg() != 1 || !validOutput(*output) {
+	if runID == "" || !validOutput(*output) {
 		fmt.Fprintln(a.stderr, "usage: oscar-corrtest runs show [--output human|json] <run-id>")
 		return 2
 	}
@@ -344,7 +346,7 @@ func (a *App) runRunsShow(ctx context.Context, args []string) int {
 		return code
 	}
 	defer runtime.Close()
-	run, err := runtime.GetRun(ctx, flags.Arg(0))
+	run, err := runtime.GetRun(ctx, runID)
 	if err != nil {
 		fmt.Fprintf(a.stderr, "runs show: %v\n", err)
 		return 1
@@ -397,16 +399,20 @@ type cleanupRuntime interface {
 
 func (a *App) runCleanup(ctx context.Context, args []string) int {
 	if len(args) == 0 || args[0] != "retry" {
-		fmt.Fprintln(a.stderr, "usage: oscar-corrtest cleanup retry <run-id>")
-		return 2
+		message := "missing cleanup action"
+		if len(args) > 0 {
+			message = fmt.Sprintf("unknown cleanup action %q", args[0])
+		}
+		return a.commandUsageError("cleanup", message)
 	}
 	flags := flag.NewFlagSet("cleanup retry", flag.ContinueOnError)
 	flags.SetOutput(a.stderr)
 	configPath, dataDir := commonConfigFlags(flags)
-	if err := flags.Parse(args[1:]); err != nil {
+	runID, err := parseSinglePositional(flags, args[1:])
+	if err != nil {
 		return 2
 	}
-	if flags.NArg() != 1 {
+	if runID == "" {
 		fmt.Fprintln(a.stderr, "usage: oscar-corrtest cleanup retry <run-id>")
 		return 2
 	}
@@ -420,7 +426,7 @@ func (a *App) runCleanup(ctx context.Context, args []string) int {
 		fmt.Fprintln(a.stderr, "cleanup retry is unavailable")
 		return 1
 	}
-	run, err := cleanup.RetryCleanup(ctx, flags.Arg(0))
+	run, err := cleanup.RetryCleanup(ctx, runID)
 	if err != nil {
 		fmt.Fprintf(a.stderr, "cleanup retry: %v\n", err)
 		if run.CleanupStatus == domain.CleanupDirty || run.CleanupStatus == domain.CleanupUnknown {
@@ -437,10 +443,11 @@ func (a *App) runExport(ctx context.Context, args []string) int {
 	flags.SetOutput(a.stderr)
 	configPath, dataDir := commonConfigFlags(flags)
 	output := flags.String("output", "", "new evidence bundle path")
-	if err := flags.Parse(args); err != nil {
+	runID, err := parseSinglePositional(flags, args)
+	if err != nil {
 		return 2
 	}
-	if flags.NArg() != 1 || *output == "" {
+	if runID == "" || *output == "" {
 		fmt.Fprintln(a.stderr, "usage: oscar-corrtest export <run-id> --output <new-zip-path>")
 		return 2
 	}
@@ -459,7 +466,7 @@ func (a *App) runExport(ctx context.Context, args []string) int {
 		fmt.Fprintln(a.stderr, "evidence export is unavailable")
 		return 1
 	}
-	result, err := operations.ExportRun(ctx, flags.Arg(0), destination)
+	result, err := operations.ExportRun(ctx, runID, destination)
 	if err != nil {
 		fmt.Fprintf(a.stderr, "export: %v\n", err)
 		return 1
@@ -472,10 +479,11 @@ func (a *App) runVerifyBundle(ctx context.Context, args []string) int {
 	flags := flag.NewFlagSet("verify-bundle", flag.ContinueOnError)
 	flags.SetOutput(a.stderr)
 	configPath, dataDir := commonConfigFlags(flags)
-	if err := flags.Parse(args); err != nil {
+	bundlePath, err := parseSinglePositional(flags, args)
+	if err != nil {
 		return 2
 	}
-	if flags.NArg() != 1 {
+	if bundlePath == "" {
 		fmt.Fprintln(a.stderr, "usage: oscar-corrtest verify-bundle <zip-path>")
 		return 2
 	}
@@ -489,7 +497,7 @@ func (a *App) runVerifyBundle(ctx context.Context, args []string) int {
 		fmt.Fprintln(a.stderr, "evidence verification is unavailable")
 		return 1
 	}
-	if err := operations.VerifyBundle(ctx, flags.Arg(0)); err != nil {
+	if err := operations.VerifyBundle(ctx, bundlePath); err != nil {
 		fmt.Fprintf(a.stderr, "verify-bundle: %v\n", err)
 		return 1
 	}
@@ -499,6 +507,26 @@ func (a *App) runVerifyBundle(ctx context.Context, args []string) int {
 
 func commonConfigFlags(flags *flag.FlagSet) (*string, *string) {
 	return flags.String("config", "", "configuration file"), flags.String("data-dir", "", "local state directory")
+}
+
+func parseSinglePositional(flags *flag.FlagSet, args []string) (string, error) {
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		positional := args[0]
+		if err := flags.Parse(args[1:]); err != nil {
+			return "", err
+		}
+		if flags.NArg() != 0 {
+			return "", fmt.Errorf("expected exactly one positional argument")
+		}
+		return positional, nil
+	}
+	if err := flags.Parse(args); err != nil {
+		return "", err
+	}
+	if flags.NArg() != 1 {
+		return "", fmt.Errorf("expected exactly one positional argument")
+	}
+	return flags.Arg(0), nil
 }
 
 func (a *App) openRuntime(ctx context.Context, overrides config.Overrides) (ApplicationRuntime, int) {

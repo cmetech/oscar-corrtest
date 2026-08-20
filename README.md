@@ -22,6 +22,16 @@ unauthenticated; use it only where network access is appropriate for a test
 tool that can create temporary rules and inject alerts. The installer never
 starts a background service.
 
+Explore the CLI from the binary itself. Global, command-group, and individual
+action help are available without opening the database or contacting OSCAR:
+
+```bash
+oscar-corrtest --help
+oscar-corrtest service --help
+oscar-corrtest service start --help
+oscar-corrtest help run
+```
+
 For persistent user-scoped operation, explicitly install and start it:
 
 ```bash

@@ -80,9 +80,8 @@ func NewConfigured(stdout, stderr io.Writer, info version.Info, serve ServeFunc,
 
 // Run executes a command and returns its process exit code.
 func (a *App) Run(ctx context.Context, args []string) int {
-	if len(args) == 0 {
-		fmt.Fprintln(a.stderr, "usage: oscar-corrtest <version|serve|service|target|doctor|scenario|plan|run|runs|cleanup|retention|export|verify-bundle|backup>")
-		return 2
+	if path, requested := helpRequest(args); requested {
+		return a.runHelp(path)
 	}
 
 	switch args[0] {
@@ -115,11 +114,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.runPlan(ctx, args[1:])
 	case "run":
 		return a.runCorrelation(ctx, args[1:])
-	case "help", "--help", "-h":
-		fmt.Fprintln(a.stdout, "usage: oscar-corrtest <version|serve|service|target|doctor|scenario|plan|run|runs|cleanup|retention|export|verify-bundle|backup>")
-		return 0
 	default:
-		fmt.Fprintf(a.stderr, "unknown command %q\nusage: oscar-corrtest <version|serve|service|target|doctor|scenario|plan|run|runs|cleanup|retention|export|verify-bundle|backup>\n", args[0])
+		fmt.Fprintf(a.stderr, "unknown command %q\nRun 'oscar-corrtest --help' to list commands.\n", args[0])
 		return 2
 	}
 }

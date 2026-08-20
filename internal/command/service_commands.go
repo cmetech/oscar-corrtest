@@ -10,8 +10,13 @@ import (
 
 func (a *App) runService(ctx context.Context, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(a.stderr, "usage: oscar-corrtest service <install|start|stop|restart|status|logs|uninstall>")
-		return 2
+		return a.commandUsageError("service", "missing service action")
+	}
+	action := args[0]
+	switch action {
+	case "install", "start", "stop", "restart", "status", "logs", "uninstall":
+	default:
+		return a.commandUsageError("service", fmt.Sprintf("unknown service action %q", action))
 	}
 	if a.service == nil {
 		fmt.Fprintln(a.stderr, "service management is unavailable")
@@ -22,7 +27,6 @@ func (a *App) runService(ctx context.Context, args []string) int {
 		fmt.Fprintf(a.stderr, "service: %v\n", err)
 		return 1
 	}
-	action := args[0]
 	remaining := args[1:]
 	switch action {
 	case "status":
@@ -88,8 +92,6 @@ func (a *App) runService(ctx context.Context, args []string) int {
 		}
 		fmt.Fprintf(a.stdout, "service %s complete; definition=%s\n", action, manager.DefinitionPath())
 		return 0
-	default:
-		fmt.Fprintf(a.stderr, "unknown service action %q\n", action)
-		return 2
 	}
+	return 2
 }
