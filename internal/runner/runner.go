@@ -65,9 +65,6 @@ func New(store Store, api API, options Options) *Runner {
 	if options.PollInterval <= 0 {
 		options.PollInterval = time.Second
 	}
-	if options.ObservationWindow <= 0 {
-		options.ObservationWindow = 35 * time.Second
-	}
 	if options.Stabilization <= 0 {
 		options.Stabilization = 5 * time.Second
 	}
@@ -84,15 +81,20 @@ func New(store Store, api API, options Options) *Runner {
 }
 
 type caseResult struct {
-	Name                 string   `json:"name"`
-	Code                 string   `json:"code"`
-	Verdict              string   `json:"verdict"`
-	SourceFingerprints   []string `json:"sourceFingerprints"`
-	SyntheticCount       int      `json:"syntheticCount"`
-	AuditOutcomes        []string `json:"auditOutcomes"`
-	NotificationStatuses []string `json:"notificationStatuses,omitempty"`
-	ObservationComplete  bool     `json:"observationComplete"`
-	Explanation          string   `json:"explanation"`
+	Name                 string                     `json:"name"`
+	Code                 string                     `json:"code"`
+	Verdict              string                     `json:"verdict"`
+	SourceFingerprints   []string                   `json:"sourceFingerprints"`
+	SyntheticCount       int                        `json:"syntheticCount"`
+	AuditOutcomes        []string                   `json:"auditOutcomes"`
+	NotificationStatuses []string                   `json:"notificationStatuses,omitempty"`
+	ObservationComplete  bool                       `json:"observationComplete"`
+	Explanation          string                     `json:"explanation"`
+	Assertions           []assertionResult          `json:"assertions"`
+	SourceHistory        []oscar.HistoryRecord      `json:"sourceHistory"`
+	SyntheticHistory     []oscar.HistoryRecord      `json:"syntheticHistory"`
+	Audits               []oscar.AuditRecord        `json:"audits"`
+	Notifications        []oscar.NotificationRecord `json:"notifications,omitempty"`
 }
 
 type canonicalReport struct {
@@ -173,9 +175,13 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 	if err := r.transition(ctx, run.ID, domain.RunInjecting, "Sending deterministic source alerts"); err != nil {
 		return r.failAndCleanup(ctx, run, plan, capabilities, resources, err)
 	}
+	caseStarted := make(map[string]time.Time, len(plan.Cases))
 	for _, item := range plan.Cases {
 		var elapsed time.Duration
-		for _, alert := range item.Alerts {
+		for alertIndex, alert := range item.Alerts {
+			if alertIndex == 0 {
+				caseStarted[item.Code] = r.opts.Now().UTC()
+			}
 			if alert.Delay > elapsed {
 				detail, _ := json.Marshal(map[string]string{"alertName": alert.Name, "status": alert.Status, "delay": alert.Delay.String()})
 				if _, err := r.store.AppendRunEvent(ctx, domain.RunEvent{RunID: run.ID, Type: "alert.scheduled", Level: "info", OccurredAt: r.opts.Now().UTC(), Summary: "Delayed alert stimulus scheduled", DetailJSON: string(detail)}); err != nil {
@@ -201,7 +207,7 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 	}
 	results := make([]caseResult, 0, len(plan.Cases))
 	for _, item := range plan.Cases {
-		result, err := r.observeCase(ctx, run, item, started)
+		result, err := r.observeCase(ctx, run, item, started, caseStarted[item.Code])
 		if err != nil {
 			return r.failAndCleanup(ctx, run, plan, capabilities, resources, err)
 		}
@@ -212,8 +218,12 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 	}
 	verdict := domain.VerdictPass
 	for _, result := range results {
-		if result.Verdict != string(domain.VerdictPass) {
+		if result.Verdict == string(domain.VerdictFail) || result.Verdict == string(domain.VerdictError) {
 			verdict = domain.VerdictFail
+			break
+		}
+		if result.Verdict == string(domain.VerdictInconclusive) || result.Verdict == string(domain.VerdictSkipped) {
+			verdict = domain.VerdictInconclusive
 		}
 	}
 	if ctx.Err() != nil {
@@ -226,115 +236,6 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 		cleanup = domain.CleanupDirty
 	}
 	return r.complete(completionCtx, run, plan, capabilities, results, verdict, cleanup, errorString(cleanupError))
-}
-
-func (r *Runner) observeCase(ctx context.Context, run domain.Run, item compiler.CasePlan, started time.Time) (caseResult, error) {
-	result := caseResult{Name: item.Name, Code: item.Code}
-	query := oscar.HistoryQuery{Start: started.Add(-time.Second), End: r.opts.Now().UTC().Add(r.opts.ObservationWindow)}
-	sourceNames := map[string]bool{}
-	for _, alert := range item.Alerts {
-		sourceNames[alert.Name] = true
-	}
-	for sourceName := range sourceNames {
-		query.AlertName = sourceName
-		sources, err := r.pollHistory(ctx, query, true, r.opts.ObservationWindow)
-		if err != nil {
-			return result, err
-		}
-		if len(sources) != 1 || sources[0].Labels["oscar_test_run_id"] != run.ID {
-			result.Verdict, result.Explanation = string(domain.VerdictInconclusive), "exact source history evidence was not unique"
-			return result, nil
-		}
-		result.SourceFingerprints = append(result.SourceFingerprints, sources[0].Fingerprint)
-		audits, err := r.api.CorrelationAudit(ctx, sources[0].Fingerprint)
-		if err != nil {
-			return result, err
-		}
-		for _, audit := range audits {
-			result.AuditOutcomes = append(result.AuditOutcomes, audit.Outcome)
-		}
-		if item.Rule.Pattern == "parent_child" {
-			notifications, err := r.api.NotificationAudit(ctx, sources[0].Fingerprint, query.Start, query.End)
-			if err != nil {
-				return result, err
-			}
-			for _, notification := range notifications {
-				result.NotificationStatuses = append(result.NotificationStatuses, notification.Status)
-			}
-		}
-	}
-	if item.Rule.Pattern == "parent_child" {
-		return r.evaluateParentChild(ctx, item, result)
-	}
-	syntheticName := item.Rule.EmitAlertName
-	parentQuery := oscar.HistoryQuery{AlertName: syntheticName, Start: started.Add(-time.Second), End: query.End}
-	positive := item.Polarity == "positive"
-	parents, err := r.pollHistory(ctx, parentQuery, positive, r.opts.ObservationWindow)
-	if err != nil {
-		return result, err
-	}
-	if !positive {
-		if err := r.opts.Sleep(ctx, r.opts.ObservationWindow); err != nil {
-			return result, err
-		}
-	}
-	result.ObservationComplete = true
-	result.SyntheticCount = len(parents)
-	hasParentAudit := contains(result.AuditOutcomes, "parent_emitted")
-	if positive && len(parents) == 1 && hasParentAudit {
-		if err := r.opts.Sleep(ctx, r.opts.Stabilization); err != nil {
-			return result, err
-		}
-		stable, err := r.api.FindHistory(ctx, parentQuery)
-		if err != nil {
-			return result, err
-		}
-		if len(stable) == 1 {
-			result.Verdict, result.Explanation = string(domain.VerdictPass), "exactly one synthetic parent remained through stabilization"
-			return result, nil
-		}
-	}
-	if !positive && len(parents) == 0 && !hasParentAudit && len(result.AuditOutcomes) > 0 {
-		result.Verdict, result.Explanation = string(domain.VerdictPass), "eligible source remained non-triggering through the full decision window"
-		return result, nil
-	}
-	result.Verdict, result.Explanation = string(domain.VerdictFail), "observed correlation evidence differed from the expected cardinality"
-	return result, nil
-}
-
-func (r *Runner) evaluateParentChild(ctx context.Context, item compiler.CasePlan, result caseResult) (caseResult, error) {
-	if item.Polarity == "negative" {
-		if err := r.opts.Sleep(ctx, r.opts.ObservationWindow); err != nil {
-			return result, err
-		}
-	}
-	result.ObservationComplete = true
-	if item.Polarity == "positive" && contains(result.AuditOutcomes, "suppressed_per_notifier") && contains(result.NotificationStatuses, "suppressed") {
-		result.Verdict, result.Explanation = string(domain.VerdictPass), "child was linked to an active parent with per-notifier suppression evidence"
-		return result, nil
-	}
-	if item.Polarity == "negative" && contains(result.AuditOutcomes, "released_no_trigger") {
-		result.Verdict, result.Explanation = string(domain.VerdictPass), "unmatched child was positively anchored as released without correlation"
-		return result, nil
-	}
-	result.Verdict, result.Explanation = string(domain.VerdictFail), "parent-child decision evidence differed from the expected outcome"
-	return result, nil
-}
-
-func (r *Runner) pollHistory(ctx context.Context, query oscar.HistoryQuery, waitForOne bool, window time.Duration) ([]oscar.HistoryRecord, error) {
-	deadline := r.opts.Now().Add(window)
-	for {
-		records, err := r.api.FindHistory(ctx, query)
-		if err != nil {
-			return nil, err
-		}
-		if !waitForOne || len(records) > 0 || !r.opts.Now().Before(deadline) {
-			return records, nil
-		}
-		if err := r.opts.Sleep(ctx, r.opts.PollInterval); err != nil {
-			return nil, err
-		}
-	}
 }
 
 func (r *Runner) cleanup(ctx context.Context, runID string, resources []domain.Resource) (domain.CleanupStatus, error) {
