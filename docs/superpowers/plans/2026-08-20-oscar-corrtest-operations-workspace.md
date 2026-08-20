@@ -182,10 +182,11 @@ Expected: FAIL because the template and asset do not exist.
 
 - [ ] **Step 3: Build the approved unified Operations surface**
 
-Use Variant B: configuration and paths in the upper workspace, service state and
-actions adjacent, and a wide dense log console below. Provide source/level/text
-filters over the bounded client view, timestamps, connection status, and a link
-to contextual documentation.
+Use Variant B exactly as selected: stack configuration, service state/actions,
+and effective paths in a narrow left rail, with the wide dense log console as
+the adjacent primary panel. Stack the regions only at responsive widths. Provide
+source/level/text filters over the bounded client view, timestamps, connection
+status, and a link to contextual documentation.
 
 - [ ] **Step 4: Implement live log enhancement**
 

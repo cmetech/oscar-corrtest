@@ -1,10 +1,68 @@
 {{define "operations"}}
-<section class="page-heading"><p class="eyebrow">Local operator controls</p><h1>Operations</h1><p>Configure the global OSCAR API key, inspect effective user paths and service state, and follow redacted application logs.</p></section>
-{{if .OperationMessage}}<div class="notice" role="status">Operation completed: {{.OperationMessage}}</div>{{end}}
-<section class="operations-grid">
-  <article class="panel operations-card"><header><p class="eyebrow">Configuration</p><h2>OSCAR API key</h2></header><p>{{if .Operations.Key.Configured}}<span class="status-pill status-pill--pass">Configured</span>{{else}}<span class="status-pill">Not configured</span>{{end}} <span class="muted">Source: {{.Operations.Key.Source}}</span></p>{{if .Operations.Key.ExternalResumesOnRestart}}<p class="notice">The startup environment value resumes after restart.</p>{{end}}<form method="post" action="/operations/api-key" class="stack-form"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><label>Replace key<input type="password" name="api_key" required autocomplete="new-password" spellcheck="false"></label><button class="primary-button" type="submit">Save and use for new OSCAR requests</button></form><form method="post" action="/operations/api-key/clear"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><button class="secondary-button" type="submit">Clear managed key</button></form><p class="muted">The key is write-only and stored in the user-scoped .env file.</p></article>
-  <article class="panel operations-card"><header><p class="eyebrow">User service</p><h2>Background process</h2></header><p><span class="status-pill">{{.Operations.Service.State}}</span> <span class="muted">{{.Operations.Service.Mechanism}}{{if .Operations.Service.PID}} · PID {{.Operations.Service.PID}}{{end}}</span></p><div class="button-row">{{range $action := (stringSlice "install" "start" "stop" "restart" "uninstall")}}<form method="post" action="/operations/service/{{$action}}"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><button class="secondary-button" type="submit">{{$action}}</button></form>{{end}}</div><p class="muted"><code>oscar-corrtest service status</code></p></article>
-  <article class="panel operations-card operations-card--paths"><header><p class="eyebrow">Effective paths</p><h2>User-scoped storage</h2></header><dl class="path-list"><div><dt>Configuration</dt><dd><code>{{.Operations.Paths.ConfigFile}}</code></dd></div><div><dt>Managed .env</dt><dd><code>{{.Operations.Paths.EnvFile}}</code></dd></div><div><dt>State</dt><dd><code>{{.Operations.Paths.DataDir}}</code></dd></div><div><dt>Logs</dt><dd><code>{{.Operations.Paths.LogDir}}</code></dd></div></dl></article>
+<section class="page-heading">
+  <p class="eyebrow">Local operator controls</p>
+  <h1>Operations</h1>
+  <p>Configure OSCAR access, inspect the user service and storage paths, and follow redacted application logs from one workspace.</p>
 </section>
-<section class="panel log-console" data-log-console data-events-url="/operations/events"><header class="log-console__header"><div><p class="eyebrow">Live diagnostics</p><h2>Application logs</h2></div><div class="button-row"><button type="button" class="secondary-button" data-log-pause>Pause</button><button type="button" class="secondary-button" data-log-clear>Clear view</button>{{range .Operations.LogSources}}<a class="secondary-button" href="/operations/logs/{{.Name}}">Download {{.Name}}</a>{{end}}</div></header><p class="muted" data-log-state aria-live="polite">Connecting to live logs…</p><div class="log-rows" data-log-rows role="log" aria-label="Redacted application records">{{range .OperationLogs}}<div class="log-row" data-sequence="{{.Sequence}}"><time>{{.Time}}</time><strong>{{.Level}}</strong><span>{{.Source}}</span><code>{{.Message}}</code></div>{{else}}<p class="muted" data-log-empty>No application records yet.</p>{{end}}</div></section>
+{{if .OperationMessage}}<div class="notice" role="status">Operation completed: {{.OperationMessage}}</div>{{end}}
+
+<section class="operations-workspace">
+  <aside class="operations-rail" aria-label="Configuration and service status">
+    <article class="panel operations-card">
+      <header><p class="eyebrow">Configuration</p><h2>OSCAR API key</h2></header>
+      <p>{{if .Operations.Key.Configured}}<span class="status-pill status-pill--pass">Configured</span>{{else}}<span class="status-pill">Not configured</span>{{end}} <span class="muted">Source: {{.Operations.Key.Source}}</span></p>
+      {{if .Operations.Key.ExternalResumesOnRestart}}<p class="notice">The startup environment value resumes after restart.</p>{{end}}
+      <form method="post" action="/operations/api-key" class="stack-form">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <label>Replace key<input type="password" name="api_key" required autocomplete="new-password" spellcheck="false"></label>
+        <button class="primary-button" type="submit">Save and use for new OSCAR requests</button>
+      </form>
+      <form method="post" action="/operations/api-key/clear">
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <button class="secondary-button" type="submit">Clear managed key</button>
+      </form>
+      <p class="muted operations-note">Write-only · stored in the user-scoped <code>.env</code> file.</p>
+    </article>
+
+    <article class="panel operations-card">
+      <header><p class="eyebrow">User service</p><h2>Background process</h2></header>
+      <p><span class="status-pill">{{.Operations.Service.State}}</span> <span class="muted">{{.Operations.Service.Mechanism}}{{if .Operations.Service.PID}} · PID {{.Operations.Service.PID}}{{end}}</span></p>
+      <div class="button-row service-actions">{{range $action := (stringSlice "install" "start" "stop" "restart" "uninstall")}}<form method="post" action="/operations/service/{{$action}}"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><button class="secondary-button" type="submit">{{$action}}</button></form>{{end}}</div>
+      <p class="muted operations-note"><code>oscar-corrtest service status</code></p>
+    </article>
+
+    <article class="panel operations-card">
+      <header><p class="eyebrow">Effective paths</p><h2>User-scoped storage</h2></header>
+      <dl class="path-list">
+        <div><dt>Configuration</dt><dd><code>{{.Operations.Paths.ConfigFile}}</code></dd></div>
+        <div><dt>Managed .env</dt><dd><code>{{.Operations.Paths.EnvFile}}</code></dd></div>
+        <div><dt>State</dt><dd><code>{{.Operations.Paths.DataDir}}</code></dd></div>
+        <div><dt>Logs</dt><dd><code>{{.Operations.Paths.LogDir}}</code></dd></div>
+      </dl>
+    </article>
+  </aside>
+
+  <section class="panel log-console" data-log-console data-events-url="/operations/events">
+    <header class="log-console__header">
+      <div>
+        <p class="eyebrow">Live diagnostics</p>
+        <h2>Application logs</h2>
+      </div>
+      <div class="button-row">
+        <button type="button" class="secondary-button" data-log-pause>Pause</button>
+        <button type="button" class="secondary-button" data-log-clear>Clear view</button>
+        {{range .Operations.LogSources}}<a class="secondary-button" href="/operations/logs/{{.Name}}">Download {{.Name}}</a>{{end}}
+      </div>
+    </header>
+    <div class="log-filter-bar" aria-label="Log filters">
+      <label>Source<select data-log-source-filter><option value="">All sources</option></select></label>
+      <label>Level<select data-log-level-filter><option value="">All levels</option><option value="DEBUG">Debug</option><option value="INFO">Info</option><option value="WARN">Warning</option><option value="ERROR">Error</option></select></label>
+      <label class="log-filter-search">Filter records<input type="search" data-log-text-filter placeholder="Message, source, or level" autocomplete="off"></label>
+    </div>
+    <p class="muted log-connection" data-log-state aria-live="polite">Connecting to live logs…</p>
+    <div class="log-rows" data-log-rows role="log" aria-label="Redacted application records">
+      {{range .OperationLogs}}<div class="log-row" data-sequence="{{.Sequence}}" data-log-source="{{.Source}}" data-log-level="{{.Level}}"><time>{{logTime .Time}}</time><strong>{{.Level}}</strong><span>{{.Source}}</span><code>{{.Message}}</code></div>{{else}}<p class="muted" data-log-empty>No application records yet.</p>{{end}}
+    </div>
+  </section>
+</section>
 {{end}}

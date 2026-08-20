@@ -377,9 +377,19 @@ func TestScenarioWorkbenchPreviewsBuiltinSourceContractAndClone(t *testing.T) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	body := response.Body.String()
-	for _, required := range []string{"Scenario catalog", "pattern: flood", "P01", "N01", "CORRTEST_FLOOD_P01", "oscar_test_run_id", "Clone as custom"} {
+	for _, required := range []string{
+		"Scenario catalog", "pattern: flood", "P01", "N01", "CORRTEST_FLOOD_P01", "oscar_test_run_id",
+		`type="search"`, `data-scenario-search`, `data-copy-source`, `data-case-tab="P01"`, `data-case-tab="N01"`,
+		`data-case-code="P01"`, `data-case-code="N01"`, "Positive trigger", "Negative control",
+		"Rule contract", "Stimulus alerts", "Expected evidence", "Inspection filters", "Edit a copy",
+	} {
 		if !strings.Contains(body, required) {
 			t.Errorf("workbench missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{`<pre class="contract-code">`, `id="scenario-authoring"`} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("workbench retained obsolete raw/separate authoring surface %q", forbidden)
 		}
 	}
 	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(body)
@@ -399,6 +409,37 @@ func TestScenarioWorkbenchPreviewsBuiltinSourceContractAndClone(t *testing.T) {
 	items, err := runtime.ListScenarios(context.Background())
 	if err != nil || len(items) != 1 || items[0].SourceDocument == "" || items[0].Name == "flood-basic" {
 		t.Fatalf("cloned items=%+v err=%v", items, err)
+	}
+}
+
+func TestScenarioImportRendersContractForSubmittedSource(t *testing.T) {
+	runtime, err := appruntime.Open(context.Background(), config.Settings{DataDir: t.TempDir(), ListenAddress: "127.0.0.1:8787"}, version.Info{Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	handler := NewHandlerWithData(version.Info{Version: "test"}, runtime)
+	get := httptest.NewRequest(http.MethodGet, "http://example.com/scenarios?selected=builtin:flood", nil)
+	getResponse := httptest.NewRecorder()
+	handler.ServeHTTP(getResponse, get)
+	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(getResponse.Body.String())
+	if len(match) != 2 {
+		t.Fatal("scenario CSRF token missing")
+	}
+	source := strings.Replace(webScenarioSource, "repeat: 5", "repeat: 6", 1)
+	values := url.Values{"csrf_token": {match[1]}, "action": {"import"}, "source": {source}, "pipeline_mode": {"phase_b_dispatch"}}
+	post := httptest.NewRequest(http.MethodPost, "http://example.com/scenarios?selected=builtin:flood", strings.NewReader(values.Encode()))
+	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	post.Header.Set("Origin", "http://example.com")
+	post.AddCookie(getResponse.Result().Cookies()[0])
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, post)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, "2 rules · 10 alerts") {
+		t.Fatalf("import response retained a stale compiled contract: %s", body)
 	}
 }
 
@@ -429,10 +470,18 @@ func TestOperationsPageManagesWriteOnlyAPIKeyAndShowsServiceLogs(t *testing.T) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	body := response.Body.String()
-	for _, required := range []string{"Operations", "Not configured", "running", "application.jsonl", "runtime ready", settings.EnvFile} {
+	for _, required := range []string{
+		"Operations", "Not configured", "running", "application.jsonl", "runtime ready", settings.EnvFile,
+		`class="operations-workspace"`, `class="operations-rail"`, `data-log-source-filter`,
+		`data-log-level-filter`, `data-log-text-filter`, `data-log-source="runtime"`, `data-log-level="info"`,
+	} {
 		if !strings.Contains(body, required) {
 			t.Errorf("operations page missing %q", required)
 		}
+	}
+	workspace := regexp.MustCompile(`(?s)<section class="operations-workspace">\s*<aside class="operations-rail".*?</aside>\s*<section class="panel log-console"`).FindString(body)
+	if workspace == "" {
+		t.Fatal("operations controls and live log are not adjacent in the approved workspace")
 	}
 	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(body)
 	if len(match) != 2 {

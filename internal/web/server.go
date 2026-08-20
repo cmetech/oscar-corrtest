@@ -78,7 +78,7 @@ type pageData struct {
 	CanDelete         bool
 	ImportedScenarios []domain.ScenarioRecord
 	ScenarioSource    string
-	ScenarioPlan      string
+	ScenarioPlan      *compiler.Plan
 	Help              HelpTopic
 	ReferenceTopics   []HelpTopic
 	ScenarioCatalog   []scenarioCatalogItem
@@ -354,15 +354,26 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 			return
 		}
 		source := r.FormValue("source")
+		items, listErr := manager.ListScenarios(r.Context())
+		if listErr != nil {
+			http.Error(w, "scenario management unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		view, viewErr := scenarioWorkbench(r.Context(), info, data, items, r.URL.Query().Get("selected"))
+		if viewErr != nil {
+			view = pageData{Version: info, Page: "scenarios", Readiness: readiness(data)}
+		}
+		view.ScenarioSource = source
+		view.SelectedBuiltIn = false
+		view.CSRFToken = csrfToken(w, r, csrfSecret)
 		document, decodeErr := scenario.Decode(strings.NewReader(source))
-		view := pageData{Version: info, Page: "scenarios", Readiness: readiness(data), ScenarioSource: source,
-			CSRFToken: csrfToken(w, r, csrfSecret)}
-		view.Targets, _ = data.ListTargets(r.Context())
 		if decodeErr != nil {
 			view.Error = decodeErr.Error()
 			renderStatus(w, tmpl, nonce, http.StatusUnprocessableEntity, view)
 			return
 		}
+		view.SelectedName = document.Name
+		view.SelectedPattern = document.Pattern
 		switch r.FormValue("action") {
 		case "preview":
 			mode := r.FormValue("pipeline_mode")
@@ -384,8 +395,7 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 				renderStatus(w, tmpl, nonce, http.StatusUnprocessableEntity, view)
 				return
 			}
-			encoded, _ := json.MarshalIndent(plan, "", "  ")
-			view.ScenarioPlan = string(encoded)
+			view.ScenarioPlan = &plan
 			view.Status = "Preview compiled without contacting or mutating OSCAR"
 		case "import":
 			record, err := manager.ImportScenario(r.Context(), []byte(source), document)
@@ -394,13 +404,34 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 				renderStatus(w, tmpl, nonce, http.StatusUnprocessableEntity, view)
 				return
 			}
+			selectedRef := "imported:" + record.ID
+			view.SelectedScenario = selectedRef
+			found := false
+			for index := range view.ScenarioCatalog {
+				view.ScenarioCatalog[index].Selected = view.ScenarioCatalog[index].Ref == selectedRef
+				found = found || view.ScenarioCatalog[index].Selected
+			}
+			if !found {
+				view.ScenarioCatalog = append(view.ScenarioCatalog, scenarioCatalogItem{Ref: selectedRef, Name: record.Name, Pattern: document.Pattern, Kind: "Custom", Selected: true})
+			}
+			mode := r.FormValue("pipeline_mode")
+			if mode != "phase_a_audit_only" && mode != "phase_b_dispatch" {
+				mode = "phase_b_dispatch"
+			}
+			if inspector, ok := data.(scenarioInspector); ok {
+				inspection, inspectErr := inspector.InspectScenario(r.Context(), []byte(source), mode)
+				if inspectErr != nil {
+					view.Error = inspectErr.Error()
+				} else {
+					view.ScenarioPlan = &inspection.Plan
+				}
+			}
 			view.Status = "Imported scenario " + record.Name + " by source digest"
 		default:
 			view.Error = "scenario action is invalid"
 			renderStatus(w, tmpl, nonce, http.StatusUnprocessableEntity, view)
 			return
 		}
-		view.ImportedScenarios, _ = manager.ListScenarios(r.Context())
 		render(w, tmpl, nonce, view)
 	})
 	mux.HandleFunc("POST /runs", func(w http.ResponseWriter, r *http.Request) {
@@ -778,8 +809,7 @@ func scenarioWorkbench(ctx context.Context, info version.Info, data DataSource, 
 		if inspectErr != nil {
 			view.Error = inspectErr.Error()
 		} else {
-			encoded, _ := json.MarshalIndent(inspection.Plan, "", "  ")
-			view.ScenarioPlan = string(encoded)
+			view.ScenarioPlan = &inspection.Plan
 		}
 	}
 	return view, nil

@@ -1,11 +1,115 @@
 {{define "scenarios"}}
-<section class="page-heading"><p class="eyebrow">Closed, validated inputs</p><h1>Scenario workbench</h1><p>Inspect canonical built-ins and custom scenarios as source plus the exact compiled P01/N01 OSCAR contract.</p></section>
-{{if .Error}}<div class="notice notice--error" role="alert">{{.Error}}</div>{{end}}
-{{if .Status}}<div class="notice" role="status">{{.Status}}</div>{{end}}
-<section class="scenario-workbench" aria-label="Scenario workbench">
-  <aside class="scenario-catalog"><header><p class="eyebrow">Catalog</p><h2>Scenario catalog</h2></header><nav aria-label="Scenarios">{{range .ScenarioCatalog}}<a href="/scenarios?selected={{urlquery .Ref}}"{{if .Selected}} aria-current="page"{{end}}><span>{{.Name}}</span><small>{{.Kind}} · {{.Pattern}}</small></a>{{end}}</nav></aside>
-  <section class="scenario-source"><header class="workbench-header"><div><p class="eyebrow">Source</p><h2>{{.SelectedName}}</h2></div>{{if .SelectedBuiltIn}}<form method="post" action="/scenarios/clone"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><input type="hidden" name="scenario_ref" value="{{.SelectedScenario}}"><button class="primary-button" type="submit">Clone as custom</button></form>{{end}}</header><p class="muted">Strict canonical YAML · {{.SelectedPattern}}</p><pre class="source-code"><code>{{.ScenarioSource}}</code></pre></section>
-  <section class="scenario-contract"><header><p class="eyebrow">Compiled contract</p><h2>P01 / N01</h2></header>{{if .ScenarioPlan}}<p class="muted">Names, labels, rules, stimuli, assertions, filters, and mutation budget.</p><pre class="contract-code"><code>{{.ScenarioPlan}}</code></pre>{{else}}<p class="notice notice--error">The selected source could not be compiled.</p>{{end}}</section>
+<section class="page-heading">
+  <p class="eyebrow">Closed, validated inputs</p>
+  <h1>Scenario workbench</h1>
+  <p>Inspect canonical examples, edit a safe custom copy, and verify the exact P01/N01 OSCAR contract before running it.</p>
 </section>
-<section class="panel" id="scenario-authoring"><h2>Custom scenarios</h2><p class="muted">Paste strict YAML or JSON. Preview is target-free; import preserves the validated source by content digest.</p><form method="post" action="/scenarios" class="form-grid"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><label>Scenario YAML or JSON<textarea name="source" rows="18" required>{{.ScenarioSource}}</textarea></label><label>Pipeline mode<select name="pipeline_mode"><option value="phase_b_dispatch">Phase B — audit and dispatch</option><option value="phase_a_audit_only">Phase A — audit only</option></select></label><div><button type="submit" name="action" value="preview">Compile preview</button> <button type="submit" name="action" value="import">Import validated source</button></div></form></section>
+{{if .Status}}<div class="notice" role="status">{{.Status}}</div>{{end}}
+
+<section class="scenario-workbench" aria-label="Scenario workbench">
+  <aside class="scenario-catalog">
+    <header>
+      <p class="eyebrow">Catalog</p>
+      <h2>Scenario catalog</h2>
+      <label class="catalog-search"><span class="visually-hidden">Filter scenarios</span><input type="search" data-scenario-search placeholder="Filter examples…" autocomplete="off"></label>
+      <p class="muted scenario-count">Eight built-ins plus saved custom definitions</p>
+    </header>
+    <nav aria-label="Scenarios" data-scenario-list>
+      {{range .ScenarioCatalog}}<a href="/scenarios?selected={{urlquery .Ref}}" data-scenario-item data-search-value="{{.Name}} {{.Kind}} {{.Pattern}}"{{if .Selected}} aria-current="page"{{end}}><span>{{.Name}}</span><small>{{.Kind}} · {{.Pattern}}</small></a>{{end}}
+      <p class="muted catalog-empty" data-scenario-empty hidden>No matching scenarios.</p>
+    </nav>
+    <div class="catalog-guidance">
+      <strong>Custom scenarios</strong>
+      <p>Select the closest built-in, choose <em>Edit a copy</em>, then validate and import the modified YAML.</p>
+    </div>
+  </aside>
+
+  <section class="scenario-source">
+    <header class="workbench-header">
+      <div><p class="eyebrow">Exact source</p><h2>{{.SelectedName}}</h2></div>
+      <div class="button-row source-actions">
+        <button class="secondary-button" type="button" data-copy-source>Copy source</button>
+        {{if .SelectedBuiltIn}}<form method="post" action="/scenarios/clone"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><input type="hidden" name="scenario_ref" value="{{.SelectedScenario}}"><button class="primary-button" type="submit">Edit a copy</button></form>{{end}}
+      </div>
+    </header>
+    <p class="muted source-context"><span class="status-pill">{{if .SelectedBuiltIn}}Read-only built-in{{else}}Editable custom{{end}}</span> Strict canonical YAML · <code>{{.SelectedPattern}}</code></p>
+    {{if .Error}}<div class="notice notice--error" role="alert"><strong>Validation failed.</strong> {{.Error}}</div>{{end}}
+
+    {{if .SelectedBuiltIn}}
+      <textarea class="scenario-editor" data-scenario-source readonly spellcheck="false" aria-label="Canonical scenario YAML">{{.ScenarioSource}}</textarea>
+    {{else}}
+      <form id="scenario-editor-form" method="post" action="/scenarios?selected={{urlquery .SelectedScenario}}" class="scenario-editor-form">
+        <textarea class="scenario-editor" data-scenario-source name="source" required spellcheck="false" aria-label="Editable scenario YAML">{{.ScenarioSource}}</textarea>
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <div class="scenario-editor-toolbar">
+          <label>Pipeline mode<select name="pipeline_mode"><option value="phase_b_dispatch">Phase B — audit and dispatch</option><option value="phase_a_audit_only">Phase A — audit only</option></select></label>
+          <div class="button-row"><button class="secondary-button" type="submit" name="action" value="preview">Validate &amp; compile</button><button class="primary-button" type="submit" name="action" value="import">Import validated copy</button></div>
+        </div>
+      </form>
+    {{end}}
+    <p class="copy-status muted" data-copy-status aria-live="polite"></p>
+  </section>
+
+  <section class="scenario-contract">
+    <header class="contract-header">
+      <div><p class="eyebrow">Compiled contract</p><h2>P01 / N01</h2></div>
+      {{if .ScenarioPlan}}<span class="status-pill status-pill--pass">Structurally valid</span>{{end}}
+    </header>
+    {{if .ScenarioPlan}}
+      <dl class="contract-summary">
+        <div><dt>Pattern</dt><dd><code>{{.ScenarioPlan.Pattern}}</code></dd></div>
+        <div><dt>Mode</dt><dd><code>phase_b_dispatch</code></dd></div>
+        <div><dt>Budget</dt><dd>{{.ScenarioPlan.MutationBudget.Rules}} rules · {{.ScenarioPlan.MutationBudget.Alerts}} alerts</dd></div>
+      </dl>
+      <div class="case-tabs" role="tablist" aria-label="Compiled cases">
+        {{range $index, $case := .ScenarioPlan.Cases}}<button type="button" role="tab" id="case-tab-{{$case.Code}}" data-case-tab="{{$case.Code}}" aria-controls="case-panel-{{$case.Code}}" aria-selected="{{if eq $index 0}}true{{else}}false{{end}}" tabindex="{{if eq $index 0}}0{{else}}-1{{end}}"><strong>{{$case.Code}}</strong><span>{{if eq $case.Code "P01"}}Positive trigger{{else}}Negative control{{end}}</span></button>{{end}}
+      </div>
+      <div class="case-panels">
+        {{range $case := .ScenarioPlan.Cases}}
+        <article class="scenario-case-panel" id="case-panel-{{$case.Code}}" data-case-panel data-case-code="{{$case.Code}}" role="tabpanel" aria-labelledby="case-tab-{{$case.Code}}">
+          <header class="case-heading"><div><p class="eyebrow">{{$case.Polarity}} case</p><h3>{{$case.Name}}</h3></div><span class="status-pill">Observe {{duration $case.ObservationWindow}}</span></header>
+
+          <section class="contract-section">
+            <h4>Rule contract</h4>
+            <dl class="contract-details">
+              <div><dt>Name</dt><dd><code>{{$case.Rule.Name}}</code></dd></div>
+              <div><dt>Pattern</dt><dd><code>{{$case.Rule.Pattern}}</code></dd></div>
+              <div><dt>Window</dt><dd>{{$case.Rule.WindowSeconds}} seconds</dd></div>
+              <div><dt>Group by</dt><dd>{{range $case.Rule.GroupBy}}<code class="token">{{.}}</code>{{else}}None{{end}}</dd></div>
+              {{if $case.Rule.EmitAlertName}}<div><dt>Synthetic alert</dt><dd><code>{{$case.Rule.EmitAlertName}}</code></dd></div>{{end}}
+            </dl>
+            <details><summary>Match criteria</summary><pre><code>{{jsonValue $case.Rule.MatchCriteria}}</code></pre></details>
+          </section>
+
+          <section class="contract-section">
+            <h4>Stimulus alerts <span>{{len $case.Alerts}}</span></h4>
+            <ol class="stimulus-list">
+              {{range $alert := $case.Alerts}}<li><div><code>{{$alert.Name}}</code><span class="status-pill">{{$alert.Status}}</span></div><small>role <code>{{index $alert.Labels "oscar_test_alert_role"}}</code> · delay {{duration $alert.Delay}}</small></li>{{end}}
+            </ol>
+          </section>
+
+          <section class="contract-section">
+            <h4>Expected evidence</h4>
+            <ul class="assertion-list">
+              {{range $assertion := $case.Assertions}}<li><code>{{$assertion.Kind}}</code><span>{{if $assertion.Outcome}}outcome <code>{{$assertion.Outcome}}</code> · {{end}}equals <strong>{{$assertion.Equals}}</strong></span></li>{{end}}
+            </ul>
+          </section>
+
+          <section class="contract-section">
+            <h4>Generated identity labels</h4>
+            <dl class="label-contract">{{range $key, $value := $case.Rule.EmitLabels}}<div><dt><code>{{$key}}</code></dt><dd><code>{{$value}}</code></dd></div>{{end}}</dl>
+          </section>
+
+          <section class="contract-section">
+            <h4>Inspection filters</h4>
+            <dl class="filter-contract">{{range $key, $value := $case.Inspection.Filters}}<div><dt>{{$key}}</dt><dd><button type="button" class="copy-value" data-copy-value="{{$value}}" title="Copy filter">{{$value}}</button></dd></div>{{end}}</dl>
+          </section>
+        </article>
+        {{end}}
+      </div>
+    {{else}}
+      <div class="contract-empty"><strong>No compiled contract</strong><p>Correct the YAML validation error, then compile the custom scenario again.</p></div>
+    {{end}}
+  </section>
+</section>
 {{end}}
