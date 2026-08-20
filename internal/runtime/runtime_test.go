@@ -9,11 +9,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
+	"github.com/cmetech/oscar-corrtest/internal/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/version"
 )
 
@@ -187,5 +189,30 @@ func TestRetryCleanupRequiresReadBackOwnershipBeforeDelete(t *testing.T) {
 	updated, err := runtime.RetryCleanup(context.Background(), run.ID)
 	if err != nil || updated.CleanupStatus != domain.CleanupClean || deletes != 1 {
 		t.Fatalf("updated=%+v deletes=%d err=%v", updated, deletes, err)
+	}
+}
+
+func TestImportScenarioPersistsOriginalSourceOnceByDigest(t *testing.T) {
+	runtime, err := Open(context.Background(), config.Settings{DataDir: t.TempDir(), ListenAddress: "127.0.0.1:8787"}, version.Info{Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	source := []byte("apiVersion: corrtest.oscar/v1alpha1\nkind: CorrelationScenario\nname: sample\nsuite: custom\npattern: flood\nmaxDuration: 90s\ncases: []\n")
+	document, err := scenario.Decode(strings.NewReader(string(source)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := runtime.ImportScenario(context.Background(), source, document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := runtime.ImportScenario(context.Background(), source, document)
+	if err != nil || first.ID != second.ID || first.SourceDocument != string(source) {
+		t.Fatalf("first=%+v second=%+v err=%v", first, second, err)
+	}
+	items, err := runtime.ListScenarios(context.Background())
+	if err != nil || len(items) != 1 {
+		t.Fatalf("items=%+v err=%v", items, err)
 	}
 }

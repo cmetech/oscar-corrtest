@@ -2,8 +2,11 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -463,6 +466,34 @@ func (r *Runtime) RetryCleanup(ctx context.Context, runID string) (domain.Run, e
 		return updated, fmt.Errorf("%s", summary)
 	}
 	return updated, getErr
+}
+
+// ImportScenario persists a validated source document once by content digest.
+func (r *Runtime) ImportScenario(ctx context.Context, source []byte, document scenario.Scenario) (domain.ScenarioRecord, error) {
+	if len(source) == 0 || len(source) > 1<<20 || document.APIVersion != "corrtest.oscar/v1alpha1" || document.Name == "" {
+		return domain.ScenarioRecord{}, fmt.Errorf("scenario source is invalid")
+	}
+	// Re-run the strict decoder so callers cannot pair arbitrary bytes with a parsed value.
+	decoded, err := scenario.Decode(bytes.NewReader(source))
+	if err != nil || decoded.Name != document.Name || decoded.Pattern != document.Pattern {
+		return domain.ScenarioRecord{}, fmt.Errorf("scenario source does not match the validated document")
+	}
+	digest := sha256.Sum256(source)
+	hexDigest := hex.EncodeToString(digest[:])
+	if existing, err := r.database.FindScenarioByDigest(ctx, hexDigest); err == nil {
+		return existing, nil
+	}
+	now := time.Now().UTC()
+	item := domain.ScenarioRecord{ID: "scn_" + hexDigest[:24], Name: document.Name, APIVersion: document.APIVersion, SourceDocument: string(source), SHA256: hexDigest, CreatedAt: now, UpdatedAt: now}
+	if err := r.database.CreateScenario(ctx, item); err != nil {
+		return domain.ScenarioRecord{}, err
+	}
+	return item, nil
+}
+
+// ListScenarios returns imported scenario metadata with source content omitted by callers as needed.
+func (r *Runtime) ListScenarios(ctx context.Context) ([]domain.ScenarioRecord, error) {
+	return r.database.ListScenarios(ctx)
 }
 
 func ownedRule(rule oscar.Rule, resource domain.Resource, runID string) bool {

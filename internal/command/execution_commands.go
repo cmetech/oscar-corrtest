@@ -23,20 +23,24 @@ type customCorrelationRuntime interface {
 	ExecuteScenario(context.Context, string, scenario.Scenario, string) (domain.Run, error)
 }
 
-func (a *App) runScenario(_ context.Context, args []string) int {
+func (a *App) runScenario(ctx context.Context, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(a.stderr, "usage: oscar-corrtest scenario <list|validate>")
+		fmt.Fprintln(a.stderr, "usage: oscar-corrtest scenario <list|validate|import>")
 		return 2
 	}
 	if args[0] == "validate" {
 		return a.runScenarioValidate(args[1:])
 	}
+	if args[0] == "import" {
+		return a.runScenarioImport(ctx, args[1:])
+	}
 	if args[0] != "list" {
-		fmt.Fprintln(a.stderr, "usage: oscar-corrtest scenario <list|validate>")
+		fmt.Fprintln(a.stderr, "usage: oscar-corrtest scenario <list|validate|import>")
 		return 2
 	}
 	flags := flag.NewFlagSet("scenario list", flag.ContinueOnError)
 	flags.SetOutput(a.stderr)
+	configPath, dataDir := commonConfigFlags(flags)
 	output := flags.String("output", "human", "human or json")
 	if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 || !validOutput(*output) {
 		return 2
@@ -45,17 +49,92 @@ func (a *App) runScenario(_ context.Context, args []string) int {
 		Name      string `json:"name"`
 		Pattern   string `json:"pattern"`
 		CaseCount int    `json:"caseCount"`
+		ID        string `json:"id,omitempty"`
+		Source    string `json:"source"`
 	}
 	var values []summary
 	for _, item := range scenario.AllBuiltins() {
-		values = append(values, summary{Name: item.Name, Pattern: item.Pattern, CaseCount: len(item.Cases)})
+		values = append(values, summary{Name: item.Name, Pattern: item.Pattern, CaseCount: len(item.Cases), Source: "built-in"})
+	}
+	if a.open != nil {
+		application, code := a.openRuntime(ctx, config.Overrides{ConfigPath: *configPath, DataDir: *dataDir})
+		if code != 0 {
+			return code
+		}
+		defer application.Close()
+		if catalog, ok := application.(scenarioCatalogRuntime); ok {
+			items, err := catalog.ListScenarios(ctx)
+			if err != nil {
+				fmt.Fprintf(a.stderr, "scenario list: %v\n", err)
+				return 1
+			}
+			for _, item := range items {
+				values = append(values, summary{ID: item.ID, Name: item.Name, Source: "imported"})
+			}
+		}
 	}
 	if *output == "json" {
 		return a.writeJSON(values)
 	}
 	for _, item := range values {
-		fmt.Fprintf(a.stdout, "%s\t%s\t%d cases\n", item.Pattern, item.Name, item.CaseCount)
+		fmt.Fprintf(a.stdout, "%s\t%s\t%d cases\t%s\n", item.Pattern, item.Name, item.CaseCount, item.Source)
 	}
+	return 0
+}
+
+type scenarioCatalogRuntime interface {
+	ImportScenario(context.Context, []byte, scenario.Scenario) (domain.ScenarioRecord, error)
+	ListScenarios(context.Context) ([]domain.ScenarioRecord, error)
+}
+
+func (a *App) runScenarioImport(ctx context.Context, args []string) int {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		fmt.Fprintln(a.stderr, "usage: oscar-corrtest scenario import <file> [--output human|json]")
+		return 2
+	}
+	path := args[0]
+	flags := flag.NewFlagSet("scenario import", flag.ContinueOnError)
+	flags.SetOutput(a.stderr)
+	configPath, dataDir := commonConfigFlags(flags)
+	output := flags.String("output", "human", "human or json")
+	if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 || !validOutput(*output) {
+		return 2
+	}
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > 1<<20 {
+		fmt.Fprintln(a.stderr, "scenario import: file is unavailable, unsafe, or too large")
+		return 3
+	}
+	// #nosec G304 -- the operator-selected source was lstat-validated and size-bounded.
+	source, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintln(a.stderr, "scenario import: could not read source")
+		return 3
+	}
+	document, err := scenario.Decode(strings.NewReader(string(source)))
+	if err != nil {
+		fmt.Fprintf(a.stderr, "scenario import: %v\n", err)
+		return 3
+	}
+	application, code := a.openRuntime(ctx, config.Overrides{ConfigPath: *configPath, DataDir: *dataDir})
+	if code != 0 {
+		return code
+	}
+	defer application.Close()
+	catalog, ok := application.(scenarioCatalogRuntime)
+	if !ok {
+		fmt.Fprintln(a.stderr, "scenario import is unavailable")
+		return 1
+	}
+	record, err := catalog.ImportScenario(ctx, source, document)
+	if err != nil {
+		fmt.Fprintf(a.stderr, "scenario import: %v\n", err)
+		return 1
+	}
+	if *output == "json" {
+		return a.writeJSON(record)
+	}
+	fmt.Fprintf(a.stdout, "Imported scenario %s (%s)\n", record.Name, record.ID)
 	return 0
 }
 
