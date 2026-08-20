@@ -94,3 +94,27 @@ func TestOpenKeepsMigrationFailureInDiagnosticMode(t *testing.T) {
 		t.Fatal("diagnostic runtime accepted mutation")
 	}
 }
+
+func TestPreviewBuiltinUsesStoredTargetWithoutMutation(t *testing.T) {
+	settings := config.Settings{DataDir: t.TempDir(), ListenAddress: "127.0.0.1:8787"}
+	runtime, err := Open(context.Background(), settings, version.Info{Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runtime.Close() })
+	target, err := runtime.CreateTarget(context.Background(), domain.TargetInput{DisplayName: "Lab", BaseURL: "https://oscar.example", APIProfile: "public-v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := runtime.PreviewBuiltin(context.Background(), target.ID, "threshold", "phase_b_dispatch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Pattern != "threshold" || plan.MutationBudget.Rules != 2 || plan.MutationBudget.Alerts != 5 || plan.RunID == "" {
+		t.Fatalf("plan=%+v", plan)
+	}
+	runs, err := runtime.ListRuns(context.Background(), domain.RunFilter{})
+	if err != nil || len(runs) != 0 {
+		t.Fatalf("preview persisted a run: %+v err=%v", runs, err)
+	}
+}

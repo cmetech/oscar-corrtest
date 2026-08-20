@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/version"
@@ -22,6 +23,32 @@ func TestVersionCommand(t *testing.T) {
 	}
 	if got := stdout.String(); got != "oscar-corrtest v1.2.3 commit=abc built=now\n" {
 		t.Fatalf("stdout=%q", got)
+	}
+}
+
+func TestScenarioListPlanAndRunCommandsShareRuntimeContracts(t *testing.T) {
+	now := time.Date(2026, 8, 20, 2, 0, 0, 0, time.UTC)
+	completed := domain.Run{ID: "crt_00000000000000000000000099", ShortToken: "00000099", Status: domain.RunCompleted,
+		Verdict: domain.VerdictPass, CleanupStatus: domain.CleanupClean, HarnessVersion: "test", CreatedAt: now, UpdatedAt: now}
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"scenario", "list", "--output", "json"}, `"pattern":"parent_child"`},
+		{[]string{"plan", "builtin:flood", "--target", "tgt_lab", "--pipeline-mode", "phase_b_dispatch", "--output", "json"}, `"mutationBudget"`},
+		{[]string{"run", "builtin:flood", "--target", "tgt_lab", "--pipeline-mode", "phase_b_dispatch", "--labels-survived", "--output", "json"}, completed.ID},
+	}
+	for _, test := range tests {
+		var stdout, stderr bytes.Buffer
+		fake := &fakeRuntime{executedRun: completed}
+		open := func(context.Context, config.Settings) (ApplicationRuntime, error) { return fake, nil }
+		app := NewConfigured(&stdout, &stderr, version.Info{Version: "test"}, nil, open, testGetenv)
+		if code := app.Run(context.Background(), test.args); code != 0 {
+			t.Fatalf("args=%v exit=%d stderr=%q", test.args, code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), test.want) {
+			t.Fatalf("args=%v stdout=%q missing %q", test.args, stdout.String(), test.want)
+		}
 	}
 }
 
@@ -101,6 +128,7 @@ type fakeRuntime struct {
 	lastFilter    domain.RunFilter
 	backupPath    string
 	closed        bool
+	executedRun   domain.Run
 }
 
 func (f *fakeRuntime) CreateTarget(_ context.Context, input domain.TargetInput) (domain.Target, error) {
@@ -129,6 +157,12 @@ func (f *fakeRuntime) ListArtifactEvidence(context.Context, string) ([]domain.Ar
 func (f *fakeRuntime) ReadyStatus() (bool, string)                 { return true, "" }
 func (f *fakeRuntime) Backup(_ context.Context, path string) error { f.backupPath = path; return nil }
 func (f *fakeRuntime) Close() error                                { f.closed = true; return nil }
+func (f *fakeRuntime) PreviewBuiltin(_ context.Context, targetID, pattern, mode string) (compiler.Plan, error) {
+	return compiler.Plan{APIVersion: outputAPIVersion, Pattern: pattern, RunID: "preview", MutationBudget: compiler.MutationBudget{Rules: 2, Alerts: 9}}, nil
+}
+func (f *fakeRuntime) ExecuteBuiltin(_ context.Context, targetID, pattern, mode string, labelsSurvived bool) (domain.Run, error) {
+	return f.executedRun, nil
+}
 
 func testGetenv(key string) string {
 	if key == "HOME" {

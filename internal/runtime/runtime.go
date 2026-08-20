@@ -3,15 +3,21 @@ package runtime
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/cmetech/oscar-corrtest/internal/artifact"
+	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/history"
+	"github.com/cmetech/oscar-corrtest/internal/oscar"
 	storage "github.com/cmetech/oscar-corrtest/internal/persistence/sqlite"
+	"github.com/cmetech/oscar-corrtest/internal/runner"
+	"github.com/cmetech/oscar-corrtest/internal/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/version"
 )
 
@@ -29,10 +35,12 @@ type Runtime struct {
 	history   *history.Service
 	artifacts *artifact.Store
 	readiness Readiness
+	version   string
+	runMu     sync.Mutex
 }
 
 // Open initializes local state, migrations, artifact storage, and interrupted-run recovery.
-func Open(ctx context.Context, settings config.Settings, _ version.Info) (*Runtime, error) {
+func Open(ctx context.Context, settings config.Settings, info version.Info) (*Runtime, error) {
 	if settings.DataDir == "" || !filepath.IsAbs(settings.DataDir) {
 		return nil, fmt.Errorf("data directory %q must be absolute", settings.DataDir)
 	}
@@ -56,7 +64,7 @@ func Open(ctx context.Context, settings config.Settings, _ version.Info) (*Runti
 	service := history.New(database, nil, nil)
 	result := &Runtime{
 		settings: settings, database: database, history: service, artifacts: artifacts,
-		readiness: Readiness{Ready: database.Ready() == nil, DatabasePath: databasePath},
+		readiness: Readiness{Ready: database.Ready() == nil, DatabasePath: databasePath}, version: info.Version,
 	}
 	if readyErr := database.Ready(); readyErr != nil {
 		result.readiness.Error = readyErr.Error()
@@ -67,6 +75,48 @@ func Open(ctx context.Context, settings config.Settings, _ version.Info) (*Runti
 		return nil, fmt.Errorf("recover interrupted runs: %w", err)
 	}
 	return result, nil
+}
+
+// PreviewBuiltin compiles an isolated plan without creating a durable run or contacting OSCAR.
+func (r *Runtime) PreviewBuiltin(ctx context.Context, targetID, pattern, pipelineMode string) (compiler.Plan, error) {
+	if _, err := r.GetTarget(ctx, targetID); err != nil {
+		return compiler.Plan{}, err
+	}
+	id, err := domain.NewRunID(rand.Reader)
+	if err != nil {
+		return compiler.Plan{}, fmt.Errorf("create preview identity: %w", err)
+	}
+	preview := domain.Run{ID: id.String(), ShortToken: id.Short()}
+	return compiler.Compile(preview, scenario.Builtin(pattern), compiler.Capabilities{PipelineMode: pipelineMode})
+}
+
+// ExecuteBuiltin serializes live mutation runs through the same durable runtime used by CLI and UI.
+func (r *Runtime) ExecuteBuiltin(ctx context.Context, targetID, pattern, pipelineMode string, labelsSurvived bool) (domain.Run, error) {
+	r.runMu.Lock()
+	defer r.runMu.Unlock()
+	target, err := r.GetTarget(ctx, targetID)
+	if err != nil {
+		return domain.Run{}, err
+	}
+	run, err := r.history.CreateRun(ctx, targetID, "", r.version)
+	if err != nil {
+		return domain.Run{}, err
+	}
+	plan, err := compiler.Compile(run, scenario.Builtin(pattern), compiler.Capabilities{PipelineMode: pipelineMode})
+	if err != nil {
+		return run, err
+	}
+	client, err := oscar.New(target, oscar.Options{HarnessVersion: r.version})
+	if err != nil {
+		return run, err
+	}
+	engine := runner.New(r.database, client, runner.Options{})
+	executeErr := engine.Execute(ctx, run, plan, runner.CapabilitySnapshot{APIProfile: target.APIProfile, PipelineMode: pipelineMode, Ready: true, LabelsSurvived: labelsSurvived, Compatibility: true})
+	stored, getErr := r.GetRun(context.Background(), run.ID)
+	if getErr != nil {
+		return run, getErr
+	}
+	return stored, executeErr
 }
 
 // Readiness returns the immutable startup readiness snapshot.
