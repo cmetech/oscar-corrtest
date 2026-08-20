@@ -36,9 +36,16 @@ pre { overflow: auto; white-space: pre-wrap; }
 .summary-card span { display: block; color: var(--ct-fg-muted); font-size: 12px; }
 .timeline { display: grid; gap: var(--ct-space-3); padding-left: var(--ct-space-6); }
 .timeline li { display: grid; grid-template-columns: minmax(170px, auto) 1fr auto; gap: var(--ct-space-3); }
+.reference-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: var(--ct-space-6); align-items: start; }
+.reference-toc { position: sticky; top: 76px; display: grid; max-height: calc(100vh - 96px); overflow: auto; padding: var(--ct-space-3); border: 1px solid var(--ct-border); background: var(--ct-card); }
+.reference-toc a { padding: 7px 9px; color: var(--ct-fg-muted); text-decoration: none; }
+.reference-content { min-width: 0; }
+.reference-topic { scroll-margin-top: 76px; }
 
 @media (max-width: 900px) {
   .filter-bar, .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .reference-layout { grid-template-columns: 1fr; }
+  .reference-toc { position: static; max-height: none; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 620px) {
   .form-grid, .filter-bar, .summary-grid { grid-template-columns: 1fr; }

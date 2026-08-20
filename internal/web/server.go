@@ -76,6 +76,8 @@ type pageData struct {
 	ImportedScenarios []domain.ScenarioRecord
 	ScenarioSource    string
 	ScenarioPlan      string
+	Help              HelpTopic
+	ReferenceTopics   []HelpTopic
 }
 
 type readinessView struct {
@@ -488,6 +490,10 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 	mux.HandleFunc("GET /settings", func(w http.ResponseWriter, _ *http.Request) {
 		render(w, tmpl, nonce, pageData{Version: info, Page: "settings", Readiness: readiness(data)})
 	})
+	mux.HandleFunc("GET /reference", func(w http.ResponseWriter, _ *http.Request) {
+		catalog := defaultHelpCatalog()
+		render(w, tmpl, nonce, pageData{Version: info, Page: "reference", Readiness: readiness(data), ReferenceTopics: catalog.All()})
+	})
 	return mux
 }
 
@@ -496,6 +502,13 @@ func render(w http.ResponseWriter, tmpl *template.Template, nonce nonceFunc, dat
 }
 
 func renderStatus(w http.ResponseWriter, tmpl *template.Template, nonce nonceFunc, status int, data pageData) {
+	helpID := data.Page
+	if helpID == "settings" {
+		helpID = "operations"
+	}
+	if topic, ok := defaultHelpCatalog().Topic(helpID); ok {
+		data.Help = topic
+	}
 	n, err := nonce()
 	if err != nil || n == "" {
 		http.Error(w, "could not render page", http.StatusInternalServerError)

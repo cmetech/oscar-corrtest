@@ -37,7 +37,7 @@ textarea:focus-visible {
   z-index: 10;
   top: 0;
   display: flex;
-  min-height: 64px;
+  min-height: 56px;
   align-items: center;
   justify-content: space-between;
   gap: var(--ct-space-4);
@@ -99,8 +99,8 @@ textarea:focus-visible {
 
 .app-shell {
   display: grid;
-  min-height: calc(100vh - 64px);
-  grid-template-columns: 224px minmax(0, 1fr);
+  min-height: calc(100vh - 56px);
+  grid-template-columns: 196px minmax(0, 1fr);
 }
 
 .primary-nav {
@@ -142,9 +142,12 @@ textarea:focus-visible {
 }
 
 main {
-  width: min(1180px, 100%);
-  padding: clamp(var(--ct-space-6), 5vw, 56px);
+  width: 100%;
+  min-width: 0;
+  padding: clamp(var(--ct-space-4), 3vw, 36px);
 }
+
+body.help-open { overflow: hidden; }
 
 .data-table-wrapper {
   overflow-x: auto;

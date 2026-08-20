@@ -12,6 +12,47 @@
   transition: border-color 140ms ease, background-color 140ms ease, transform 140ms ease;
 }
 
+.reference-button,
+.icon-button {
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid #4A505D;
+  border-radius: var(--ct-radius-input);
+  background: #272B34;
+  color: #FAFAFA;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.icon-button { width: 38px; padding: 0; font-size: 24px; }
+
+.help-overlay {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  background: rgb(0 0 0 / 52%);
+}
+
+.help-drawer {
+  position: fixed;
+  z-index: 31;
+  inset: 0 0 0 auto;
+  width: min(460px, 100vw);
+  overflow: auto;
+  padding: var(--ct-space-6);
+  border-left: 1px solid var(--ct-border);
+  background: var(--ct-card);
+  box-shadow: -18px 0 48px rgb(0 0 0 / 28%);
+}
+
+.help-drawer__header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--ct-space-4); }
+.help-drawer__header h2 { margin-bottom: var(--ct-space-2); }
+.help-drawer__content { display: grid; gap: var(--ct-space-4); margin-block: var(--ct-space-6); }
+.help-drawer__content section { padding-top: var(--ct-space-4); border-top: 1px solid var(--ct-border); }
+.help-drawer__content h3 { margin: 0 0 var(--ct-space-2); font-size: 14px; }
+.help-drawer pre, .reference-topic pre { padding: var(--ct-space-3); border: 1px solid var(--ct-border); background: var(--ct-bg); }
+
 .theme-toggle:hover {
   border-color: var(--ct-accent);
   background: #303541;

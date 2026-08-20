@@ -1,0 +1,14 @@
+{{define "help-drawer"}}
+<div class="help-overlay" data-help-overlay hidden></div>
+<aside class="help-drawer" id="page-help-drawer" role="dialog" aria-modal="true" aria-labelledby="page-help-title" data-help-drawer hidden>
+  <header class="help-drawer__header">
+    <div><p class="eyebrow">Page reference</p><h2 id="page-help-title">{{.Help.Title}}</h2></div>
+    <button class="icon-button" type="button" data-help-close aria-label="Close page reference">×</button>
+  </header>
+  <p class="muted">{{.Help.Summary}}</p>
+  <div class="help-drawer__content">
+    {{range .Help.Sections}}<section><h3>{{.Heading}}</h3>{{range .Paragraphs}}<p>{{.}}</p>{{end}}{{if .Bullets}}<ul>{{range .Bullets}}<li>{{.}}</li>{{end}}</ul>{{end}}{{if .Code}}<pre><code>{{.Code}}</code></pre>{{end}}</section>{{end}}
+  </div>
+  <footer><a href="/reference#{{.Help.ID}}">Open full reference</a></footer>
+</aside>
+{{end}}
