@@ -9,10 +9,11 @@ func TestResolvePlatformPaths(t *testing.T) {
 		env      map[string]string
 		envFile  string
 		stateDir string
+		service  string
 	}{
-		{"linux fallback", "linux", map[string]string{"HOME": "/home/alex"}, "/home/alex/.config/oscar-corrtest/.env", "/home/alex/.local/state/oscar-corrtest"},
-		{"darwin xdg", "darwin", map[string]string{"HOME": "/Users/alex", "XDG_CONFIG_HOME": "/cfg", "XDG_STATE_HOME": "/state"}, "/cfg/oscar-corrtest/.env", "/state/oscar-corrtest"},
-		{"windows local app data", "windows", map[string]string{"LOCALAPPDATA": `C:\Users\alex\AppData\Local`}, `C:\Users\alex\AppData\Local\oscar-corrtest\.env`, `C:\Users\alex\AppData\Local\oscar-corrtest\data`},
+		{"linux fallback", "linux", map[string]string{"HOME": "/home/alex"}, "/home/alex/.config/oscar-corrtest/.env", "/home/alex/.local/state/oscar-corrtest", "/home/alex/.config/systemd/user/oscar-corrtest.service"},
+		{"darwin xdg", "darwin", map[string]string{"HOME": "/Users/alex", "XDG_CONFIG_HOME": "/cfg", "XDG_STATE_HOME": "/state"}, "/cfg/oscar-corrtest/.env", "/state/oscar-corrtest", "/Users/alex/Library/LaunchAgents/io.cmetech.oscar-corrtest.plist"},
+		{"windows local app data", "windows", map[string]string{"LOCALAPPDATA": `C:\Users\alex\AppData\Local`}, `C:\Users\alex\AppData\Local\oscar-corrtest\.env`, `C:\Users\alex\AppData\Local\oscar-corrtest\data`, `C:\Users\alex\AppData\Local\oscar-corrtest\oscar-corrtest-task.xml`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -22,6 +23,9 @@ func TestResolvePlatformPaths(t *testing.T) {
 			}
 			if got.EnvFile != tt.envFile || got.StateDir != tt.stateDir {
 				t.Fatalf("paths=%+v, want env=%q state=%q", got, tt.envFile, tt.stateDir)
+			}
+			if got.ServiceDefinition != tt.service {
+				t.Fatalf("ServiceDefinition=%q want %q", got.ServiceDefinition, tt.service)
 			}
 			if got.ConfigFile == "" || got.LogDir == "" || got.ApplicationLog == "" || got.BootstrapLog == "" {
 				t.Fatalf("incomplete paths: %+v", got)
