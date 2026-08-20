@@ -81,20 +81,26 @@ build:
 	$(GO_BUILD) -o "$(BUILD_DIR)/$(BINARY)" $(PKG)
 
 cross:
-	mkdir -p "$(BUILD_DIR)/linux_amd64" "$(BUILD_DIR)/linux_arm64"
+	mkdir -p "$(BUILD_DIR)/linux_amd64" "$(BUILD_DIR)/linux_arm64" "$(BUILD_DIR)/darwin_amd64" "$(BUILD_DIR)/darwin_arm64" "$(BUILD_DIR)/windows_amd64"
 	GOOS=linux GOARCH=amd64 $(GO_BUILD) -o "$(BUILD_DIR)/linux_amd64/$(BINARY)" $(PKG)
 	GOOS=linux GOARCH=arm64 $(GO_BUILD) -o "$(BUILD_DIR)/linux_arm64/$(BINARY)" $(PKG)
+	GOOS=darwin GOARCH=amd64 $(GO_BUILD) -o "$(BUILD_DIR)/darwin_amd64/$(BINARY)" $(PKG)
+	GOOS=darwin GOARCH=arm64 $(GO_BUILD) -o "$(BUILD_DIR)/darwin_arm64/$(BINARY)" $(PKG)
+	GOOS=windows GOARCH=amd64 $(GO_BUILD) -o "$(BUILD_DIR)/windows_amd64/$(BINARY).exe" $(PKG)
 
 package: cross
 	mkdir -p "$(DIST_DIR)"
-	./scripts/package.sh "$(VERSION)" amd64 "$(BUILD_DIR)/linux_amd64/$(BINARY)" "$(SOURCE_DATE_EPOCH)"
-	./scripts/package.sh "$(VERSION)" arm64 "$(BUILD_DIR)/linux_arm64/$(BINARY)" "$(SOURCE_DATE_EPOCH)"
+	./scripts/package.sh "$(VERSION)" linux amd64 "$(BUILD_DIR)/linux_amd64/$(BINARY)" "$(SOURCE_DATE_EPOCH)"
+	./scripts/package.sh "$(VERSION)" linux arm64 "$(BUILD_DIR)/linux_arm64/$(BINARY)" "$(SOURCE_DATE_EPOCH)"
+	./scripts/package.sh "$(VERSION)" darwin amd64 "$(BUILD_DIR)/darwin_amd64/$(BINARY)" "$(SOURCE_DATE_EPOCH)"
+	./scripts/package.sh "$(VERSION)" darwin arm64 "$(BUILD_DIR)/darwin_arm64/$(BINARY)" "$(SOURCE_DATE_EPOCH)"
+	./scripts/package.sh "$(VERSION)" windows amd64 "$(BUILD_DIR)/windows_amd64/$(BINARY).exe" "$(SOURCE_DATE_EPOCH)"
 
-checksums:
+checksums: package
 	@set -eu; \
-	files="$$(find "$(DIST_DIR)" -maxdepth 1 -type f -name '$(BINARY)_$(VERSION)_linux_*.tar.gz' -exec basename {} \; | LC_ALL=C sort)"; \
-	test -n "$$files"; \
+	files='$(BINARY)_$(VERSION)_darwin_amd64.tar.gz $(BINARY)_$(VERSION)_darwin_arm64.tar.gz $(BINARY)_$(VERSION)_linux_amd64.tar.gz $(BINARY)_$(VERSION)_linux_arm64.tar.gz $(BINARY)_$(VERSION)_windows_amd64.zip'; \
 	cd "$(DIST_DIR)"; \
+	for file in $$files; do test -f "$$file"; done; \
 	if command -v sha256sum >/dev/null 2>&1; then \
 		for file in $$files; do sha256sum "$$file"; done > SHA256SUMS; \
 	else \
