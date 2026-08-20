@@ -13,6 +13,7 @@ import (
 
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
+	"github.com/cmetech/oscar-corrtest/internal/service"
 	"github.com/cmetech/oscar-corrtest/internal/version"
 	"github.com/cmetech/oscar-corrtest/internal/web"
 )
@@ -38,19 +39,21 @@ type OpenRuntimeFunc func(context.Context, config.Settings) (ApplicationRuntime,
 
 // App is the oscar-corrtest command-line application.
 type App struct {
-	stdout io.Writer
-	stderr io.Writer
-	info   version.Info
-	serve  ServeFunc
-	open   OpenRuntimeFunc
-	getenv func(string) string
+	stdout  io.Writer
+	stderr  io.Writer
+	info    version.Info
+	serve   ServeFunc
+	open    OpenRuntimeFunc
+	getenv  func(string) string
+	service func() (service.Manager, error)
 }
 
 // Dependencies contains process-owned integrations used by commands.
 type Dependencies struct {
-	Serve  ServeFunc
-	Open   OpenRuntimeFunc
-	Getenv func(string) string
+	Serve   ServeFunc
+	Open    OpenRuntimeFunc
+	Getenv  func(string) string
+	Service func() (service.Manager, error)
 }
 
 // NewApplication constructs the complete CLI from explicit dependencies.
@@ -59,7 +62,7 @@ func NewApplication(stdout, stderr io.Writer, info version.Info, dependencies De
 	if getenv == nil {
 		getenv = os.Getenv
 	}
-	return &App{stdout: stdout, stderr: stderr, info: info, serve: dependencies.Serve, open: dependencies.Open, getenv: getenv}
+	return &App{stdout: stdout, stderr: stderr, info: info, serve: dependencies.Serve, open: dependencies.Open, getenv: getenv, service: dependencies.Service}
 }
 
 // New constructs an application using the supplied output streams and build metadata.
@@ -75,7 +78,7 @@ func NewConfigured(stdout, stderr io.Writer, info version.Info, serve ServeFunc,
 // Run executes a command and returns its process exit code.
 func (a *App) Run(ctx context.Context, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(a.stderr, "usage: oscar-corrtest <version|serve|target|doctor|scenario|plan|run|runs|cleanup|retention|export|verify-bundle|backup>")
+		fmt.Fprintln(a.stderr, "usage: oscar-corrtest <version|serve|service|target|doctor|scenario|plan|run|runs|cleanup|retention|export|verify-bundle|backup>")
 		return 2
 	}
 
@@ -85,6 +88,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return 0
 	case "serve":
 		return a.runServe(ctx, args[1:])
+	case "service":
+		return a.runService(ctx, args[1:])
 	case "target":
 		return a.runTarget(ctx, args[1:])
 	case "runs":
@@ -108,10 +113,10 @@ func (a *App) Run(ctx context.Context, args []string) int {
 	case "run":
 		return a.runCorrelation(ctx, args[1:])
 	case "help", "--help", "-h":
-		fmt.Fprintln(a.stdout, "usage: oscar-corrtest <version|serve|target|doctor|scenario|plan|run|runs|cleanup|retention|export|verify-bundle|backup>")
+		fmt.Fprintln(a.stdout, "usage: oscar-corrtest <version|serve|service|target|doctor|scenario|plan|run|runs|cleanup|retention|export|verify-bundle|backup>")
 		return 0
 	default:
-		fmt.Fprintf(a.stderr, "unknown command %q\nusage: oscar-corrtest <version|serve|target|doctor|scenario|plan|run|runs|cleanup|retention|export|verify-bundle|backup>\n", args[0])
+		fmt.Fprintf(a.stderr, "unknown command %q\nusage: oscar-corrtest <version|serve|service|target|doctor|scenario|plan|run|runs|cleanup|retention|export|verify-bundle|backup>\n", args[0])
 		return 2
 	}
 }

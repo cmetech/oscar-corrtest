@@ -12,6 +12,7 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/envfile"
 	"github.com/cmetech/oscar-corrtest/internal/platformpaths"
 	appruntime "github.com/cmetech/oscar-corrtest/internal/runtime"
+	"github.com/cmetech/oscar-corrtest/internal/service"
 	"github.com/cmetech/oscar-corrtest/internal/version"
 	"github.com/cmetech/oscar-corrtest/internal/web"
 )
@@ -34,6 +35,13 @@ func main() {
 	open := func(ctx context.Context, settings config.Settings) (command.ApplicationRuntime, error) {
 		return appruntime.OpenWithOptions(ctx, settings, info, appruntime.Options{Environment: environment})
 	}
-	app := command.NewApplication(os.Stdout, os.Stderr, info, command.Dependencies{Serve: web.Run, Open: open, Getenv: environment.Getenv})
+	serviceFactory := func() (service.Manager, error) {
+		executable, executableErr := os.Executable()
+		if executableErr != nil {
+			return nil, executableErr
+		}
+		return service.NewManager(service.Options{GOOS: runtime.GOOS, Executable: executable, Paths: paths, Runner: service.ExecRunner{}, Stdout: os.Stdout, Stderr: os.Stderr})
+	}
+	app := command.NewApplication(os.Stdout, os.Stderr, info, command.Dependencies{Serve: web.Run, Open: open, Getenv: environment.Getenv, Service: serviceFactory})
 	os.Exit(app.Run(ctx, os.Args[1:]))
 }
