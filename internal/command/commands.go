@@ -106,7 +106,7 @@ func (a *App) runDoctor(ctx context.Context, args []string) int {
 	flags.SetOutput(a.stderr)
 	configPath, dataDir := commonConfigFlags(flags)
 	target := flags.String("target", "", "target ID")
-	mode := flags.String("pipeline-mode", "", "phase_a_audit_only or phase_b_dispatch")
+	mode := flags.String("pipeline-mode", "", pipelineModeValues)
 	output := flags.String("output", "human", "human or json")
 	if err := flags.Parse(args); err != nil {
 		return 2

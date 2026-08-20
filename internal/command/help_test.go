@@ -170,6 +170,31 @@ func TestHelpExplainsOptionsAndExamplesForOperationalCommands(t *testing.T) {
 	}
 }
 
+func TestHelpDocumentsAcceptedEnumsAndNonstandardExitCodes(t *testing.T) {
+	tests := []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"doctor", "--help"}, []string{"publication_disabled", "phase_a_audit_only", "phase_b_dispatch", "unknown", "2 means incompatible", "3 means diagnostic or OSCAR failure"}},
+		{[]string{"scenario", "validate", "--help"}, []string{"Exit status 3", "unavailable, unsafe, or invalid"}},
+		{[]string{"scenario", "import", "--help"}, []string{"Exit status 3", "unavailable, unsafe, or invalid", "1 means a runtime or persistence failure"}},
+		{[]string{"plan", "--help"}, []string{"Exit status 3", "source, compilation, or execution-contract error"}},
+		{[]string{"runs", "list", "--help"}, []string{"PASS, FAIL, INCONCLUSIVE, ERROR, or SKIPPED", "CLEAN, DIRTY, NOT_REQUIRED, or UNKNOWN"}},
+	}
+	for _, test := range tests {
+		var stdout, stderr bytes.Buffer
+		app := New(&stdout, &stderr, version.Info{}, nil)
+		if code := app.Run(context.Background(), test.args); code != 0 {
+			t.Fatalf("args=%v exit=%d stderr=%q", test.args, code, stderr.String())
+		}
+		for _, want := range test.want {
+			if !strings.Contains(stdout.String(), want) {
+				t.Fatalf("args=%v stdout missing %q:\n%s", test.args, want, stdout.String())
+			}
+		}
+	}
+}
+
 func TestHelpNeverInitializesRuntimeOrServiceManagement(t *testing.T) {
 	var runtimeCalls, serviceCalls int
 	app := NewApplication(&bytes.Buffer{}, &bytes.Buffer{}, version.Info{}, Dependencies{

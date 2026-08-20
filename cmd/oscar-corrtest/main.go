@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"runtime"
@@ -20,24 +22,32 @@ import (
 )
 
 func main() {
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, os.LookupEnv))
+}
+
+func run(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string, bool)) int {
+	if handled, exitCode := command.HandleHelp(stdout, stderr, args); handled {
+		return exitCode
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	info := version.Current()
-	paths, err := platformpaths.Resolve(runtime.GOOS, os.LookupEnv)
+	paths, err := platformpaths.Resolve(runtime.GOOS, lookupEnv)
 	if err != nil {
-		_, _ = os.Stderr.WriteString("oscar-corrtest: resolve user paths: " + err.Error() + "\n")
-		os.Exit(1)
+		fmt.Fprintf(stderr, "oscar-corrtest: resolve user paths: %v\n", err)
+		return 1
 	}
-	environment, err := envfile.Open(paths.EnvFile, os.LookupEnv)
+	environment, err := envfile.Open(paths.EnvFile, lookupEnv)
 	if err != nil {
-		_, _ = os.Stderr.WriteString("oscar-corrtest: open managed environment: " + err.Error() + "\n")
-		os.Exit(1)
+		fmt.Fprintf(stderr, "oscar-corrtest: open managed environment: %v\n", err)
+		return 1
 	}
-	logs, logErr := applog.Open(paths.LogDir, os.Stderr, applog.Options{})
+	logs, logErr := applog.Open(paths.LogDir, stderr, applog.Options{})
 	if logErr != nil {
-		_, _ = os.Stderr.WriteString("oscar-corrtest: structured log unavailable; using stderr only\n")
-		logs = applog.StderrOnly(os.Stderr)
+		fmt.Fprintln(stderr, "oscar-corrtest: structured log unavailable; using stderr only")
+		logs = applog.StderrOnly(stderr)
 	}
 	logger := logs.Logger("main")
 	serviceFactory := func() (service.Manager, error) {
@@ -45,7 +55,7 @@ func main() {
 		if executableErr != nil {
 			return nil, executableErr
 		}
-		return service.NewManager(service.Options{GOOS: runtime.GOOS, Executable: executable, Paths: paths, Runner: service.ExecRunner{}, Stdout: os.Stdout, Stderr: os.Stderr})
+		return service.NewManager(service.Options{GOOS: runtime.GOOS, Executable: executable, Paths: paths, Runner: service.ExecRunner{}, Stdout: stdout, Stderr: stderr})
 	}
 	open := func(ctx context.Context, settings config.Settings) (command.ApplicationRuntime, error) {
 		manager, managerErr := serviceFactory()
@@ -55,8 +65,8 @@ func main() {
 		controller := operations.New(settings, environment, manager, logs)
 		return appruntime.OpenWithOptions(ctx, settings, info, appruntime.Options{Environment: environment, Logs: logs, Logger: logs.Logger("runtime"), Operations: controller})
 	}
-	app := command.NewApplication(os.Stdout, os.Stderr, info, command.Dependencies{Serve: web.Run, Open: open, Getenv: environment.Getenv, Service: serviceFactory, Logger: logger})
-	exitCode := app.Run(ctx, os.Args[1:])
+	app := command.NewApplication(stdout, stderr, info, command.Dependencies{Serve: web.Run, Open: open, Getenv: environment.Getenv, Service: serviceFactory, Logger: logger})
+	exitCode := app.Run(ctx, args)
 	_ = logs.Close()
-	os.Exit(exitCode)
+	return exitCode
 }

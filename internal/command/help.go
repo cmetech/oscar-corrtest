@@ -174,11 +174,14 @@ var helpTopics = map[string]helpTopic{
 		description: "Verify OSCAR API access, rule validation, reserved-label survival, and requested pipeline compatibility.",
 		options: append(commonHelpOptions(),
 			helpItem{"--target <id>", "Configured target ID (required)."},
-			helpItem{"--pipeline-mode <mode>", "phase_a_audit_only or phase_b_dispatch (required)."},
+			helpItem{"--pipeline-mode <mode>", pipelineModeValues + " (required)."},
 			helpItem{"--output <format>", "Output format: human or json (default human)."},
 		),
 		examples: []string{"oscar-corrtest target list", "oscar-corrtest doctor --target tgt_lab --pipeline-mode phase_b_dispatch"},
-		notes:    []string{"A nonzero exit means the target is unavailable, incompatible, or the command was invalid."},
+		notes: []string{
+			"Exit status 0 means compatible; 2 means incompatible or invalid usage.",
+			"Exit status 3 means diagnostic or OSCAR failure; 1 means a local runtime or output failure.",
+		},
 	},
 	"scenario": {
 		usage:       "oscar-corrtest scenario <action>",
@@ -201,12 +204,14 @@ var helpTopics = map[string]helpTopic{
 		description: "Parse and validate a custom scenario YAML file without changing local state.",
 		options:     []helpItem{{"--output <format>", "Output format: human or json (default human)."}},
 		examples:    []string{"oscar-corrtest scenario validate scenario.yaml", "oscar-corrtest scenario validate scenario.yaml --output json"},
+		notes:       []string{"Exit status 3 means the source file is unavailable, unsafe, or invalid; 1 means an output failure."},
 	},
 	"scenario import": {
 		usage:       "oscar-corrtest scenario import <file> [options]",
 		description: "Validate and save a custom scenario YAML file in the local catalog.",
 		options:     append(commonHelpOptions(), helpItem{"--output <format>", "Output format: human or json (default human)."}),
 		examples:    []string{"oscar-corrtest scenario import scenario.yaml", "oscar-corrtest scenario list"},
+		notes:       []string{"Exit status 3 means the source file is unavailable, unsafe, or invalid; 1 means a runtime or persistence failure."},
 	},
 	"plan": planOrRunHelp("plan", "Compile and preview a scenario without creating OSCAR rules or injecting alerts."),
 	"run":  planOrRunHelp("run", "Execute a scenario, evaluate its assertions, preserve evidence, and clean up owned OSCAR resources."),
@@ -225,9 +230,9 @@ var helpTopics = map[string]helpTopic{
 		description: "List saved runs, optionally filtering by target, lifecycle, verdict, cleanup state, or pattern.",
 		options: append(commonHelpOptions(),
 			helpItem{"--target <id>", "Filter by target ID."},
-			helpItem{"--status <status>", "Filter by run lifecycle status."},
-			helpItem{"--verdict <verdict>", "Filter by PASS, FAIL, INCONCLUSIVE, or SKIPPED."},
-			helpItem{"--cleanup <status>", "Filter by cleanup status."},
+			helpItem{"--status <status>", "Filter by QUEUED, PREFLIGHT, SETTING_UP, INJECTING, OBSERVING, ASSERTING, CANCELLING, CLEANING_UP, INTERRUPTED, RECOVERING, or COMPLETED."},
+			helpItem{"--verdict <verdict>", "Filter by PASS, FAIL, INCONCLUSIVE, ERROR, or SKIPPED."},
+			helpItem{"--cleanup <status>", "Filter by CLEAN, DIRTY, NOT_REQUIRED, or UNKNOWN."},
 			helpItem{"--pattern <pattern>", "Filter by correlation pattern."},
 			helpItem{"--output <format>", "Output format: human or json (default human)."},
 		),
@@ -303,7 +308,7 @@ func planOrRunHelp(name, description string) helpTopic {
 		description: description,
 		options: append(commonHelpOptions(),
 			helpItem{"--target <id>", "Configured target ID (required)."},
-			helpItem{"--pipeline-mode <mode>", "publication_disabled, phase_a_audit_only, phase_b_dispatch, or unknown (required)."},
+			helpItem{"--pipeline-mode <mode>", pipelineModeValues + " (required)."},
 			helpItem{"--output <format>", "Output format: human or json (default human)."},
 		),
 		examples: []string{
@@ -315,6 +320,8 @@ func planOrRunHelp(name, description string) helpTopic {
 	}
 	if name == "run" {
 		topic.notes = append(topic.notes, "Exit status: 0 PASS/SKIPPED, 1 FAIL, 2 INCONCLUSIVE, 3 execution error, 4 cleanup dirty/unknown.")
+	} else {
+		topic.notes = append(topic.notes, "Exit status 3 means a source, compilation, or execution-contract error.")
 	}
 	return topic
 }
@@ -360,6 +367,17 @@ func helpRequest(args []string) (string, bool) {
 		return args[0], true
 	}
 	return "", false
+}
+
+// HandleHelp renders a help request before process-level configuration,
+// logging, runtime, or service initialization occurs.
+func HandleHelp(stdout, stderr io.Writer, args []string) (bool, int) {
+	path, requested := helpRequest(args)
+	if !requested {
+		return false, 0
+	}
+	app := &App{stdout: stdout, stderr: stderr}
+	return true, app.runHelp(path)
 }
 
 func (a *App) runHelp(path string) int {

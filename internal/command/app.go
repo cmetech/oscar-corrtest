@@ -80,8 +80,8 @@ func NewConfigured(stdout, stderr io.Writer, info version.Info, serve ServeFunc,
 
 // Run executes a command and returns its process exit code.
 func (a *App) Run(ctx context.Context, args []string) int {
-	if path, requested := helpRequest(args); requested {
-		return a.runHelp(path)
+	if handled, exitCode := HandleHelp(a.stdout, a.stderr, args); handled {
+		return exitCode
 	}
 
 	switch args[0] {

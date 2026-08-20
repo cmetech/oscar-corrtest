@@ -13,6 +13,8 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/scenario"
 )
 
+const pipelineModeValues = "publication_disabled, phase_a_audit_only, phase_b_dispatch, or unknown"
+
 type correlationRuntime interface {
 	PreviewBuiltin(context.Context, string, string, string) (compiler.Plan, error)
 	ExecuteBuiltin(context.Context, string, string, string) (domain.Run, error)
