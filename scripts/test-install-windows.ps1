@@ -57,6 +57,10 @@ try {
     if ((Get-FileHash -Algorithm SHA256 -LiteralPath $installed).Hash -ne $installedBefore) {
         throw 'Idempotent reinstall changed the Windows executable'
     }
+    $installerDebris = @(Get-ChildItem -LiteralPath $installDirectory -Force | Where-Object { $_.Name -like '.oscar-corrtest-*.tmp' })
+    if ($installerDebris.Count -ne 0) {
+        throw "Idempotent reinstall left installer temporary files: $($installerDebris.Name -join ', ')"
+    }
 
     Add-Content -LiteralPath (Join-Path $releaseDirectory $assetName) -Value 'corrupt' -NoNewline
     $failed = $false

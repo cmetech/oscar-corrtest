@@ -39,6 +39,7 @@ function Copy-Download([string]$Uri, [string]$Destination) {
 
 $work = Join-Path ([IO.Path]::GetTempPath()) ("oscar-corrtest-install-" + [guid]::NewGuid().ToString('N'))
 $installTemporary = $null
+$installBackup = $null
 try {
     New-Item -ItemType Directory -Path $work -Force | Out-Null
     $version = $env:OSCAR_CORRTEST_VERSION
@@ -110,11 +111,15 @@ try {
     $installTemporary = Join-Path $installDirectory ('.oscar-corrtest-' + [guid]::NewGuid().ToString('N') + '.tmp')
     Copy-Item -LiteralPath $stagedBinary -Destination $installTemporary
     if (Test-Path -LiteralPath $destination -PathType Leaf) {
-        [IO.File]::Replace($installTemporary, $destination, $null, $true)
+        $installBackup = Join-Path $installDirectory ('.oscar-corrtest-backup-' + [guid]::NewGuid().ToString('N') + '.tmp')
+        [IO.File]::Replace($installTemporary, $destination, $installBackup, $true)
+        $installTemporary = $null
+        Remove-Item -LiteralPath $installBackup -Force
+        $installBackup = $null
     } else {
         [IO.File]::Move($installTemporary, $destination)
+        $installTemporary = $null
     }
-    $installTemporary = $null
 
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     $pathParts = @($userPath -split ';' | Where-Object { $_ })
@@ -143,6 +148,9 @@ try {
 } finally {
     if ($installTemporary -and (Test-Path -LiteralPath $installTemporary)) {
         Remove-Item -LiteralPath $installTemporary -Force -ErrorAction SilentlyContinue
+    }
+    if ($installBackup -and (Test-Path -LiteralPath $installBackup)) {
+        Remove-Item -LiteralPath $installBackup -Force -ErrorAction SilentlyContinue
     }
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
 }
