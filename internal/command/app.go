@@ -106,10 +106,10 @@ func (a *App) Run(ctx context.Context, args []string) int {
 func (a *App) runServe(ctx context.Context, args []string) int {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.SetOutput(a.stderr)
-	listen := flags.String("listen", "", "literal loopback listen address")
+	listen := flags.String("listen", "", "HTTP listen address")
 	configPath := flags.String("config", "", "configuration file")
 	dataDir := flags.String("data-dir", "", "local state directory")
-	remoteMode := flags.String("remote-mode", "", "bearer or trusted-proxy (required for non-loopback binds)")
+	remoteMode := flags.String("remote-mode", "", "optional bearer or trusted-proxy UI authentication")
 	authTokenEnv := flags.String("auth-token-env", "", "environment variable containing the bearer credential")
 	authTokenFile := flags.String("auth-token-file", "", "absolute file containing the bearer credential")
 	authTokenSystemd := flags.String("auth-token-systemd", "", "systemd credential name containing the bearer credential")
@@ -139,6 +139,9 @@ func (a *App) runServe(ctx context.Context, args []string) int {
 		fmt.Fprintln(a.stderr, "serve is unavailable")
 		return 1
 	}
+	if security.Mode == web.SecurityNone && !isLiteralLoopback(settings.ListenAddress) {
+		fmt.Fprintln(a.stderr, "WARNING: corrtest UI is unauthenticated; every network peer that can reach this listener can create rules and inject alerts")
+	}
 	var application ApplicationRuntime
 	if a.open != nil {
 		application, err = a.open(ctx, settings)
@@ -162,12 +165,8 @@ func (a *App) runServe(ctx context.Context, args []string) int {
 
 type secretFlags struct{ env, file, systemd string }
 
-func (a *App) resolveServingSecurity(address, mode string, refs secretFlags, proxyHeader, proxyValue, trustedProxy, tlsCert, tlsKey string) (web.Security, error) {
-	loopbackErr := validateLoopback(address)
+func (a *App) resolveServingSecurity(_ string, mode string, refs secretFlags, proxyHeader, proxyValue, trustedProxy, tlsCert, tlsKey string) (web.Security, error) {
 	if mode == "" {
-		if loopbackErr != nil {
-			return web.Security{}, fmt.Errorf("%w; non-loopback serving requires --remote-mode", loopbackErr)
-		}
 		if refs.env != "" || refs.file != "" || refs.systemd != "" || proxyHeader != "" || proxyValue != "" || trustedProxy != "" || tlsCert != "" || tlsKey != "" {
 			return web.Security{}, fmt.Errorf("remote authentication or TLS flags require --remote-mode")
 		}
@@ -264,14 +263,11 @@ func httpCanonicalHeader(value string) string {
 	return strings.Join(parts, "-")
 }
 
-func validateLoopback(address string) error {
+func isLiteralLoopback(address string) bool {
 	host, _, err := net.SplitHostPort(address)
 	if err != nil {
-		return fmt.Errorf("invalid listen address %q: %w", address, err)
+		return false
 	}
 	ip := net.ParseIP(host)
-	if ip == nil || !ip.IsLoopback() {
-		return fmt.Errorf("listen address %q must use a literal loopback IP", address)
-	}
-	return nil
+	return ip != nil && ip.IsLoopback()
 }

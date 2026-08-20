@@ -298,19 +298,35 @@ func TestServeCommandPassesListenAddress(t *testing.T) {
 	}
 }
 
-func TestServeAcceptsOnlyLiteralLoopbackAddresses(t *testing.T) {
+func TestServeDefaultsToUnauthenticatedAllInterfaces(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	var got web.Options
+	serve := func(_ context.Context, options web.Options) error {
+		got = options
+		return nil
+	}
+	app := NewConfigured(&stdout, &stderr, version.Info{}, serve, nil, testGetenv)
+	if code := app.Run(context.Background(), []string{"serve"}); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+	}
+	if got.ListenAddress != "0.0.0.0:8787" || got.Security.Mode != web.SecurityNone {
+		t.Fatalf("options=%+v", got)
+	}
+	if !strings.Contains(stderr.String(), "WARNING") || !strings.Contains(stderr.String(), "unauthenticated") {
+		t.Fatalf("stderr=%q", stderr.String())
+	}
+}
+
+func TestServeAllowsUnauthenticatedListenerChoices(t *testing.T) {
 	tests := []struct {
-		address string
-		wantOK  bool
+		address     string
+		wantWarning bool
 	}{
-		{"127.0.0.1:8787", true},
-		{"127.0.0.2:8787", true},
-		{"[::1]:8787", true},
-		{"localhost:8787", false},
-		{"0.0.0.0:8787", false},
-		{"[::]:8787", false},
-		{":8787", false},
-		{"192.0.2.10:8787", false},
+		{"0.0.0.0:8787", true},
+		{"[::]:8787", true},
+		{"192.0.2.10:8787", true},
+		{"127.0.0.1:8787", false},
+		{"[::1]:8787", false},
 	}
 
 	for _, tt := range tests {
@@ -324,17 +340,12 @@ func TestServeAcceptsOnlyLiteralLoopbackAddresses(t *testing.T) {
 			code := New(&stdout, &stderr, version.Info{}, serve).Run(
 				context.Background(), []string{"serve", "--listen", tt.address},
 			)
-			if tt.wantOK {
-				if code != 0 || !called {
-					t.Fatalf("exit=%d called=%v stderr=%q", code, called, stderr.String())
-				}
-				return
-			}
-			if code != 2 || called {
+			if code != 0 || !called {
 				t.Fatalf("exit=%d called=%v stderr=%q", code, called, stderr.String())
 			}
-			if !strings.Contains(stderr.String(), "non-loopback serving requires --remote-mode") {
-				t.Fatalf("stderr=%q", stderr.String())
+			warned := strings.Contains(stderr.String(), "WARNING") && strings.Contains(stderr.String(), "unauthenticated")
+			if warned != tt.wantWarning {
+				t.Fatalf("warning=%v want=%v stderr=%q", warned, tt.wantWarning, stderr.String())
 			}
 		})
 	}

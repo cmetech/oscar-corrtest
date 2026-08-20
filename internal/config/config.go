@@ -50,7 +50,7 @@ func Load(getenv func(string) string, overrides Overrides) (Settings, error) {
 	settings := Settings{
 		ConfigPath:    filepath.Clean(absConfigPath),
 		DataDir:       defaultDataDir(getenv),
-		ListenAddress: "127.0.0.1:8787",
+		ListenAddress: "0.0.0.0:8787",
 	}
 	fileValues, err := readFile(settings.ConfigPath)
 	if err != nil {

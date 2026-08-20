@@ -439,6 +439,28 @@ func TestLoopbackHostGuardRejectsDNSRebindingHost(t *testing.T) {
 	}
 }
 
+func TestHostGuardSelectionMatchesActualListener(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	for _, test := range []struct {
+		name, listener string
+		want           int
+	}{
+		{"loopback guarded", "127.0.0.1:8787", http.StatusMisdirectedRequest},
+		{"wildcard unguarded", "0.0.0.0:8787", http.StatusOK},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := hostGuardForListener(next, test.listener, Security{})
+			request := httptest.NewRequest(http.MethodGet, "http://attacker.example:8787/", nil)
+			request.Host = "attacker.example:8787"
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.want {
+				t.Fatalf("status=%d want=%d", response.Code, test.want)
+			}
+		})
+	}
+}
+
 func TestTrustedProxyRequiresPeerAndIdentity(t *testing.T) {
 	t.Parallel()
 	_, network, _ := net.ParseCIDR("10.20.0.0/16")

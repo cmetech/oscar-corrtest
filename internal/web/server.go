@@ -606,6 +606,21 @@ func loopbackHostGuard(next http.Handler, listenerAddress string) http.Handler {
 	})
 }
 
+func hostGuardForListener(next http.Handler, listenerAddress string, security Security) http.Handler {
+	if security.Mode != SecurityNone {
+		return next
+	}
+	host, _, err := net.SplitHostPort(listenerAddress)
+	if err != nil {
+		return next
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return next
+	}
+	return loopbackHostGuard(next, listenerAddress)
+}
+
 func generateNonce() (string, error) {
 	random := make([]byte, 18)
 	if _, err := rand.Read(random); err != nil {
@@ -628,9 +643,7 @@ func Run(ctx context.Context, opts Options) error {
 		_ = listener.Close()
 		return err
 	}
-	if opts.Security.Mode == SecurityNone {
-		handler = loopbackHostGuard(handler, listener.Addr().String())
-	}
+	handler = hostGuardForListener(handler, listener.Addr().String(), opts.Security)
 	server := &http.Server{
 		Handler: handler, ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,

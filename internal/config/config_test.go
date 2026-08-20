@@ -22,7 +22,7 @@ func TestLoadUsesXDGDefaults(t *testing.T) {
 	if got.DataDir != "/tmp/state-home/oscar-corrtest" {
 		t.Fatalf("DataDir=%q", got.DataDir)
 	}
-	if got.ListenAddress != "127.0.0.1:8787" {
+	if got.ListenAddress != "0.0.0.0:8787" {
 		t.Fatalf("ListenAddress=%q", got.ListenAddress)
 	}
 }
