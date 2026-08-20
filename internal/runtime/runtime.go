@@ -57,6 +57,9 @@ type Runtime struct {
 	readiness Readiness
 	version   string
 	runMu     sync.Mutex
+	activeMu  sync.Mutex
+	active    map[string]context.CancelFunc
+	runWG     sync.WaitGroup
 	rootCtx   context.Context
 }
 
@@ -86,6 +89,7 @@ func Open(ctx context.Context, settings config.Settings, info version.Info) (*Ru
 	result := &Runtime{
 		settings: settings, database: database, history: service, artifacts: artifacts,
 		readiness: Readiness{Ready: database.Ready() == nil, DatabasePath: databasePath}, version: info.Version, rootCtx: ctx,
+		active: make(map[string]context.CancelFunc),
 	}
 	if readyErr := database.Ready(); readyErr != nil {
 		result.readiness.Error = readyErr.Error()
@@ -204,14 +208,46 @@ func (r *Runtime) StartBuiltin(ctx context.Context, targetID, pattern, pipelineM
 	if err != nil {
 		return domain.Run{}, err
 	}
+	executionCtx, cancel := context.WithCancel(r.rootCtx)
+	r.activeMu.Lock()
+	r.active[run.ID] = cancel
+	r.activeMu.Unlock()
+	r.runWG.Add(1)
 	go func() {
+		defer r.runWG.Done()
+		defer func() {
+			r.activeMu.Lock()
+			delete(r.active, run.ID)
+			r.activeMu.Unlock()
+			cancel()
+		}()
 		r.runMu.Lock()
 		defer r.runMu.Unlock()
-		diagnostic := r.diagnose(r.rootCtx, client, target, run, plan, pipelineMode)
+		diagnostic := r.diagnose(executionCtx, client, target, run, plan, pipelineMode)
 		engine := runner.New(r.database, client, runner.Options{})
-		_ = engine.Execute(r.rootCtx, run, plan, diagnostic.snapshot())
+		_ = engine.Execute(executionCtx, run, plan, diagnostic.snapshot())
 	}()
 	return run, nil
+}
+
+// CancelRun requests cancellation for a run owned by this process. The runner
+// persists its terminal error and bounded cleanup evidence before it exits.
+func (r *Runtime) CancelRun(ctx context.Context, runID string) error {
+	run, err := r.GetRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if run.Status == domain.RunCompleted || run.Status == domain.RunInterrupted {
+		return fmt.Errorf("run is already terminal")
+	}
+	r.activeMu.Lock()
+	cancel, ok := r.active[runID]
+	r.activeMu.Unlock()
+	if !ok {
+		return fmt.Errorf("run is not active in this process")
+	}
+	cancel()
+	return nil
 }
 
 // Doctor performs the same rule-schema and label-survival preflight used by execution.
@@ -279,8 +315,17 @@ func (r *Runtime) Settings() config.Settings { return r.settings }
 // Artifacts returns the traversal-safe local artifact store.
 func (r *Runtime) Artifacts() *artifact.Store { return r.artifacts }
 
-// Close releases the database pool.
-func (r *Runtime) Close() error { return r.database.Close() }
+// Close cancels active executions, waits for their bounded cleanup, then
+// releases the database pool.
+func (r *Runtime) Close() error {
+	r.activeMu.Lock()
+	for _, cancel := range r.active {
+		cancel()
+	}
+	r.activeMu.Unlock()
+	r.runWG.Wait()
+	return r.database.Close()
+}
 
 // CreateTarget delegates to the shared history service.
 func (r *Runtime) CreateTarget(ctx context.Context, input domain.TargetInput) (domain.Target, error) {
@@ -494,6 +539,44 @@ func (r *Runtime) ImportScenario(ctx context.Context, source []byte, document sc
 // ListScenarios returns imported scenario metadata with source content omitted by callers as needed.
 func (r *Runtime) ListScenarios(ctx context.Context) ([]domain.ScenarioRecord, error) {
 	return r.database.ListScenarios(ctx)
+}
+
+// PreviewRetention returns at most 500 old runs that are terminal and whose
+// independent cleanup state proves local deletion is safe.
+func (r *Runtime) PreviewRetention(ctx context.Context, before time.Time) ([]domain.Run, error) {
+	if before.IsZero() {
+		return nil, fmt.Errorf("retention cutoff is required")
+	}
+	runs, err := r.ListRuns(ctx, domain.RunFilter{CreatedBefore: &before, Limit: 500})
+	if err != nil {
+		return nil, err
+	}
+	eligible := make([]domain.Run, 0, len(runs))
+	for _, run := range runs {
+		terminal := run.Status == domain.RunCompleted || run.Status == domain.RunInterrupted
+		cleanupSafe := run.CleanupStatus == domain.CleanupClean || run.CleanupStatus == domain.CleanupNotRequired
+		if terminal && cleanupSafe {
+			eligible = append(eligible, run)
+		}
+	}
+	return eligible, nil
+}
+
+// ApplyRetention deletes exactly the run IDs returned by the safety preview;
+// every artifact is reverified by DeleteRun immediately before deletion.
+func (r *Runtime) ApplyRetention(ctx context.Context, before time.Time) ([]string, error) {
+	candidates, err := r.PreviewRetention(ctx, before)
+	if err != nil {
+		return nil, err
+	}
+	deleted := make([]string, 0, len(candidates))
+	for _, run := range candidates {
+		if err := r.DeleteRun(ctx, run.ID); err != nil {
+			return deleted, fmt.Errorf("retention stopped at run %s: %w", run.ID, err)
+		}
+		deleted = append(deleted, run.ID)
+	}
+	return deleted, nil
 }
 
 // DeleteRun removes one exact terminal, cleanup-safe run after artifact verification.

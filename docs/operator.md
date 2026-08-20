@@ -26,6 +26,19 @@ oscar-corrtest verify-bundle ./evidence.zip
 
 `PASS` and cleanup status are independent. A cleanup-dirty run exits with code 4 and remains available for `oscar-corrtest cleanup retry <run-id>`. Retry reads the exact returned rule ID and verifies full run ownership before deletion. Manual deletion requires an exact terminal run ID, verified artifacts, clean/not-required cleanup, and `--yes`.
 
+Browser runs can be cancelled from their run-detail page. The process detaches a bounded cleanup context from the cancelled operation, persists terminal cleanup evidence, and waits for active cleanup before closing SQLite during shutdown.
+
+Preview retention before applying it:
+
+```bash
+oscar-corrtest retention preview --before 2026-08-01T00:00:00Z
+oscar-corrtest retention apply --before 2026-08-01T00:00:00Z --yes
+```
+
+Only terminal `CLEAN` or `NOT_REQUIRED` runs qualify. Each artifact is hash-verified again immediately before deletion; dirty, unknown, active, pending-artifact, missing, or changed runs remain preserved. Each invocation is capped at 500 candidates.
+
+The Scenarios UI accepts bounded strict YAML/JSON source. Preview compiles through the same compiler without contacting OSCAR; import persists the original validated source by its SHA-256 digest.
+
 ## Serving modes
 
 Loopback mode needs no UI authentication:

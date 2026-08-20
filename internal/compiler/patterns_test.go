@@ -59,6 +59,11 @@ func TestPatternStimuliEncodeCurrentOscarSemantics(t *testing.T) {
 	if crossSource.Cases[0].Alerts[0].Labels["oscar_source"] == crossSource.Cases[0].Alerts[1].Labels["oscar_source"] {
 		t.Fatalf("cross-source stimuli=%+v", crossSource.Cases[0].Alerts)
 	}
+	coOccurrence := compile("co_occurrence")
+	negativeMatches, _ := coOccurrence.Cases[1].Rule.MatchCriteria["required_matches"].([]any)
+	if len(negativeMatches) != 2 || coOccurrence.Cases[1].Rule.MatchCriteria["min_matches"] != 2 {
+		t.Fatalf("co-occurrence negative changed the rule threshold instead of omitting a stimulus: %+v", coOccurrence.Cases[1].Rule.MatchCriteria)
+	}
 	persistence := compile("persistence")
 	if len(persistence.Cases[1].Alerts) != 2 || persistence.Cases[1].Alerts[1].Status != "resolved" {
 		t.Fatalf("persistence negative=%+v", persistence.Cases[1].Alerts)
@@ -66,6 +71,10 @@ func TestPatternStimuliEncodeCurrentOscarSemantics(t *testing.T) {
 	parentChild := compile("parent_child")
 	if parentChild.Cases[0].Rule.EmitAlertName != "" || len(parentChild.Cases[0].Alerts) != 2 {
 		t.Fatalf("parent-child plan=%+v", parentChild.Cases[0])
+	}
+	negativeParentMatch, _ := parentChild.Cases[1].Rule.MatchCriteria["parent_match"].(map[string]string)
+	if negativeParentMatch["alertname"] == "" {
+		t.Fatalf("parent-child negative rule has no deterministic parent selector: %+v", parentChild.Cases[1].Rule.MatchCriteria)
 	}
 }
 
@@ -99,5 +108,24 @@ func TestCompiledMatchCriteriaMirrorOSCARPublicV1Schemas(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestParentChildNotifierNamesComeFromScenarioInput(t *testing.T) {
+	run := domain.Run{ID: "crt_0123456789ABCDEFGHJKMNPQRS", ShortToken: "7Q9K2M4A"}
+	input := scenario.Builtin("parent_child")
+	input.Cases[0].SuppressForNotifiers = []string{"pager-duty-lab"}
+	input.Cases[0].TagForNotifiers = []string{"email-lab"}
+	plan, err := compiler.Compile(run, input, compiler.Capabilities{PipelineMode: "phase_b_dispatch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	suppress, ok := plan.Cases[0].Rule.MatchCriteria["suppress_children_for_notifiers"].([]string)
+	if !ok || len(suppress) != 1 || suppress[0] != "pager-duty-lab" {
+		t.Fatalf("suppression notifiers=%#v", plan.Cases[0].Rule.MatchCriteria["suppress_children_for_notifiers"])
+	}
+	tag, ok := plan.Cases[0].Rule.MatchCriteria["tag_children_for_notifiers"].([]string)
+	if !ok || len(tag) != 1 || tag[0] != "email-lab" {
+		t.Fatalf("tag notifiers=%#v", plan.Cases[0].Rule.MatchCriteria["tag_children_for_notifiers"])
 	}
 }

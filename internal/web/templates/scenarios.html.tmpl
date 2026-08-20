@@ -1,0 +1,16 @@
+{{define "scenarios"}}
+<section class="page-heading"><p class="eyebrow">Closed, validated inputs</p><h1>Custom scenarios</h1><p>Paste strict YAML or JSON, compile a no-mutation preview, then persist the original source by content digest.</p></section>
+{{if .Error}}<div class="notice notice--error" role="alert">{{.Error}}</div>{{end}}
+{{if .Status}}<div class="notice" role="status">{{.Status}}</div>{{end}}
+<section class="panel">
+  <form method="post" action="/scenarios" class="form-grid">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <label>Scenario YAML or JSON<textarea name="source" rows="18" required>{{.ScenarioSource}}</textarea></label>
+    <label>Preview target<select name="target_id">{{range .Targets}}<option value="{{.ID}}">{{.DisplayName}} — {{.BaseURL}}</option>{{end}}</select></label>
+    <label>Pipeline mode<select name="pipeline_mode"><option value="phase_b_dispatch">Phase B — audit and dispatch</option><option value="phase_a_audit_only">Phase A — audit only</option></select></label>
+    <div><button type="submit" name="action" value="preview">Compile preview</button> <button type="submit" name="action" value="import">Import validated source</button></div>
+  </form>
+</section>
+{{if .ScenarioPlan}}<section class="panel"><h2>Immutable plan preview</h2><pre>{{.ScenarioPlan}}</pre></section>{{end}}
+<section class="panel"><h2>Imported scenarios</h2>{{if .ImportedScenarios}}<div class="data-table-wrapper"><table><caption>Persisted custom scenario sources</caption><thead><tr><th>Name</th><th>ID</th><th>SHA-256</th></tr></thead><tbody>{{range .ImportedScenarios}}<tr><td>{{.Name}}</td><td><code>{{.ID}}</code></td><td><code>{{.SHA256}}</code></td></tr>{{end}}</tbody></table></div>{{else}}<p class="muted">No custom scenarios imported.</p>{{end}}</section>
+{{end}}

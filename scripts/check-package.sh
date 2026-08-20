@@ -1,12 +1,17 @@
 #!/bin/sh
 set -eu
 
-if [ "$#" -ne 1 ] || [ ! -d "$1" ]; then
-  printf '%s\n' 'usage: check-package.sh <dist-directory>' >&2
+if [ "$#" -ne 2 ] || [ ! -d "$1" ] || [ -z "$2" ]; then
+  printf '%s\n' 'usage: check-package.sh <dist-directory> <version>' >&2
   exit 2
 fi
 
-for archive in "$1"/*.tar.gz; do
+for architecture in amd64 arm64; do
+  archive="$1/oscar-corrtest_$2_linux_$architecture.tar.gz"
+  if [ ! -f "$archive" ]; then
+    printf 'missing package: %s\n' "$archive" >&2
+    exit 1
+  fi
   listing=$(tar -tzf "$archive")
   for path in \
     oscar-corrtest/bin/oscar-corrtest \

@@ -88,7 +88,7 @@ package: cross
 
 checksums:
 	@set -eu; \
-	files="$$(find "$(DIST_DIR)" -maxdepth 1 -type f -name '*.tar.gz' -exec basename {} \; | LC_ALL=C sort)"; \
+	files="$$(find "$(DIST_DIR)" -maxdepth 1 -type f -name '$(BINARY)_$(VERSION)_linux_*.tar.gz' -exec basename {} \; | LC_ALL=C sort)"; \
 	test -n "$$files"; \
 	cd "$(DIST_DIR)"; \
 	if command -v sha256sum >/dev/null 2>&1; then \
@@ -98,7 +98,7 @@ checksums:
 	fi
 
 package-content-check: package
-	./scripts/check-package.sh "$(DIST_DIR)"
+	./scripts/check-package.sh "$(DIST_DIR)" "$(VERSION)"
 
 reproducible-check:
 	./scripts/check-reproducible.sh

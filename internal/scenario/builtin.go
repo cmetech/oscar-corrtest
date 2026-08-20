@@ -47,8 +47,8 @@ func Builtin(pattern string) Scenario {
 		base.Cases = []Case{positive("emits-when-heartbeat-absent", event("heartbeat")), negative("continued-heartbeat-prevents-parent", event("heartbeat"), Event{Role: "heartbeat", Status: "firing", Delay: 15 * time.Second})}
 	case "parent_child":
 		base.Cases = []Case{
-			{Name: "links-child-to-active-parent", Code: "P01", Polarity: "positive", Window: 30 * time.Second, GroupBy: []string{"site"}, Labels: map[string]string{"site": "corrtest-p01"}, Events: []Event{event("parent"), {Role: "child", Status: "firing", Delay: time.Second}}, Assertions: []Assertion{{Kind: "parent-link-count", Outcome: "suppressed_per_notifier", Equals: 1}}},
-			{Name: "releases-child-without-parent", Code: "N01", Polarity: "negative", Window: 30 * time.Second, GroupBy: []string{"site"}, Labels: map[string]string{"site": "corrtest-n01"}, Events: []Event{event("child")}, Assertions: []Assertion{{Kind: "audit-count", Outcome: "released_no_trigger", Equals: 1}}},
+			{Name: "links-child-to-active-parent", Code: "P01", Polarity: "positive", Window: 30 * time.Second, GroupBy: []string{"site"}, Labels: map[string]string{"site": "corrtest-p01"}, SuppressForNotifiers: []string{"email"}, Events: []Event{event("parent"), {Role: "child", Status: "firing", Delay: time.Second}}, Assertions: []Assertion{{Kind: "parent-link-count", Outcome: "suppressed_per_notifier", Equals: 1}}},
+			{Name: "releases-child-without-parent", Code: "N01", Polarity: "negative", Window: 30 * time.Second, GroupBy: []string{"site"}, Labels: map[string]string{"site": "corrtest-n01"}, SuppressForNotifiers: []string{"email"}, Events: []Event{event("child")}, Assertions: []Assertion{{Kind: "audit-count", Outcome: "released_no_trigger", Equals: 1}}},
 		}
 	default:
 		return Scenario{APIVersion: base.APIVersion, Kind: base.Kind, Pattern: pattern}

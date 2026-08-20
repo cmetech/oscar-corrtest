@@ -14,11 +14,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	appruntime "github.com/cmetech/oscar-corrtest/internal/runtime"
+	"github.com/cmetech/oscar-corrtest/internal/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/version"
 )
+
+const webScenarioSource = `apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: sample
+suite: custom
+pattern: flood
+maxDuration: 90s
+cases:
+  - {name: positive, code: P01, polarity: positive, role: interface_down, repeat: 5, window: 30s, assertions: [{kind: synthetic-alert-count, equals: 1}]}
+  - {name: negative, code: N01, polarity: negative, role: interface_down, repeat: 4, window: 30s, assertions: [{kind: synthetic-alert-count, equals: 0}]}
+`
 
 func TestHandlerRoutes(t *testing.T) {
 	handler := NewHandler(version.Info{Version: "v1.2.3", Commit: "abc", BuildDate: "now"})
@@ -240,6 +253,78 @@ func TestRunEventsSSEReplaysAfterSequence(t *testing.T) {
 	}
 }
 
+func TestRunCancellationRequiresSameOriginAndCSRF(t *testing.T) {
+	data := &runUIData{}
+	handler := NewHandlerWithData(version.Info{}, data)
+	get := httptest.NewRequest(http.MethodGet, "http://example.com/runs/crt_ui", nil)
+	getResponse := httptest.NewRecorder()
+	handler.ServeHTTP(getResponse, get)
+	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(getResponse.Body.String())
+	if len(match) != 2 {
+		t.Fatalf("cancel CSRF token missing: %s", getResponse.Body.String())
+	}
+	values := url.Values{"csrf_token": {match[1]}}
+	post := httptest.NewRequest(http.MethodPost, "http://example.com/runs/crt_ui/cancel", strings.NewReader(values.Encode()))
+	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	post.Header.Set("Origin", "http://example.com")
+	post.AddCookie(getResponse.Result().Cookies()[0])
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, post)
+	if response.Code != http.StatusSeeOther || !data.cancelled {
+		t.Fatalf("cancel status=%d cancelled=%t body=%s", response.Code, data.cancelled, response.Body.String())
+	}
+}
+
+func TestRunDeletionRequiresCleanupSafeTerminalStateAndCSRF(t *testing.T) {
+	data := &deletionUIData{}
+	handler := NewHandlerWithData(version.Info{}, data)
+	get := httptest.NewRequest(http.MethodGet, "http://example.com/runs/crt_ui", nil)
+	getResponse := httptest.NewRecorder()
+	handler.ServeHTTP(getResponse, get)
+	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(getResponse.Body.String())
+	if len(match) != 2 || !strings.Contains(getResponse.Body.String(), "Delete verified local run") {
+		t.Fatalf("delete action missing: %s", getResponse.Body.String())
+	}
+	values := url.Values{"csrf_token": {match[1]}}
+	post := httptest.NewRequest(http.MethodPost, "http://example.com/runs/crt_ui/delete", strings.NewReader(values.Encode()))
+	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	post.Header.Set("Origin", "http://example.com")
+	post.AddCookie(getResponse.Result().Cookies()[0])
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, post)
+	if response.Code != http.StatusSeeOther || !data.deleted {
+		t.Fatalf("delete status=%d deleted=%t body=%s", response.Code, data.deleted, response.Body.String())
+	}
+}
+
+func TestScenarioUIPreviewsAndImportsStrictSourceWithCSRF(t *testing.T) {
+	data := &scenarioUIData{}
+	handler := NewHandlerWithData(version.Info{}, data)
+	get := httptest.NewRequest(http.MethodGet, "http://example.com/scenarios", nil)
+	getResponse := httptest.NewRecorder()
+	handler.ServeHTTP(getResponse, get)
+	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(getResponse.Body.String())
+	if len(match) != 2 || !strings.Contains(getResponse.Body.String(), "Custom scenarios") {
+		t.Fatalf("scenario page missing: %s", getResponse.Body.String())
+	}
+	source := webScenarioSource
+	for _, action := range []string{"preview", "import"} {
+		values := url.Values{"csrf_token": {match[1]}, "action": {action}, "source": {source}, "target_id": {"tgt_lab"}, "pipeline_mode": {"phase_b_dispatch"}}
+		post := httptest.NewRequest(http.MethodPost, "http://example.com/scenarios", strings.NewReader(values.Encode()))
+		post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		post.Header.Set("Origin", "http://example.com")
+		post.AddCookie(getResponse.Result().Cookies()[0])
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, post)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", action, response.Code, response.Body.String())
+		}
+	}
+	if !data.previewed || !data.imported {
+		t.Fatalf("previewed=%t imported=%t", data.previewed, data.imported)
+	}
+}
+
 func TestBearerSecurityProtectsEveryApplicationRoute(t *testing.T) {
 	t.Parallel()
 	security := Security{Mode: SecurityBearer, BearerToken: []byte("correct horse battery staple"), SecureCookies: true}
@@ -363,7 +448,8 @@ func (missingArtifactData) GetRun(context.Context, string) (domain.Run, error) {
 
 type runUIData struct {
 	diagnosticData
-	pattern string
+	pattern   string
+	cancelled bool
 }
 
 func (d *runUIData) ReadyStatus() (bool, string) { return true, "" }
@@ -374,8 +460,55 @@ func (d *runUIData) StartBuiltin(_ context.Context, targetID, pattern, mode stri
 	d.pattern = pattern
 	return domain.Run{ID: "crt_ui", ShortToken: "00000001", Status: domain.RunQueued, CleanupStatus: domain.CleanupNotRequired}, nil
 }
+func (d *runUIData) GetRun(context.Context, string) (domain.Run, error) {
+	return domain.Run{ID: "crt_ui", ShortToken: "00000001", Status: domain.RunObserving, CleanupStatus: domain.CleanupUnknown}, nil
+}
+func (d *runUIData) CancelRun(_ context.Context, id string) error {
+	if id != "crt_ui" {
+		return errors.New("not found")
+	}
+	d.cancelled = true
+	return nil
+}
 
 type sseData struct{ runUIData }
+
+type deletionUIData struct {
+	runUIData
+	deleted bool
+}
+
+type scenarioUIData struct {
+	runUIData
+	previewed bool
+	imported  bool
+}
+
+func (d *scenarioUIData) ListScenarios(context.Context) ([]domain.ScenarioRecord, error) {
+	if !d.imported {
+		return nil, nil
+	}
+	return []domain.ScenarioRecord{{ID: "scn_sample", Name: "sample", APIVersion: "corrtest.oscar/v1alpha1", SHA256: "abc"}}, nil
+}
+func (d *scenarioUIData) PreviewScenario(_ context.Context, targetID string, document scenario.Scenario, mode string) (compiler.Plan, error) {
+	d.previewed = true
+	return compiler.Plan{APIVersion: "corrtest.oscar/v1alpha1", Pattern: document.Pattern, MutationBudget: compiler.MutationBudget{Rules: 2, Alerts: 9}}, nil
+}
+func (d *scenarioUIData) ImportScenario(_ context.Context, source []byte, document scenario.Scenario) (domain.ScenarioRecord, error) {
+	d.imported = true
+	return domain.ScenarioRecord{ID: "scn_sample", Name: document.Name, APIVersion: document.APIVersion, SourceDocument: string(source), SHA256: "abc"}, nil
+}
+
+func (d *deletionUIData) GetRun(context.Context, string) (domain.Run, error) {
+	return domain.Run{ID: "crt_ui", ShortToken: "00000001", Status: domain.RunCompleted, Verdict: domain.VerdictPass, CleanupStatus: domain.CleanupClean}, nil
+}
+func (d *deletionUIData) DeleteRun(_ context.Context, id string) error {
+	if id != "crt_ui" {
+		return errors.New("not found")
+	}
+	d.deleted = true
+	return nil
+}
 
 func (sseData) GetRun(context.Context, string) (domain.Run, error) {
 	return domain.Run{ID: "crt_ui", ShortToken: "00000001", Status: domain.RunCompleted, Verdict: domain.VerdictPass, CleanupStatus: domain.CleanupClean}, nil

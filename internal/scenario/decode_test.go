@@ -49,11 +49,13 @@ func TestDecodeStrictCustomScenario(t *testing.T) {
 
 func TestDecodeRejectsUnsafeOrAmbiguousDocuments(t *testing.T) {
 	tests := map[string]string{
-		"unknown field": strings.Replace(validCustom, "pattern: flood", "pattern: flood\nunknown: true", 1),
-		"duplicate key": strings.Replace(validCustom, "pattern: flood", "pattern: flood\npattern: threshold", 1),
-		"multiple docs": validCustom + "\n---\n" + validCustom,
-		"alias":         strings.Replace(validCustom, "labels: {site: lab-a}", "labels: &labels {site: lab-a}\n    events:\n      - {role: interface_down, status: firing, labels: *labels}", 1),
-		"too large":     strings.Repeat("x", (1<<20)+1),
+		"unknown field":  strings.Replace(validCustom, "pattern: flood", "pattern: flood\nunknown: true", 1),
+		"duplicate key":  strings.Replace(validCustom, "pattern: flood", "pattern: flood\npattern: threshold", 1),
+		"multiple docs":  validCustom + "\n---\n" + validCustom,
+		"alias":          strings.Replace(validCustom, "labels: {site: lab-a}", "labels: &labels {site: lab-a}\n    events:\n      - {role: interface_down, status: firing, labels: *labels}", 1),
+		"too large":      strings.Repeat("x", (1<<20)+1),
+		"empty cases":    strings.Replace(validCustom, strings.Split(validCustom, "cases:")[1], " []\n", 1),
+		"reserved label": strings.Replace(validCustom, "labels: {site: lab-a}", "labels: {oscar_test_run_id: forged}", 1),
 	}
 	for name, input := range tests {
 		t.Run(name, func(t *testing.T) {

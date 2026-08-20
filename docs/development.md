@@ -40,7 +40,7 @@ Both GitHub Actions and GitLab CI/CD call these Make targets rather than duplica
 
 ## Reproducible builds
 
-Build metadata is derived from the current Git commit. `SOURCE_DATE_EPOCH` uses the commit timestamp. Release archives stage only the executable and README beneath an `oscar-corrtest/` directory, normalize member order, ownership, and timestamps with GNU tar, and remove gzip timestamps with `gzip -n`.
+Build metadata is derived from the current Git commit. `SOURCE_DATE_EPOCH` uses the commit timestamp. Release archives stage the executable, README, operator/built-in/schema documentation, systemd unit, and Containerfile beneath an `oscar-corrtest/` directory, normalize member order, ownership, and timestamps with GNU tar, and remove gzip timestamps with `gzip -n`.
 
 ```bash
 make package checksums

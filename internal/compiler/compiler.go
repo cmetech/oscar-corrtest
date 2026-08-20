@@ -100,6 +100,14 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 				return Plan{}, fmt.Errorf("case %q overrides reserved label %q", source.Name, key)
 			}
 		}
+		if len(source.SuppressForNotifiers) > 16 || len(source.TagForNotifiers) > 16 {
+			return Plan{}, fmt.Errorf("case %q exceeds the notifier budget", source.Name)
+		}
+		for _, notifier := range append(append([]string{}, source.SuppressForNotifiers...), source.TagForNotifiers...) {
+			if strings.TrimSpace(notifier) != notifier || notifier == "" || len(notifier) > 100 {
+				return Plan{}, fmt.Errorf("case %q contains an invalid notifier name", source.Name)
+			}
+		}
 		caseCode, short := strings.ToUpper(source.Code), strings.ToUpper(run.ShortToken)
 		ruleName := fmt.Sprintf("corrtest-%s-%s-%s", input.Pattern, strings.ToLower(caseCode), strings.ToLower(short))
 		names := map[string]string{}
@@ -108,12 +116,24 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 				names[event.Role] = physicalName(patternCode, caseCode, event.Role, short)
 			}
 		}
+		requiredRoles := map[string][]string{
+			"co_occurrence": {"disk_full", "cpu_high"},
+			"sequence":      {"login_failure", "privileged_command"},
+			"parent_child":  {"parent", "child"},
+		}
+		if roles := requiredRoles[input.Pattern]; len(roles) > 0 {
+			for _, role := range roles {
+				if names[role] == "" {
+					names[role] = physicalName(patternCode, caseCode, role, short)
+				}
+			}
+		}
 		syntheticName := physicalName(patternCode, caseCode, "synthetic", short)
 		if input.Pattern == "parent_child" {
 			syntheticName = ""
 		}
 		item := CasePlan{Name: source.Name, Code: caseCode, Polarity: source.Polarity, Assertions: source.Assertions}
-		item.Rule = RulePlan{Name: ruleName, Pattern: input.Pattern, WindowSeconds: int(source.Window / time.Second), GroupBy: source.GroupBy, MatchCriteria: matchCriteria(input.Pattern, names), EmitAlertName: syntheticName, EmitLabels: identityLabels(run, input, source, ruleName, "synthetic", "synthetic_parent"), Description: fmt.Sprintf("Temporary OSCAR correlation test rule; run=%s scenario=%s case=%s", run.ID, input.Name, source.Name)}
+		item.Rule = RulePlan{Name: ruleName, Pattern: input.Pattern, WindowSeconds: int(source.Window / time.Second), GroupBy: source.GroupBy, MatchCriteria: matchCriteria(input.Pattern, names, source), EmitAlertName: syntheticName, EmitLabels: identityLabels(run, input, source, ruleName, "synthetic", "synthetic_parent"), Description: fmt.Sprintf("Temporary OSCAR correlation test rule; run=%s scenario=%s case=%s", run.ID, input.Name, source.Name)}
 		for index, event := range events {
 			labels := identityLabels(run, input, source, ruleName, "source", event.Role)
 			for key, value := range source.Labels {
@@ -157,7 +177,7 @@ func physicalName(patternCode, caseCode, role, short string) string {
 	}
 	return fmt.Sprintf("CORRTEST_%s_%s_%s_%s", patternCode, caseCode, role, short)
 }
-func matchCriteria(pattern string, names map[string]string) map[string]any {
+func matchCriteria(pattern string, names map[string]string, source scenario.Case) map[string]any {
 	first := func() string {
 		values := uniqueNames(names)
 		if len(values) == 0 {
@@ -188,7 +208,7 @@ func matchCriteria(pattern string, names map[string]string) map[string]any {
 	case "absence":
 		return map[string]any{"expected_match": map[string]string{"alertname": first()}, "expected_every_seconds": 10, "absent_for_seconds": 30}
 	case "parent_child":
-		return map[string]any{"parent_match": map[string]string{"alertname": names["parent"]}, "child_matches": []any{map[string]string{"alertname": names["child"]}}, "suppress_children_for_notifiers": []string{"email"}, "tag_children_for_notifiers": []string{}}
+		return map[string]any{"parent_match": map[string]string{"alertname": names["parent"]}, "child_matches": []any{map[string]string{"alertname": names["child"]}}, "suppress_children_for_notifiers": append([]string(nil), source.SuppressForNotifiers...), "tag_children_for_notifiers": append([]string(nil), source.TagForNotifiers...)}
 	default:
 		return nil
 	}

@@ -18,6 +18,17 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/web"
 )
 
+const commandScenarioSource = `apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: sample
+suite: custom
+pattern: flood
+maxDuration: 90s
+cases:
+  - {name: positive, code: P01, polarity: positive, role: interface_down, repeat: 5, window: 30s, assertions: [{kind: synthetic-alert-count, equals: 1}]}
+  - {name: negative, code: N01, polarity: negative, role: interface_down, repeat: 4, window: 30s, assertions: [{kind: synthetic-alert-count, equals: 0}]}
+`
+
 func TestVersionCommand(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	app := New(&stdout, &stderr, version.Info{Version: "v1.2.3", Commit: "abc", BuildDate: "now"}, nil)
@@ -57,7 +68,7 @@ func TestScenarioListPlanAndRunCommandsShareRuntimeContracts(t *testing.T) {
 
 func TestScenarioValidateAcceptsStrictCustomDocument(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "scenario.yaml")
-	if err := os.WriteFile(path, []byte("apiVersion: corrtest.oscar/v1alpha1\nkind: CorrelationScenario\nname: sample\nsuite: custom\npattern: flood\nmaxDuration: 90s\ncases: []\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(commandScenarioSource), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
@@ -72,7 +83,7 @@ func TestScenarioValidateAcceptsStrictCustomDocument(t *testing.T) {
 
 func TestPlanAcceptsCustomScenarioFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "scenario.yaml")
-	content := "apiVersion: corrtest.oscar/v1alpha1\nkind: CorrelationScenario\nname: sample\nsuite: custom\npattern: flood\nmaxDuration: 90s\ncases: []\n"
+	content := commandScenarioSource
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -157,15 +168,45 @@ func TestRunsListShowAndBackupCommands(t *testing.T) {
 	}
 }
 
+func TestRetentionRequiresExplicitApplyConfirmation(t *testing.T) {
+	cutoff := "2026-08-01T00:00:00Z"
+	for _, test := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"preview", []string{"retention", "preview", "--before", cutoff, "--output", "json"}, `"id":"crt_old"`},
+		{"apply", []string{"retention", "apply", "--before", cutoff, "--yes", "--output", "json"}, `"crt_old"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			fake := &fakeRuntime{retentionRuns: []domain.Run{{ID: "crt_old", Status: domain.RunCompleted, CleanupStatus: domain.CleanupClean}}}
+			open := func(context.Context, config.Settings) (ApplicationRuntime, error) { return fake, nil }
+			app := NewConfigured(&stdout, &stderr, version.Info{}, nil, open, testGetenv)
+			if code := app.Run(context.Background(), test.args); code != 0 {
+				t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+			}
+			if !strings.Contains(stdout.String(), test.want) {
+				t.Fatalf("stdout=%q missing %q", stdout.String(), test.want)
+			}
+			if test.name == "apply" && !fake.retentionApplied {
+				t.Fatal("retention apply was not invoked")
+			}
+		})
+	}
+}
+
 type fakeRuntime struct {
-	createdTarget  domain.TargetInput
-	targets        []domain.Target
-	runs           []domain.Run
-	lastFilter     domain.RunFilter
-	backupPath     string
-	closed         bool
-	executedRun    domain.Run
-	customScenario scenario.Scenario
+	createdTarget    domain.TargetInput
+	targets          []domain.Target
+	runs             []domain.Run
+	lastFilter       domain.RunFilter
+	backupPath       string
+	closed           bool
+	executedRun      domain.Run
+	customScenario   scenario.Scenario
+	retentionRuns    []domain.Run
+	retentionApplied bool
 }
 
 func (f *fakeRuntime) CreateTarget(_ context.Context, input domain.TargetInput) (domain.Target, error) {
@@ -207,6 +248,17 @@ func (f *fakeRuntime) PreviewScenario(_ context.Context, targetID string, docume
 func (f *fakeRuntime) ExecuteScenario(_ context.Context, targetID string, document scenario.Scenario, mode string) (domain.Run, error) {
 	f.customScenario = document
 	return f.executedRun, nil
+}
+func (f *fakeRuntime) PreviewRetention(context.Context, time.Time) ([]domain.Run, error) {
+	return f.retentionRuns, nil
+}
+func (f *fakeRuntime) ApplyRetention(context.Context, time.Time) ([]string, error) {
+	f.retentionApplied = true
+	ids := make([]string, 0, len(f.retentionRuns))
+	for _, run := range f.retentionRuns {
+		ids = append(ids, run.ID)
+	}
+	return ids, nil
 }
 
 func testGetenv(key string) string {

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
@@ -14,6 +15,69 @@ import (
 )
 
 const outputAPIVersion = "corrtest.oscar/v1alpha1"
+
+type retentionRuntime interface {
+	PreviewRetention(context.Context, time.Time) ([]domain.Run, error)
+	ApplyRetention(context.Context, time.Time) ([]string, error)
+}
+
+func (a *App) runRetention(ctx context.Context, args []string) int {
+	if len(args) == 0 || (args[0] != "preview" && args[0] != "apply") {
+		fmt.Fprintln(a.stderr, "usage: oscar-corrtest retention <preview|apply> --before <RFC3339> [--yes]")
+		return 2
+	}
+	action := args[0]
+	flags := flag.NewFlagSet("retention "+action, flag.ContinueOnError)
+	flags.SetOutput(a.stderr)
+	configPath, dataDir := commonConfigFlags(flags)
+	cutoffValue := flags.String("before", "", "delete only eligible runs created before this RFC3339 time")
+	yes := flags.Bool("yes", false, "confirm retention deletion")
+	output := flags.String("output", "human", "human or json")
+	if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 || *cutoffValue == "" || !validOutput(*output) || (action == "apply" && !*yes) || (action == "preview" && *yes) {
+		fmt.Fprintln(a.stderr, "retention apply requires --yes; preview does not accept it")
+		return 2
+	}
+	cutoff, err := time.Parse(time.RFC3339, *cutoffValue)
+	if err != nil {
+		fmt.Fprintln(a.stderr, "retention cutoff must be RFC3339")
+		return 2
+	}
+	application, code := a.openRuntime(ctx, config.Overrides{ConfigPath: *configPath, DataDir: *dataDir})
+	if code != 0 {
+		return code
+	}
+	defer application.Close()
+	retention, ok := application.(retentionRuntime)
+	if !ok {
+		fmt.Fprintln(a.stderr, "retention is unavailable")
+		return 1
+	}
+	if action == "preview" {
+		runs, err := retention.PreviewRetention(ctx, cutoff.UTC())
+		if err != nil {
+			fmt.Fprintf(a.stderr, "retention preview: %v\n", err)
+			return 1
+		}
+		if *output == "json" {
+			return a.writeJSON(runs)
+		}
+		fmt.Fprintf(a.stdout, "%d cleanup-safe terminal runs are eligible\n", len(runs))
+		for _, run := range runs {
+			fmt.Fprintln(a.stdout, run.ID)
+		}
+		return 0
+	}
+	deleted, err := retention.ApplyRetention(ctx, cutoff.UTC())
+	if err != nil {
+		fmt.Fprintf(a.stderr, "retention apply: %v\n", err)
+		return 1
+	}
+	if *output == "json" {
+		return a.writeJSON(deleted)
+	}
+	fmt.Fprintf(a.stdout, "Deleted %d cleanup-safe terminal runs\n", len(deleted))
+	return 0
+}
 
 func (a *App) runTarget(ctx context.Context, args []string) int {
 	if len(args) == 0 {

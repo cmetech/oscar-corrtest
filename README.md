@@ -26,6 +26,7 @@ export OSCAR_API_TOKEN='...'
 ```
 
 Open <http://127.0.0.1:8787>. Runs started from the browser continue if the browser disconnects; reconnecting replays persisted events.
+The Scenarios page validates, previews, and imports strict YAML/JSON. Active run pages provide cancellation with bounded cleanup; cleanup-safe terminal runs can be deleted only after local artifact verification.
 
 ## What is tested
 
@@ -64,11 +65,13 @@ oscar-corrtest cleanup retry <run-id>
 oscar-corrtest export <run-id> --output ./run-evidence.zip
 oscar-corrtest verify-bundle ./run-evidence.zip
 oscar-corrtest backup --output ./corrtest-backup.db
+oscar-corrtest retention preview --before 2026-08-01T00:00:00Z
+oscar-corrtest retention apply --before 2026-08-01T00:00:00Z --yes
 ```
 
 Custom YAML/JSON is strict and bounded: unknown/duplicate keys, aliases, multiple documents, reserved-label overrides, unsafe durations, and oversized inputs are rejected. The release archive includes the JSON Schema at `docs/schema/correlation-scenario.schema.json`.
 
-Evidence ZIPs are atomic and non-overwriting. They contain the canonical JSON report, immutable plan, timeline, offline HTML, JUnit XML, and a SHA-256 manifest. Run deletion requires an exact ID, `--yes`, a terminal clean/not-required cleanup state, and verified local artifacts.
+Evidence ZIPs are atomic and non-overwriting. They contain the canonical JSON report, immutable plan, timeline, offline HTML, JUnit XML, and a SHA-256 manifest. Run deletion requires an exact ID, `--yes`, a terminal clean/not-required cleanup state, and verified local artifacts. Retention uses the same gate, provides a separate preview, and processes no more than 500 exact candidates per invocation.
 
 SQLite uses WAL, foreign keys, a busy timeout, and full synchronous writes. Keep the data directory on a local filesystem. The online database backup does not include separate run artifact directories; preserve the whole state directory or export the required runs.
 

@@ -16,16 +16,18 @@ type Scenario struct {
 
 // Case declares stimuli and a typed expected outcome.
 type Case struct {
-	Name       string            `json:"name" yaml:"name"`
-	Code       string            `json:"code" yaml:"code"`
-	Polarity   string            `json:"polarity" yaml:"polarity"`
-	Role       string            `json:"role" yaml:"role"`
-	Repeat     int               `json:"repeat" yaml:"repeat"`
-	Window     time.Duration     `json:"window" yaml:"window"`
-	GroupBy    []string          `json:"groupBy" yaml:"groupBy"`
-	Labels     map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
-	Assertions []Assertion       `json:"assertions" yaml:"assertions"`
-	Events     []Event           `json:"events,omitempty" yaml:"events,omitempty"`
+	Name                 string            `json:"name" yaml:"name"`
+	Code                 string            `json:"code" yaml:"code"`
+	Polarity             string            `json:"polarity" yaml:"polarity"`
+	Role                 string            `json:"role" yaml:"role"`
+	Repeat               int               `json:"repeat" yaml:"repeat"`
+	Window               time.Duration     `json:"window" yaml:"window"`
+	GroupBy              []string          `json:"groupBy" yaml:"groupBy"`
+	Labels               map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
+	SuppressForNotifiers []string          `json:"suppressForNotifiers,omitempty" yaml:"suppressForNotifiers,omitempty"`
+	TagForNotifiers      []string          `json:"tagForNotifiers,omitempty" yaml:"tagForNotifiers,omitempty"`
+	Assertions           []Assertion       `json:"assertions" yaml:"assertions"`
+	Events               []Event           `json:"events,omitempty" yaml:"events,omitempty"`
 }
 
 // Event is one deterministic alert occurrence. Varying labels are explicit

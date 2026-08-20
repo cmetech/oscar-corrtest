@@ -50,6 +50,7 @@ type Options struct {
 	PollInterval      time.Duration
 	ObservationWindow time.Duration
 	Stabilization     time.Duration
+	CleanupTimeout    time.Duration
 	Now               func() time.Time
 	Sleep             func(context.Context, time.Duration) error
 }
@@ -69,6 +70,9 @@ func New(store Store, api API, options Options) *Runner {
 	}
 	if options.Stabilization <= 0 {
 		options.Stabilization = 5 * time.Second
+	}
+	if options.CleanupTimeout <= 0 {
+		options.CleanupTimeout = 30 * time.Second
 	}
 	if options.Now == nil {
 		options.Now = time.Now
@@ -108,18 +112,29 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 	started := r.opts.Now().UTC()
 	capJSON, _ := json.Marshal(capabilities)
 	planJSON, _ := json.Marshal(plan)
-	if err := r.store.SetRunExecutionDocuments(ctx, run.ID, capJSON, planJSON, started); err != nil {
+	startupCtx, startupCancel := context.WithTimeout(context.WithoutCancel(ctx), r.opts.CleanupTimeout)
+	defer startupCancel()
+	if err := r.store.SetRunExecutionDocuments(startupCtx, run.ID, capJSON, planJSON, started); err != nil {
 		return err
 	}
-	if err := r.transition(ctx, run.ID, domain.RunPreflight, "Target preflight started"); err != nil {
+	if err := r.transition(startupCtx, run.ID, domain.RunPreflight, "Target preflight started"); err != nil {
 		return err
+	}
+	if ctx.Err() != nil {
+		if err := r.finishWithoutMutation(startupCtx, run, plan, capabilities, domain.VerdictError, ctx.Err().Error()); err != nil {
+			return err
+		}
+		return ctx.Err()
+	}
+	if len(plan.Cases) == 0 {
+		return r.finishWithoutMutation(ctx, run, plan, capabilities, domain.VerdictError, "compiled plan contains no executable cases")
 	}
 	if !capabilities.Ready || !capabilities.LabelsSurvived || capabilities.PipelineMode != "phase_b_dispatch" {
 		explanation := "required Phase-B readiness and reserved-label survival were not proven"
 		return r.finishWithoutMutation(ctx, run, plan, capabilities, domain.VerdictInconclusive, explanation)
 	}
 
-	if err := r.transition(ctx, run.ID, domain.RunSettingUp, "Creating temporary correlation rules"); err != nil {
+	if err := r.transition(startupCtx, run.ID, domain.RunSettingUp, "Creating temporary correlation rules"); err != nil {
 		return err
 	}
 	resources := make([]domain.Resource, 0, len(plan.Cases))
@@ -138,23 +153,25 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 			candidates, reconcileErr := r.api.FindRules(ctx, item.Rule.Name)
 			if reconcileErr != nil || len(candidates) != 1 || candidates[0].Name != item.Rule.Name || candidates[0].Pattern != item.Rule.Pattern || candidates[0].Description != item.Rule.Description {
 				_ = r.store.MarkResourceCleanupError(ctx, resource.ID, "rule create outcome unknown")
+				resources[len(resources)-1].LifecycleState = domain.ResourceUnknown
 				return r.failAndCleanup(ctx, run, plan, capabilities, resources, fmt.Errorf("rule create outcome could not be safely reconciled: %w", err))
 			}
 			created = candidates[0]
 		}
 		if created.Name != item.Rule.Name || created.Description != item.Rule.Description {
 			_ = r.store.MarkResourceCleanupError(ctx, resource.ID, "created rule ownership did not round-trip")
+			resources[len(resources)-1].LifecycleState = domain.ResourceUnknown
 			return r.failAndCleanup(ctx, run, plan, capabilities, resources, fmt.Errorf("created rule ownership mismatch"))
 		}
+		resources[len(resources)-1].ExternalID = strconv.Itoa(created.ID)
 		if err := r.store.AdoptResource(ctx, resource.ID, strconv.Itoa(created.ID), r.opts.Now().UTC()); err != nil {
 			return r.failAndCleanup(ctx, run, plan, capabilities, resources, err)
 		}
-		resources[len(resources)-1].ExternalID = strconv.Itoa(created.ID)
 		resources[len(resources)-1].LifecycleState = domain.ResourceCreated
 	}
 
 	if err := r.transition(ctx, run.ID, domain.RunInjecting, "Sending deterministic source alerts"); err != nil {
-		return err
+		return r.failAndCleanup(ctx, run, plan, capabilities, resources, err)
 	}
 	for _, item := range plan.Cases {
 		var elapsed time.Duration
@@ -180,7 +197,7 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 	}
 
 	if err := r.transition(ctx, run.ID, domain.RunObserving, "Observing OSCAR history and correlation audit"); err != nil {
-		return err
+		return r.failAndCleanup(ctx, run, plan, capabilities, resources, err)
 	}
 	results := make([]caseResult, 0, len(plan.Cases))
 	for _, item := range plan.Cases {
@@ -191,7 +208,7 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 		results = append(results, result)
 	}
 	if err := r.transition(ctx, run.ID, domain.RunAsserting, "Evaluating terminal evidence"); err != nil {
-		return err
+		return r.failAndCleanup(ctx, run, plan, capabilities, resources, err)
 	}
 	verdict := domain.VerdictPass
 	for _, result := range results {
@@ -199,11 +216,16 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 			verdict = domain.VerdictFail
 		}
 	}
-	cleanup, cleanupError := r.cleanup(ctx, run.ID, resources)
+	if ctx.Err() != nil {
+		return r.failAndCleanup(ctx, run, plan, capabilities, resources, ctx.Err())
+	}
+	completionCtx, completionCancel := context.WithTimeout(context.WithoutCancel(ctx), r.opts.CleanupTimeout)
+	defer completionCancel()
+	cleanup, cleanupError := r.cleanup(completionCtx, run.ID, resources)
 	if cleanupError != nil {
 		cleanup = domain.CleanupDirty
 	}
-	return r.complete(ctx, run, plan, capabilities, results, verdict, cleanup, errorString(cleanupError))
+	return r.complete(completionCtx, run, plan, capabilities, results, verdict, cleanup, errorString(cleanupError))
 }
 
 func (r *Runner) observeCase(ctx context.Context, run domain.Run, item compiler.CasePlan, started time.Time) (caseResult, error) {
@@ -325,9 +347,22 @@ func (r *Runner) cleanup(ctx context.Context, runID string, resources []domain.R
 	var failures []string
 	for _, resource := range resources {
 		if resource.ExternalID == "" {
+			if resource.LifecycleState == domain.ResourceProposed {
+				if err := r.store.MarkResourceDeleted(ctx, resource.ID, r.opts.Now().UTC()); err != nil {
+					failures = append(failures, resource.ExternalName)
+				}
+				continue
+			}
+			_ = r.store.MarkResourceCleanupError(ctx, resource.ID, "external rule identity is unknown")
+			failures = append(failures, resource.ExternalName)
 			continue
 		}
-		id, _ := strconv.Atoi(resource.ExternalID)
+		id, err := strconv.Atoi(resource.ExternalID)
+		if err != nil || id <= 0 {
+			_ = r.store.MarkResourceCleanupError(ctx, resource.ID, "external rule identity is invalid")
+			failures = append(failures, resource.ExternalName)
+			continue
+		}
 		if err := r.api.DeleteRule(ctx, id); err != nil {
 			_ = r.store.MarkResourceCleanupError(ctx, resource.ID, "delete failed")
 			failures = append(failures, resource.ExternalName)
@@ -344,11 +379,16 @@ func (r *Runner) cleanup(ctx context.Context, runID string, resources []domain.R
 }
 
 func (r *Runner) failAndCleanup(ctx context.Context, run domain.Run, plan compiler.Plan, capabilities CapabilitySnapshot, resources []domain.Resource, cause error) error {
-	cleanup, cleanupErr := r.cleanup(ctx, run.ID, resources)
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.opts.CleanupTimeout)
+	defer cancel()
+	if err := r.transition(cleanupCtx, run.ID, domain.RunCancelling, "Run failed or was cancelled; cleanup required"); err != nil {
+		return fmt.Errorf("persist cancellation before cleanup: %w (original error: %v)", err, cause)
+	}
+	cleanup, cleanupErr := r.cleanup(cleanupCtx, run.ID, resources)
 	if cleanupErr != nil {
 		cleanup = domain.CleanupDirty
 	}
-	if err := r.complete(ctx, run, plan, capabilities, nil, domain.VerdictError, cleanup, cause.Error()); err != nil {
+	if err := r.complete(cleanupCtx, run, plan, capabilities, nil, domain.VerdictError, cleanup, cause.Error()); err != nil {
 		return err
 	}
 	return cause

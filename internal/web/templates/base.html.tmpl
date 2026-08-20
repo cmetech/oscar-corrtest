@@ -30,13 +30,14 @@
       <a href="/"{{if eq .Page "dashboard"}} aria-current="page"{{end}}>Dashboard</a>
 	  <a href="/run-test"{{if eq .Page "run-test"}} aria-current="page"{{end}}>Run test</a>
       <a href="/runs"{{if or (eq .Page "runs") (eq .Page "run-detail")}} aria-current="page"{{end}}>Runs</a>
-      <a href="#" aria-disabled="true">Scenarios</a>
+      <a href="/scenarios"{{if eq .Page "scenarios"}} aria-current="page"{{end}}>Scenarios</a>
       <a href="/targets"{{if eq .Page "targets"}} aria-current="page"{{end}}>Targets</a>
       <a href="/settings"{{if eq .Page "settings"}} aria-current="page"{{end}}>Settings</a>
     </nav>
     <main>
       {{if eq .Page "targets"}}{{template "targets" .}}
 	  {{else if eq .Page "run-test"}}{{template "run-test" .}}
+      {{else if eq .Page "scenarios"}}{{template "scenarios" .}}
       {{else if eq .Page "runs"}}{{template "runs" .}}
       {{else if eq .Page "run-detail"}}{{template "run-detail" .}}
       {{else if eq .Page "settings"}}{{template "settings" .}}

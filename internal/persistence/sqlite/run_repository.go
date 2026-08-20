@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/domain"
@@ -183,7 +184,29 @@ func (d *Database) SetRunExecutionDocuments(ctx context.Context, id string, capa
 	if !json.Valid(capabilities) || !json.Valid(plan) || at.IsZero() {
 		return fmt.Errorf("run execution documents are invalid")
 	}
-	result, err := d.db.ExecContext(ctx, `UPDATE runs SET capability_snapshot_json=?, compiled_plan_json=?, started_at=COALESCE(started_at,?), updated_at=? WHERE id=?`,
+	var document struct {
+		RunID   string `json:"runId"`
+		Pattern string `json:"pattern"`
+		Cases   []struct {
+			Name       string            `json:"name"`
+			Code       string            `json:"code"`
+			Assertions []json.RawMessage `json:"assertions"`
+			Alerts     []struct {
+				Name        string            `json:"name"`
+				Labels      map[string]string `json:"labels"`
+				Annotations map[string]string `json:"annotations"`
+			} `json:"alerts"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(plan, &document); err != nil || document.RunID != id || document.Pattern == "" {
+		return fmt.Errorf("compiled plan identity is invalid")
+	}
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin execution document persistence: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE runs SET capability_snapshot_json=?, compiled_plan_json=?, started_at=COALESCE(started_at,?), updated_at=? WHERE id=?`,
 		string(capabilities), string(plan), formatTime(at), formatTime(at), id)
 	if err != nil {
 		return fmt.Errorf("persist run execution documents: %w", err)
@@ -191,6 +214,52 @@ func (d *Database) SetRunExecutionDocuments(ctx context.Context, id string, capa
 	count, err := result.RowsAffected()
 	if err != nil || count != 1 {
 		return ErrNotFound
+	}
+	for caseIndex, item := range document.Cases {
+		if item.Code == "" || item.Name == "" {
+			return fmt.Errorf("compiled plan case identity is invalid")
+		}
+		caseID := id + ":case:" + item.Code
+		if _, err := tx.ExecContext(ctx, `INSERT INTO run_cases(id,run_id,stable_key,pattern,name,status) VALUES(?,?,?,?,?,?)`,
+			caseID, id, item.Code, document.Pattern, item.Name, "PLANNED"); err != nil {
+			return fmt.Errorf("persist run case %d: %w", caseIndex+1, err)
+		}
+		for assertionIndex, assertion := range item.Assertions {
+			if !json.Valid(assertion) {
+				return fmt.Errorf("compiled assertion %d is invalid", assertionIndex+1)
+			}
+			var identity struct {
+				Kind string `json:"kind"`
+			}
+			if err := json.Unmarshal(assertion, &identity); err != nil || identity.Kind == "" {
+				return fmt.Errorf("compiled assertion %d has no kind", assertionIndex+1)
+			}
+			stableKey := identity.Kind + ":" + strconv.Itoa(assertionIndex+1)
+			assertionID := caseID + ":assertion:" + strconv.Itoa(assertionIndex+1)
+			if _, err := tx.ExecContext(ctx, `INSERT INTO assertions(id,run_id,case_id,stable_key,kind,expected_json) VALUES(?,?,?,?,?,?)`,
+				assertionID, id, caseID, stableKey, identity.Kind, string(assertion)); err != nil {
+				return fmt.Errorf("persist assertion %d: %w", assertionIndex+1, err)
+			}
+		}
+		for alertIndex, alert := range item.Alerts {
+			labels, err := json.Marshal(alert.Labels)
+			if err != nil || alert.Name == "" {
+				return fmt.Errorf("compiled alert %d is invalid", alertIndex+1)
+			}
+			eventID := alert.Annotations["oscar_test_event_id"]
+			if eventID == "" {
+				eventID = caseID + ":event:" + strconv.Itoa(alertIndex+1)
+			}
+			attemptID := caseID + ":attempt:" + strconv.Itoa(alertIndex+1)
+			if _, err := tx.ExecContext(ctx, `INSERT INTO alert_attempts(id,run_id,case_id,event_id,event_index,physical_alert_name,semantic_role,identity_labels_json,send_state,created_at,updated_at)
+				VALUES(?,?,?,?,?,?,?,?,?,?,?)`, attemptID, id, caseID, eventID, alertIndex+1, alert.Name,
+				alert.Labels["oscar_test_alert_role"], string(labels), "PLANNED", formatTime(at), formatTime(at)); err != nil {
+				return fmt.Errorf("persist alert attempt %d: %w", alertIndex+1, err)
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit execution documents: %w", err)
 	}
 	return nil
 }

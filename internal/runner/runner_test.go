@@ -57,6 +57,10 @@ func TestRunnerExecutesFloodCasesAndCleansOwnedRules(t *testing.T) {
 	if len(api.deleted) != 2 || api.imported || api.updated {
 		t.Fatalf("unsafe API lifecycle: %+v", api)
 	}
+	filtered, err := database.ListRuns(context.Background(), domain.RunFilter{Pattern: "flood"})
+	if err != nil || len(filtered) != 1 || filtered[0].ID != run.ID {
+		t.Fatalf("normalized plan rows do not support pattern filtering: runs=%+v err=%v", filtered, err)
+	}
 	events, err := database.ListRunEvents(context.Background(), run.ID)
 	if err != nil || len(events) < 7 || events[len(events)-1].Summary != "Run completed" {
 		t.Fatalf("events=%+v err=%v", events, err)
@@ -90,6 +94,27 @@ func TestRunnerCannotPassWhenPipelineModeIsPhaseA(t *testing.T) {
 	}
 }
 
+func TestRunnerCannotPassAnEmptyCustomPlan(t *testing.T) {
+	database := openDatabase(t)
+	run := newRun()
+	if err := database.CreateRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	plan := compiler.Plan{APIVersion: "corrtest.oscar/v1alpha1", RunID: run.ID, ShortToken: run.ShortToken, Pattern: "flood", Digest: "empty"}
+	api := &fakeAPI{}
+	engine := runner.New(database, api, runner.Options{PollInterval: time.Millisecond, ObservationWindow: time.Millisecond})
+	if err := engine.Execute(context.Background(), run, plan, runner.CapabilitySnapshot{PipelineMode: "phase_b_dispatch", Ready: true, LabelsSurvived: true}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := database.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Verdict != domain.VerdictError || stored.CleanupStatus != domain.CleanupNotRequired || api.created != 0 {
+		t.Fatalf("empty plan produced unsafe outcome: run=%+v created=%d", stored, api.created)
+	}
+}
+
 func TestRunnerReconcilesLostCreateResponseByExactOwnership(t *testing.T) {
 	database := openDatabase(t)
 	run := newRun()
@@ -110,6 +135,88 @@ func TestRunnerReconcilesLostCreateResponseByExactOwnership(t *testing.T) {
 		if resource.ExternalID == "" || resource.LifecycleState != domain.ResourceDeleted {
 			t.Fatalf("lost create was not safely adopted and deleted: %+v", resource)
 		}
+	}
+}
+
+func TestRunnerDoesNotClaimCleanWhenLostCreateCannotBeReconciled(t *testing.T) {
+	database := openDatabase(t)
+	run := newRun()
+	if err := database.CreateRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	plan, _ := compiler.Compile(run, scenario.Builtin("flood"), compiler.Capabilities{PipelineMode: "phase_b_dispatch"})
+	api := &fakeAPI{createError: errors.New("response lost after create"), hideReconciled: true}
+	engine := runner.New(database, api, runner.Options{PollInterval: time.Millisecond, ObservationWindow: time.Millisecond})
+	if err := engine.Execute(context.Background(), run, plan, runner.CapabilitySnapshot{PipelineMode: "phase_b_dispatch", Ready: true, LabelsSurvived: true}); err == nil {
+		t.Fatal("expected unreconciled create to fail")
+	}
+	stored, err := database.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Verdict != domain.VerdictError || stored.CleanupStatus != domain.CleanupDirty {
+		t.Fatalf("unreconciled create must remain dirty: %+v", stored)
+	}
+	resources, err := database.ListResources(context.Background(), run.ID)
+	if err != nil || len(resources) != 1 || resources[0].LifecycleState != domain.ResourceUnknown {
+		t.Fatalf("unknown resource evidence was lost: resources=%+v err=%v", resources, err)
+	}
+}
+
+func TestRunnerUsesDetachedBoundedContextToCleanupAfterCancellation(t *testing.T) {
+	database := openDatabase(t)
+	run := newRun()
+	if err := database.CreateRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	plan, _ := compiler.Compile(run, scenario.Builtin("flood"), compiler.Capabilities{PipelineMode: "phase_b_dispatch"})
+	ctx, cancel := context.WithCancel(context.Background())
+	api := &fakeAPI{}
+	engine := runner.New(database, api, runner.Options{
+		PollInterval:      time.Millisecond,
+		ObservationWindow: time.Millisecond,
+		CleanupTimeout:    time.Second,
+		Sleep: func(context.Context, time.Duration) error {
+			cancel()
+			return context.Canceled
+		},
+	})
+	if err := engine.Execute(ctx, run, plan, runner.CapabilitySnapshot{PipelineMode: "phase_b_dispatch", Ready: true, LabelsSurvived: true}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("execute error=%v, want context cancellation", err)
+	}
+	stored, err := database.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != domain.RunCompleted || stored.Verdict != domain.VerdictError || stored.CleanupStatus != domain.CleanupClean {
+		t.Fatalf("canceled run did not persist clean terminal evidence: %+v", stored)
+	}
+	if len(api.deleted) != 2 {
+		t.Fatalf("created rules were not cleaned after cancellation: deleted=%v", api.deleted)
+	}
+}
+
+func TestRunnerPersistsTerminalNoMutationEvidenceWhenAlreadyCancelled(t *testing.T) {
+	database := openDatabase(t)
+	run := newRun()
+	if err := database.CreateRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	plan, _ := compiler.Compile(run, scenario.Builtin("flood"), compiler.Capabilities{PipelineMode: "phase_b_dispatch"})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	api := &fakeAPI{}
+	err := runner.New(database, api, runner.Options{CleanupTimeout: time.Second}).Execute(ctx, run, plan,
+		runner.CapabilitySnapshot{PipelineMode: "phase_b_dispatch", Ready: true, LabelsSurvived: true})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("execute error=%v, want context cancellation", err)
+	}
+	stored, getErr := database.GetRun(context.Background(), run.ID)
+	if getErr != nil {
+		t.Fatal(getErr)
+	}
+	if stored.Status != domain.RunCompleted || stored.Verdict != domain.VerdictError || stored.CleanupStatus != domain.CleanupNotRequired || api.created != 0 {
+		t.Fatalf("pre-cancelled run did not terminate safely: run=%+v created=%d", stored, api.created)
 	}
 }
 
@@ -172,6 +279,7 @@ type fakeAPI struct {
 	runID                    string
 	createError              error
 	reconciled               oscar.Rule
+	hideReconciled           bool
 }
 
 func (f *fakeAPI) ValidateRule(context.Context, compiler.RulePlan) error { return nil }
@@ -187,6 +295,9 @@ func (f *fakeAPI) CreateRule(_ context.Context, rule compiler.RulePlan) (oscar.R
 }
 
 func (f *fakeAPI) FindRules(_ context.Context, name string) ([]oscar.Rule, error) {
+	if f.hideReconciled {
+		return nil, nil
+	}
 	if f.reconciled.Name == name {
 		return []oscar.Rule{f.reconciled}, nil
 	}

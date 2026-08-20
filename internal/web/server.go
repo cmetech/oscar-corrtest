@@ -17,8 +17,10 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/evidence"
 	"github.com/cmetech/oscar-corrtest/internal/scenario"
@@ -49,22 +51,27 @@ type Options struct {
 }
 
 type pageData struct {
-	Nonce     string
-	Version   version.Info
-	Page      string
-	Targets   []domain.Target
-	Runs      []domain.Run
-	Run       *domain.Run
-	Events    []domain.RunEvent
-	Artifacts []domain.ArtifactEvidence
-	Readiness readinessView
-	CSRFToken string
-	Error     string
-	Status    string
-	Verdict   string
-	Cleanup   string
-	Pattern   string
-	Scenarios []scenario.Scenario
+	Nonce             string
+	Version           version.Info
+	Page              string
+	Targets           []domain.Target
+	Runs              []domain.Run
+	Run               *domain.Run
+	Events            []domain.RunEvent
+	Artifacts         []domain.ArtifactEvidence
+	Readiness         readinessView
+	CSRFToken         string
+	Error             string
+	Status            string
+	Verdict           string
+	Cleanup           string
+	Pattern           string
+	Scenarios         []scenario.Scenario
+	CanCancel         bool
+	CanDelete         bool
+	ImportedScenarios []domain.ScenarioRecord
+	ScenarioSource    string
+	ScenarioPlan      string
 }
 
 type readinessView struct {
@@ -80,6 +87,20 @@ type runStarter interface {
 
 type runExporter interface {
 	ExportRun(context.Context, string, string) (evidence.Result, error)
+}
+
+type runCanceller interface {
+	CancelRun(context.Context, string) error
+}
+
+type runDeleter interface {
+	DeleteRun(context.Context, string) error
+}
+
+type scenarioManager interface {
+	ListScenarios(context.Context) ([]domain.ScenarioRecord, error)
+	PreviewScenario(context.Context, string, scenario.Scenario, string) (compiler.Plan, error)
+	ImportScenario(context.Context, []byte, scenario.Scenario) (domain.ScenarioRecord, error)
 }
 
 // NewHandler returns the Plan-1 shell with no durable data source.
@@ -213,6 +234,83 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 		}
 		render(w, tmpl, nonce, view)
 	})
+	mux.HandleFunc("GET /scenarios", func(w http.ResponseWriter, r *http.Request) {
+		manager, ok := data.(scenarioManager)
+		if !ok || csrfErr != nil {
+			http.Error(w, "scenario management unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		targets, err := data.ListTargets(r.Context())
+		if err != nil {
+			http.Error(w, "scenario management unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		items, err := manager.ListScenarios(r.Context())
+		if err != nil {
+			http.Error(w, "scenario management unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		render(w, tmpl, nonce, pageData{Version: info, Page: "scenarios", Readiness: readiness(data), Targets: targets,
+			ImportedScenarios: items, CSRFToken: csrfToken(w, r, csrfSecret)})
+	})
+	mux.HandleFunc("POST /scenarios", func(w http.ResponseWriter, r *http.Request) {
+		manager, ok := data.(scenarioManager)
+		if !ok || csrfErr != nil {
+			http.Error(w, "scenario management unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid scenario form", http.StatusBadRequest)
+			return
+		}
+		if !sameOrigin(r) || !validCSRF(r, csrfSecret) {
+			http.Error(w, "request origin or CSRF token is invalid", http.StatusForbidden)
+			return
+		}
+		source := r.FormValue("source")
+		document, decodeErr := scenario.Decode(strings.NewReader(source))
+		view := pageData{Version: info, Page: "scenarios", Readiness: readiness(data), ScenarioSource: source,
+			CSRFToken: csrfToken(w, r, csrfSecret)}
+		view.Targets, _ = data.ListTargets(r.Context())
+		if decodeErr != nil {
+			view.Error = decodeErr.Error()
+			renderStatus(w, tmpl, nonce, http.StatusUnprocessableEntity, view)
+			return
+		}
+		switch r.FormValue("action") {
+		case "preview":
+			mode := r.FormValue("pipeline_mode")
+			if mode != "phase_a_audit_only" && mode != "phase_b_dispatch" {
+				view.Error = "pipeline mode is invalid"
+				renderStatus(w, tmpl, nonce, http.StatusUnprocessableEntity, view)
+				return
+			}
+			plan, err := manager.PreviewScenario(r.Context(), r.FormValue("target_id"), document, mode)
+			if err != nil {
+				view.Error = err.Error()
+				renderStatus(w, tmpl, nonce, http.StatusUnprocessableEntity, view)
+				return
+			}
+			encoded, _ := json.MarshalIndent(plan, "", "  ")
+			view.ScenarioPlan = string(encoded)
+			view.Status = "Preview compiled without contacting or mutating OSCAR"
+		case "import":
+			record, err := manager.ImportScenario(r.Context(), []byte(source), document)
+			if err != nil {
+				view.Error = err.Error()
+				renderStatus(w, tmpl, nonce, http.StatusUnprocessableEntity, view)
+				return
+			}
+			view.Status = "Imported scenario " + record.Name + " by source digest"
+		default:
+			view.Error = "scenario action is invalid"
+			renderStatus(w, tmpl, nonce, http.StatusUnprocessableEntity, view)
+			return
+		}
+		view.ImportedScenarios, _ = manager.ListScenarios(r.Context())
+		render(w, tmpl, nonce, view)
+	})
 	mux.HandleFunc("POST /runs", func(w http.ResponseWriter, r *http.Request) {
 		starter, ok := data.(runStarter)
 		if !ok || csrfErr != nil {
@@ -260,7 +358,58 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 			renderStatus(w, tmpl, nonce, http.StatusServiceUnavailable, pageData{Version: info, Page: "run-detail", Run: &run, Events: events, Error: err.Error(), Readiness: readiness(data)})
 			return
 		}
-		render(w, tmpl, nonce, pageData{Version: info, Page: "run-detail", Run: &run, Events: events, Artifacts: artifacts, Readiness: readiness(data)})
+		view := pageData{Version: info, Page: "run-detail", Run: &run, Events: events, Artifacts: artifacts, Readiness: readiness(data)}
+		_, canCancel := data.(runCanceller)
+		_, canDelete := data.(runDeleter)
+		view.CanCancel = canCancel && run.Status != domain.RunCompleted && run.Status != domain.RunInterrupted
+		view.CanDelete = canDelete && (run.Status == domain.RunCompleted || run.Status == domain.RunInterrupted) &&
+			(run.CleanupStatus == domain.CleanupClean || run.CleanupStatus == domain.CleanupNotRequired)
+		if (view.CanCancel || view.CanDelete) && csrfErr == nil {
+			view.CSRFToken = csrfToken(w, r, csrfSecret)
+		}
+		render(w, tmpl, nonce, view)
+	})
+	mux.HandleFunc("POST /runs/{id}/cancel", func(w http.ResponseWriter, r *http.Request) {
+		canceller, ok := data.(runCanceller)
+		if !ok || csrfErr != nil {
+			http.Error(w, "run cancellation unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid cancellation form", http.StatusBadRequest)
+			return
+		}
+		if !sameOrigin(r) || !validCSRF(r, csrfSecret) {
+			http.Error(w, "request origin or CSRF token is invalid", http.StatusForbidden)
+			return
+		}
+		if err := canceller.CancelRun(r.Context(), r.PathValue("id")); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		http.Redirect(w, r, "/runs/"+url.PathEscape(r.PathValue("id")), http.StatusSeeOther)
+	})
+	mux.HandleFunc("POST /runs/{id}/delete", func(w http.ResponseWriter, r *http.Request) {
+		deleter, ok := data.(runDeleter)
+		if !ok || csrfErr != nil {
+			http.Error(w, "run deletion unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid deletion form", http.StatusBadRequest)
+			return
+		}
+		if !sameOrigin(r) || !validCSRF(r, csrfSecret) {
+			http.Error(w, "request origin or CSRF token is invalid", http.StatusForbidden)
+			return
+		}
+		if err := deleter.DeleteRun(r.Context(), r.PathValue("id")); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		http.Redirect(w, r, "/runs", http.StatusSeeOther)
 	})
 	mux.HandleFunc("GET /runs/{id}/export", func(w http.ResponseWriter, r *http.Request) {
 		exporter, ok := data.(runExporter)

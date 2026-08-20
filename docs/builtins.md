@@ -14,3 +14,5 @@ Every built-in creates two temporary, run-owned rules: `P01` proves the expected
 | `threshold` | Three distinct `device` values emit | Repeated value stays below cardinality |
 
 The compiler rewrites all logical roles into run-unique alert names and current OSCAR public-v1 match-criteria keys. Run `oscar-corrtest plan builtin:<pattern> --target <id> --pipeline-mode phase_b_dispatch --output json` to inspect the exact mutation budget and OSCAR filters before execution.
+
+The built-in parent-child case explicitly uses notifier name `email`. If a target uses different notifier names, import a custom parent-child scenario and set `suppressForNotifiers` and/or `tagForNotifiers` to the exact configured OSCAR names; notifier names are never inferred from UI text.

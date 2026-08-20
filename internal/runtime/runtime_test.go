@@ -19,6 +19,17 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/version"
 )
 
+const runtimeScenarioSource = `apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: sample
+suite: custom
+pattern: flood
+maxDuration: 90s
+cases:
+  - {name: positive, code: P01, polarity: positive, role: interface_down, repeat: 5, window: 30s, assertions: [{kind: synthetic-alert-count, equals: 1}]}
+  - {name: negative, code: N01, polarity: negative, role: interface_down, repeat: 4, window: 30s, assertions: [{kind: synthetic-alert-count, equals: 0}]}
+`
+
 func TestOpenCreatesRestrictiveDurableRuntime(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "state")
 	runtime, err := Open(context.Background(), config.Settings{DataDir: dataDir, ListenAddress: "127.0.0.1:8787"}, version.Info{Version: "test"})
@@ -204,7 +215,7 @@ func TestImportScenarioPersistsOriginalSourceOnceByDigest(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer runtime.Close()
-	source := []byte("apiVersion: corrtest.oscar/v1alpha1\nkind: CorrelationScenario\nname: sample\nsuite: custom\npattern: flood\nmaxDuration: 90s\ncases: []\n")
+	source := []byte(runtimeScenarioSource)
 	document, err := scenario.Decode(strings.NewReader(string(source)))
 	if err != nil {
 		t.Fatal(err)
@@ -220,5 +231,48 @@ func TestImportScenarioPersistsOriginalSourceOnceByDigest(t *testing.T) {
 	items, err := runtime.ListScenarios(context.Background())
 	if err != nil || len(items) != 1 {
 		t.Fatalf("items=%+v err=%v", items, err)
+	}
+}
+
+func TestRetentionDeletesOnlyTerminalCleanupSafeRuns(t *testing.T) {
+	runtime, err := Open(context.Background(), config.Settings{DataDir: t.TempDir(), ListenAddress: "127.0.0.1:8787"}, version.Info{Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	clean, err := runtime.CreateRun(context.Background(), "", "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirty, err := runtime.CreateRun(context.Background(), "", "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	completeTestRun(t, runtime, clean.ID, domain.CleanupClean)
+	completeTestRun(t, runtime, dirty.ID, domain.CleanupDirty)
+	before := time.Now().UTC().Add(time.Minute)
+	candidates, err := runtime.PreviewRetention(context.Background(), before)
+	if err != nil || len(candidates) != 1 || candidates[0].ID != clean.ID {
+		t.Fatalf("candidates=%+v err=%v", candidates, err)
+	}
+	deleted, err := runtime.ApplyRetention(context.Background(), before)
+	if err != nil || len(deleted) != 1 || deleted[0] != clean.ID {
+		t.Fatalf("deleted=%v err=%v", deleted, err)
+	}
+	if _, err := runtime.GetRun(context.Background(), dirty.ID); err != nil {
+		t.Fatalf("dirty run was removed: %v", err)
+	}
+}
+
+func completeTestRun(t *testing.T, runtime *Runtime, runID string, cleanup domain.CleanupStatus) {
+	t.Helper()
+	now := time.Now().UTC()
+	for _, state := range []domain.RunStatus{domain.RunPreflight, domain.RunSettingUp, domain.RunInjecting, domain.RunObserving, domain.RunAsserting, domain.RunCleaningUp, domain.RunCompleted} {
+		if err := runtime.database.TransitionRun(context.Background(), runID, state, now, "test transition"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := runtime.database.CompleteRun(context.Background(), runID, domain.VerdictPass, cleanup, json.RawMessage(`{}`), "", now); err != nil {
+		t.Fatal(err)
 	}
 }
