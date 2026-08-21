@@ -28,6 +28,12 @@ func TestInspectScenarioCompilesBothPolaritiesWithoutTarget(t *testing.T) {
 	if len(inspection.Plan.Cases) != 2 || inspection.Plan.Cases[0].Code != "P01" || inspection.Plan.Cases[1].Code != "N01" {
 		t.Fatalf("inspection=%+v", inspection)
 	}
+	if inspection.Plan.RunID != "crt_PREV1EW1000000000000000000" || inspection.Plan.ShortToken != "PREV1EW1" {
+		t.Fatalf("inspection identity=%q/%q", inspection.Plan.RunID, inspection.Plan.ShortToken)
+	}
+	if len(inspection.Operations) == 0 || inspection.Operations[0].Stage != "preflight.validate_rule" {
+		t.Fatalf("inspection operations=%+v", inspection.Operations)
+	}
 	for _, item := range inspection.Plan.Cases {
 		if item.Rule.Name == "" || len(item.Alerts) == 0 || len(item.Assertions) == 0 {
 			t.Fatalf("incomplete case=%+v", item)

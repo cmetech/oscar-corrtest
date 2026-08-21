@@ -139,6 +139,9 @@ func (r *Runtime) LogSystem() *applog.System { return r.logs }
 // Operations returns the value-safe operator controller when configured.
 func (r *Runtime) Operations() *operations.Controller { return r.operations }
 
+// Version returns immutable harness metadata safe to include in request previews.
+func (r *Runtime) Version() string { return r.version }
+
 func (r *Runtime) newOSCARClient(target domain.Target) (*oscar.Client, error) {
 	client, err := oscar.New(target, oscar.Options{HarnessVersion: r.version, Getenv: r.getenv})
 	if err != nil {
