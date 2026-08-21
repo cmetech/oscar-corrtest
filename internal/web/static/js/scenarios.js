@@ -105,9 +105,7 @@
       if (!shouldEnhanceInspectionClick(event)) return;
       event.preventDefault();
       activateInspection(tab.dataset.inspectionTab, false);
-      if (window.history && window.history.replaceState) {
-        window.history.replaceState(null, '', tab.href);
-      }
+      window.location.hash = tab.hash;
     });
     tab.addEventListener('keydown', function (event) {
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
@@ -117,4 +115,11 @@
       activateInspection(inspectionTabs[next].dataset.inspectionTab, true);
     });
   });
+  if (inspectionTabs.length) {
+    var initialInspectionView = 'contract';
+    Array.prototype.forEach.call(inspectionTabs, function (tab) {
+      if (tab.hash === window.location.hash) initialInspectionView = tab.dataset.inspectionTab;
+    });
+    activateInspection(initialInspectionView, false);
+  }
 }());

@@ -85,8 +85,10 @@ pre { overflow: auto; white-space: pre-wrap; }
 .scenario-inspection-tabs a:hover { color: var(--ct-fg); }
 .scenario-inspection-tabs a[aria-selected="true"] { border-bottom-color: var(--ct-accent); color: var(--ct-fg); }
 .scenario-inspection-tabs a:focus-visible { outline: 3px solid var(--ct-accent); outline-offset: -3px; }
+.scenario-inspection-panel { scroll-margin-top: 76px; }
 .scenario-inspection-panel[hidden] { display: none; }
 .scenario-inspection-panel.authoring-view-panel { padding-top: var(--ct-space-2); }
+.scenario-inspection-heading { margin: var(--ct-space-2) 0 var(--ct-space-3); font-size: 16px; }
 .scenario-authoring-link { margin: 0 0 var(--ct-space-3); color: var(--ct-fg-muted); font-size: 11px; }
 .scenario-authoring-link a, .catalog-guidance a { color: var(--ct-fg); text-decoration-color: var(--ct-activity); text-underline-offset: 3px; }
 .contract-summary { display: grid; margin: 0 calc(var(--ct-space-4) * -1); grid-template-columns: repeat(3, minmax(0, 1fr)); }

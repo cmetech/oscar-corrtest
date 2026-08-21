@@ -25,7 +25,6 @@ import (
 
 	"github.com/cmetech/oscar-corrtest/internal/applog"
 	"github.com/cmetech/oscar-corrtest/internal/authoring"
-	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/evidence"
 	"github.com/cmetech/oscar-corrtest/internal/operations"
@@ -35,6 +34,8 @@ import (
 )
 
 var errListenAddressRequired = errors.New("listen address is required")
+
+var errScenarioInspection = errors.New("scenario inspection failed")
 
 // DataSource is the narrow durable history surface consumed by server-rendered pages.
 type DataSource interface {
@@ -91,7 +92,6 @@ type pageData struct {
 	SelectedDraft      bool
 	SelectedExample    bool
 	SelectedLevel      string
-	ScenarioView       string
 	Operations         operations.Snapshot
 	OperationLogs      []applog.Record
 	OperationMessage   string
@@ -125,7 +125,6 @@ type runDeleter interface {
 
 type scenarioManager interface {
 	ListScenarios(context.Context) ([]domain.ScenarioRecord, error)
-	PreviewScenario(context.Context, string, scenario.Scenario, string) (compiler.Plan, error)
 	ImportScenario(context.Context, []byte, scenario.Scenario) (domain.ScenarioRecord, error)
 }
 
@@ -294,8 +293,9 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 		render(w, tmpl, nonce, pageData{Version: info, Page: "authoring", Authoring: &page, AuthoringFilter: filter, AuthoringFields: authoringFields(page.Contract.Fields, filter)})
 	})
 	mux.HandleFunc("GET /scenarios", func(w http.ResponseWriter, r *http.Request) {
-		manager, ok := data.(scenarioManager)
-		if !ok || csrfErr != nil {
+		manager, managerOK := data.(scenarioManager)
+		inspector, inspectorOK := data.(scenarioInspector)
+		if !managerOK || !inspectorOK || csrfErr != nil {
 			http.Error(w, "scenario management unavailable", http.StatusServiceUnavailable)
 			return
 		}
@@ -304,8 +304,12 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 			http.Error(w, "scenario management unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		view, err := scenarioWorkbench(r.Context(), info, data, items, r.URL.Query().Get("selected"), r.URL.Query().Get("view"))
+		view, err := scenarioWorkbench(r.Context(), info, data, inspector, items, r.URL.Query().Get("selected"))
 		if err != nil {
+			if errors.Is(err, errScenarioInspection) {
+				http.Error(w, "scenario inspection is unavailable", http.StatusUnprocessableEntity)
+				return
+			}
 			http.Error(w, "scenario selection is unavailable", http.StatusNotFound)
 			return
 		}
@@ -342,8 +346,9 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 		http.Redirect(w, r, "/scenarios?selected="+url.QueryEscape("draft:"+pattern), http.StatusSeeOther)
 	})
 	mux.HandleFunc("POST /scenarios", func(w http.ResponseWriter, r *http.Request) {
-		manager, ok := data.(scenarioManager)
-		if !ok || csrfErr != nil {
+		manager, managerOK := data.(scenarioManager)
+		inspector, inspectorOK := data.(scenarioInspector)
+		if !managerOK || !inspectorOK || csrfErr != nil {
 			http.Error(w, "scenario management unavailable", http.StatusServiceUnavailable)
 			return
 		}
@@ -362,7 +367,7 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 			http.Error(w, "scenario management unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		view, viewErr := scenarioWorkbench(r.Context(), info, data, items, r.URL.Query().Get("selected"), r.URL.Query().Get("view"))
+		view, viewErr := scenarioWorkbench(r.Context(), info, data, inspector, items, r.URL.Query().Get("selected"))
 		if viewErr != nil {
 			view = pageData{Version: info, Page: "scenarios", Readiness: readiness(data)}
 		}
@@ -386,23 +391,13 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 				renderStatus(w, tmpl, nonce, http.StatusUnprocessableEntity, view)
 				return
 			}
-			if inspector, ok := data.(scenarioInspector); ok {
-				inspection, err := inspector.InspectScenario(r.Context(), []byte(source), mode)
-				if err != nil {
-					view.Error = err.Error()
-					renderStatus(w, tmpl, nonce, http.StatusUnprocessableEntity, view)
-					return
-				}
-				view.ScenarioInspection = &inspection
-			} else {
-				plan, err := manager.PreviewScenario(r.Context(), r.FormValue("target_id"), document, mode)
-				if err != nil {
-					view.Error = err.Error()
-					renderStatus(w, tmpl, nonce, http.StatusUnprocessableEntity, view)
-					return
-				}
-				view.ScenarioInspection = &appruntime.ScenarioInspection{Document: document, Source: source, Plan: plan}
+			inspection, err := inspector.InspectScenario(r.Context(), []byte(source), mode)
+			if err != nil {
+				view.Error = err.Error()
+				renderStatus(w, tmpl, nonce, http.StatusUnprocessableEntity, view)
+				return
 			}
+			view.ScenarioInspection = &inspection
 			view.Status = "Preview compiled without contacting or mutating OSCAR"
 		case "import":
 			record, err := manager.ImportScenario(r.Context(), []byte(source), document)
@@ -435,13 +430,11 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 			if mode != "phase_a_audit_only" && mode != "phase_b_dispatch" {
 				mode = "phase_b_dispatch"
 			}
-			if inspector, ok := data.(scenarioInspector); ok {
-				inspection, inspectErr := inspector.InspectScenario(r.Context(), []byte(source), mode)
-				if inspectErr != nil {
-					view.Error = inspectErr.Error()
-				} else {
-					view.ScenarioInspection = &inspection
-				}
+			inspection, inspectErr := inspector.InspectScenario(r.Context(), []byte(source), mode)
+			if inspectErr != nil {
+				view.Error = inspectErr.Error()
+			} else {
+				view.ScenarioInspection = &inspection
 			}
 			view.Status = "Saved custom scenario " + record.Name + " as an immutable version"
 		default:
@@ -832,17 +825,11 @@ func authoringFields(fields []scenario.FieldDefinition, filter string) []scenari
 	return matched
 }
 
-func scenarioWorkbench(ctx context.Context, info version.Info, data DataSource, imported []domain.ScenarioRecord, selected, inspectionView string) (pageData, error) {
+func scenarioWorkbench(ctx context.Context, info version.Info, data DataSource, inspector scenarioInspector, imported []domain.ScenarioRecord, selected string) (pageData, error) {
 	if selected == "" {
 		selected = "builtin:flood"
 	}
-	if inspectionView == "" {
-		inspectionView = "contract"
-	}
-	if inspectionView != "contract" && inspectionView != "api" && inspectionView != "lifecycle" {
-		return pageData{}, fmt.Errorf("scenario inspection view is unavailable")
-	}
-	view := pageData{Version: info, Page: "scenarios", Readiness: readiness(data), ImportedScenarios: imported, SelectedScenario: selected, ScenarioView: inspectionView}
+	view := pageData{Version: info, Page: "scenarios", Readiness: readiness(data), ImportedScenarios: imported, SelectedScenario: selected}
 	for _, builtin := range scenario.AllBuiltins() {
 		ref := "builtin:" + builtin.Pattern
 		view.ScenarioCatalog = append(view.ScenarioCatalog, scenarioCatalogItem{Ref: ref, Name: builtin.Name, Pattern: builtin.Pattern, Kind: "Built-in", Selected: ref == selected})
@@ -915,14 +902,11 @@ func scenarioWorkbench(ctx context.Context, info version.Info, data DataSource, 
 		return pageData{}, err
 	}
 	view.SelectedName, view.SelectedPattern, view.ScenarioSource = document.Name, document.Pattern, string(source)
-	if inspector, ok := data.(scenarioInspector); ok {
-		inspection, inspectErr := inspector.InspectScenario(ctx, source, "phase_b_dispatch")
-		if inspectErr != nil {
-			view.Error = inspectErr.Error()
-		} else {
-			view.ScenarioInspection = &inspection
-		}
+	inspection, inspectErr := inspector.InspectScenario(ctx, source, "phase_b_dispatch")
+	if inspectErr != nil {
+		return pageData{}, fmt.Errorf("%w: %v", errScenarioInspection, inspectErr)
 	}
+	view.ScenarioInspection = &inspection
 	return view, nil
 }
 

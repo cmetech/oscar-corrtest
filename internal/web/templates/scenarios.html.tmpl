@@ -58,22 +58,23 @@
     </header>
 	{{if .ScenarioInspection}}
 	  <nav class="scenario-inspection-tabs" role="tablist" aria-label="Scenario inspection views">
-	    <a id="scenario-inspection-tab-contract" href="/scenarios?selected={{urlquery .SelectedScenario}}&amp;view=contract" role="tab" data-inspection-tab="contract" aria-controls="scenario-inspection-contract" aria-selected="{{if eq .ScenarioView "contract"}}true{{else}}false{{end}}" tabindex="{{if eq .ScenarioView "contract"}}0{{else}}-1{{end}}">Compiled contract</a>
-	    <a id="scenario-inspection-tab-api" href="/scenarios?selected={{urlquery .SelectedScenario}}&amp;view=api" role="tab" data-inspection-tab="api" aria-controls="scenario-inspection-api" aria-selected="{{if eq .ScenarioView "api"}}true{{else}}false{{end}}" tabindex="{{if eq .ScenarioView "api"}}0{{else}}-1{{end}}">OSCAR API JSON</a>
-	    <a id="scenario-inspection-tab-lifecycle" href="/scenarios?selected={{urlquery .SelectedScenario}}&amp;view=lifecycle" role="tab" data-inspection-tab="lifecycle" aria-controls="scenario-inspection-lifecycle" aria-selected="{{if eq .ScenarioView "lifecycle"}}true{{else}}false{{end}}" tabindex="{{if eq .ScenarioView "lifecycle"}}0{{else}}-1{{end}}">Lifecycle</a>
+	    <a id="scenario-inspection-tab-contract" href="#scenario-inspection-contract" role="tab" data-inspection-tab="contract" aria-controls="scenario-inspection-contract" aria-selected="true" tabindex="0">Compiled contract</a>
+	    <a id="scenario-inspection-tab-api" href="#scenario-inspection-api" role="tab" data-inspection-tab="api" aria-controls="scenario-inspection-api" aria-selected="false" tabindex="-1">OSCAR API JSON</a>
+	    <a id="scenario-inspection-tab-lifecycle" href="#scenario-inspection-lifecycle" role="tab" data-inspection-tab="lifecycle" aria-controls="scenario-inspection-lifecycle" aria-selected="false" tabindex="-1">Lifecycle</a>
 	  </nav>
 	  <p class="scenario-authoring-link">Continue with the <a href="/authoring?section=patterns&amp;pattern={{urlquery .SelectedPattern}}{{if .SelectedLevel}}&amp;level={{urlquery .SelectedLevel}}{{end}}">{{.SelectedPattern}} pattern tutorial</a>.</p>
-	  <section id="scenario-inspection-contract" class="scenario-inspection-panel" role="tabpanel" data-inspection-panel="contract" aria-labelledby="scenario-inspection-tab-contract"{{if ne .ScenarioView "contract"}} hidden{{end}}>
-	  <dl class="contract-summary">
-	    <div><dt>Pattern</dt><dd><code>{{.ScenarioInspection.Plan.Pattern}}</code></dd></div>
-	    <div><dt>Mode</dt><dd><code>phase_b_dispatch</code></dd></div>
-	    <div><dt>Budget</dt><dd>{{.ScenarioInspection.Plan.MutationBudget.Rules}} rules · {{.ScenarioInspection.Plan.MutationBudget.Alerts}} alerts</dd></div>
-	  </dl>
-	  <div class="case-tabs" role="tablist" aria-label="Compiled cases">
-	    {{range $index, $case := .ScenarioInspection.Plan.Cases}}<button type="button" role="tab" id="case-tab-{{$case.Code}}" data-case-tab="{{$case.Code}}" aria-controls="case-panel-{{$case.Code}}" aria-selected="{{if eq $index 0}}true{{else}}false{{end}}" tabindex="{{if eq $index 0}}0{{else}}-1{{end}}"><strong>{{$case.Code}}</strong><span>{{if eq $case.Code "P01"}}Positive trigger{{else}}Negative control{{end}}</span></button>{{end}}
-	  </div>
-	  <div class="case-panels">
-	    {{range $case := .ScenarioInspection.Plan.Cases}}
+	  <section id="scenario-inspection-contract" class="scenario-inspection-panel" role="tabpanel" data-inspection-panel="contract" aria-labelledby="scenario-inspection-tab-contract">
+	    <h3 class="scenario-inspection-heading">Compiled contract</h3>
+	    <dl class="contract-summary">
+	      <div><dt>Pattern</dt><dd><code>{{.ScenarioInspection.Plan.Pattern}}</code></dd></div>
+	      <div><dt>Mode</dt><dd><code>phase_b_dispatch</code></dd></div>
+	      <div><dt>Budget</dt><dd>{{.ScenarioInspection.Plan.MutationBudget.Rules}} rules · {{.ScenarioInspection.Plan.MutationBudget.Alerts}} alerts</dd></div>
+	    </dl>
+	    <div class="case-tabs" role="tablist" aria-label="Compiled cases">
+	      {{range $index, $case := .ScenarioInspection.Plan.Cases}}<button type="button" role="tab" id="case-tab-{{$case.Code}}" data-case-tab="{{$case.Code}}" aria-controls="case-panel-{{$case.Code}}" aria-selected="{{if eq $index 0}}true{{else}}false{{end}}" tabindex="{{if eq $index 0}}0{{else}}-1{{end}}"><strong>{{$case.Code}}</strong><span>{{if eq $case.Code "P01"}}Positive trigger{{else}}Negative control{{end}}</span></button>{{end}}
+	    </div>
+	    <div class="case-panels">
+	      {{range $case := .ScenarioInspection.Plan.Cases}}
         <article class="scenario-case-panel" id="case-panel-{{$case.Code}}" data-case-panel data-case-code="{{$case.Code}}" role="tabpanel" aria-labelledby="case-tab-{{$case.Code}}">
           <header class="case-heading"><div><p class="eyebrow">{{$case.Polarity}} case</p><h3>{{$case.Name}}</h3></div><span class="status-pill">Observe {{duration $case.ObservationWindow}}</span></header>
 
@@ -113,11 +114,11 @@
             <dl class="filter-contract">{{range $key, $value := $case.Inspection.Filters}}<div><dt>{{$key}}</dt><dd><button type="button" class="copy-value" data-copy-value="{{$value}}" title="Copy filter">{{$value}}</button></dd></div>{{end}}</dl>
           </section>
         </article>
-	    {{end}}
-	  </div>
+	      {{end}}
+	    </div>
 	  </section>
-	  <section id="scenario-inspection-api" class="scenario-inspection-panel authoring-view-panel" role="tabpanel" data-inspection-panel="api" aria-labelledby="scenario-inspection-tab-api"{{if ne .ScenarioView "api"}} hidden{{end}}>{{template "inspection-api" .ScenarioInspection}}</section>
-	  <section id="scenario-inspection-lifecycle" class="scenario-inspection-panel authoring-view-panel" role="tabpanel" data-inspection-panel="lifecycle" aria-labelledby="scenario-inspection-tab-lifecycle"{{if ne .ScenarioView "lifecycle"}} hidden{{end}}>{{template "inspection-lifecycle" .ScenarioInspection}}</section>
+	  <section id="scenario-inspection-api" class="scenario-inspection-panel authoring-view-panel" role="tabpanel" data-inspection-panel="api" aria-labelledby="scenario-inspection-tab-api">{{template "inspection-api" .ScenarioInspection}}</section>
+	  <section id="scenario-inspection-lifecycle" class="scenario-inspection-panel authoring-view-panel" role="tabpanel" data-inspection-panel="lifecycle" aria-labelledby="scenario-inspection-tab-lifecycle">{{template "inspection-lifecycle" .ScenarioInspection}}</section>
 	{{else}}
       <div class="contract-empty"><strong>No compiled contract</strong><p>Correct the YAML validation error, then compile the custom scenario again.</p></div>
     {{end}}
