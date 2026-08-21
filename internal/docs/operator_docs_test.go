@@ -27,6 +27,9 @@ func TestOperatorDocsContainPlatformAndLifecycleContracts(t *testing.T) {
 		"0.0.0.0:8787", "unauthenticated", "does not start",
 		"Clone as custom", "P01", "N01", "oscar_test_run_id", "category=corrtest_", "CORRTEST_<PATTERN_CODE>",
 		"Operations", "application.jsonl",
+		"/authoring", "basic", "advanced", "P01", "N01",
+		"two temporary correlation rules", "does not create ordinary OSCAR alert rules",
+		"go run ./cmd/generate-scenario-schema",
 	} {
 		if !strings.Contains(combined, required) {
 			t.Errorf("operator documentation missing %q", required)

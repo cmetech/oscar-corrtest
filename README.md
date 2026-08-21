@@ -69,14 +69,13 @@ and macOS use `$HOME/.config/oscar-corrtest/.env` unless
 Advanced targets may still use explicit environment/file/systemd references,
 which override the global key.
 Runs started from the browser continue if the browser disconnects; reconnecting replays persisted events.
-The Scenarios page shows canonical built-in source and compiled P01/N01
-contracts. **Edit a copy** opens an unsaved draft; **Save custom scenario**
-persists one immutable version after validation. Modified saved scenarios become
-new versions. Unused custom versions can be deleted from the UI, while versions
-referenced by historical runs are retained.
-See [scenario authoring](docs/scenario-authoring.md). Active run pages provide
-cancellation with bounded cleanup; cleanup-safe terminal runs can be deleted
-only after local artifact verification.
+Open `/authoring` for the target-free Authoring guide: 16 basic/advanced
+examples across all eight patterns, plus exact YAML, compiled-contract, OSCAR
+API, and lifecycle previews. Opening an example in Scenarios creates an
+unsaved draft; **Save custom scenario** explicitly persists a validated custom
+version. See the full [scenario authoring guide](docs/scenario-authoring.md).
+Active run pages provide cancellation with bounded cleanup; cleanup-safe
+terminal runs can be deleted only after local artifact verification.
 
 Windows amd64 and version-pinned installation are also supported. See the
 [installation guide](docs/install.md) for Windows PowerShell, upgrades,

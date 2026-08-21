@@ -53,6 +53,24 @@ Use the catalog to preview any built-in, compare P01 with N01, and select
 `category=corrtest_<pattern>`, `oscar_test_run_id`, rule criteria, assertion
 values, and manual OSCAR filters. See [scenario-authoring.md](scenario-authoring.md).
 
+## Scenario authoring and live lifecycle
+
+Use `/authoring` for the target-free Authoring guide. Its Quickstart, Schema,
+Patterns, Assertions, and Validation sections provide 16 basic/advanced
+examples, each with YAML, compiled-contract, OSCAR API JSON, and lifecycle
+views. Opening an example in Scenarios creates an unsaved editable draft;
+**Save custom scenario** is the explicit persistence action.
+
+The preview does not contact OSCAR or prove live target compatibility. A live
+run first validates a real rule payload and reserved-label survival, then
+creates exactly two temporary correlation rules for P01 and N01. It does not
+create ordinary OSCAR alert rules. Source stimuli use `POST /api/v1/alerts`;
+CorrTest resolves server identities from authoritative history, records
+evidence, resolves its injected alerts, and deletes only returned rule IDs.
+Phase A is audit-only. Use Phase B when a synthetic parent or notifier outcome
+is part of the required evidence. The full authoring workflow, field reference,
+and generated schema drift command are in [scenario-authoring.md](scenario-authoring.md).
+
 ## Operations and application logs
 
 The Operations page manages the write-only global API key, shows the effective
