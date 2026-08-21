@@ -117,20 +117,60 @@ func TestAuthoringWorkspaceKeepsCoreControlsServerRendered(t *testing.T) {
 	}
 }
 
-func TestAuthoringExampleSelectorsSubmitTheServerRenderedFormOnChange(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/authoring", nil)
+func TestAuthoringCookbookSelectionRequiresExplicitLoad(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/authoring?section=patterns&pattern=sequence&level=advanced&view=api", nil)
 	res := httptest.NewRecorder()
 	NewHandler(version.Info{}).ServeHTTP(res, req)
 	if res.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
 	}
-	if count := strings.Count(res.Body.String(), `data-authoring-example-select`); count != 3 {
-		t.Fatalf("authoring page has %d auto-loading example selectors, want 3", count)
+	body := res.Body.String()
+	formStart := strings.Index(body, `<form class="authoring-controls"`)
+	if formStart < 0 {
+		t.Fatal("authoring page is missing the cookbook selection form")
 	}
-	js := readAsset(t, "static/js/authoring.js")
-	for _, fragment := range []string{"[data-authoring-example-select]", "select.form", "requestSubmit()"} {
-		if !strings.Contains(js, fragment) {
-			t.Errorf("authoring selector enhancement missing %q", fragment)
+	formEnd := strings.Index(body[formStart:], `</form>`)
+	if formEnd < 0 {
+		t.Fatal("authoring page has an unterminated cookbook selection form")
+	}
+	form := body[formStart : formStart+formEnd]
+	for _, fragment := range []string{
+		`aria-label="Cookbook example selection"`, `action="/authoring#patterns"`,
+		`name="section" value="patterns"`, `name="pattern"`, `name="level"`,
+		`name="view" value="api"`, `Load cookbook example`,
+	} {
+		if !strings.Contains(form, fragment) {
+			t.Errorf("cookbook selector form missing %q", fragment)
+		}
+	}
+	if strings.Contains(form, `<select name="view"`) {
+		t.Error("cookbook selector duplicates the inspection-panel view navigation")
+	}
+	if strings.Contains(body, `data-authoring-example-select`) {
+		t.Error("cookbook selectors still trigger implicit page navigation")
+	}
+	patternsStart := strings.Index(body, `id="patterns"`)
+	if patternsStart < 0 {
+		t.Fatal("authoring page is missing the Pattern cookbook section")
+	}
+	if formStart < patternsStart {
+		t.Error("cookbook selector is rendered before the Pattern cookbook it controls")
+	}
+}
+
+func TestAuthoringQuickstartNavigationRestoresFixedFloodTutorial(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/authoring?section=patterns&step=assertions&pattern=sequence&level=advanced&view=api", nil)
+	res := httptest.NewRecorder()
+	NewHandler(version.Info{}).ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
+	}
+	for _, href := range []string{
+		`href="/authoring?section=quickstart&amp;step=identity&amp;pattern=flood&amp;level=basic&amp;view=yaml#quickstart"`,
+		`href="/authoring?section=quickstart&amp;step=cases&amp;pattern=flood&amp;level=basic&amp;view=yaml#step-cases"`,
+	} {
+		if !strings.Contains(res.Body.String(), href) {
+			t.Errorf("Quickstart navigation does not restore its fixed Flood walkthrough: missing %s", href)
 		}
 	}
 }

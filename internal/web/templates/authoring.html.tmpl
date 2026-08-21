@@ -10,26 +10,17 @@
   <aside class="authoring-outline">
     <header><p class="eyebrow">Guide outline</p><h2>Build surface</h2></header>
     <nav aria-label="Authoring sections">
-      {{range $page.Catalog.Sections}}<a href="/authoring?section={{urlquery .ID}}&amp;step={{urlquery $page.Selection.Step}}&amp;pattern={{urlquery $page.Selection.Pattern}}&amp;level={{urlquery $page.Selection.Level}}&amp;view={{urlquery $page.Selection.View}}#{{.ID}}"{{if eq .ID $page.Selection.Section}} aria-current="page"{{end}}><strong>{{.Title}}</strong><small>{{.Summary}}</small></a>{{end}}
+      {{range $page.Catalog.Sections}}{{if eq .ID "quickstart"}}<a href="/authoring?section=quickstart&amp;step=identity&amp;pattern=flood&amp;level=basic&amp;view=yaml#quickstart"{{if eq .ID $page.Selection.Section}} aria-current="page"{{end}}><strong>{{.Title}}</strong><small>{{.Summary}}</small></a>{{else}}<a href="/authoring?section={{urlquery .ID}}&amp;step={{urlquery $page.Selection.Step}}&amp;pattern={{urlquery $page.Selection.Pattern}}&amp;level={{urlquery $page.Selection.Level}}&amp;view={{urlquery $page.Selection.View}}#{{.ID}}"{{if eq .ID $page.Selection.Section}} aria-current="page"{{end}}><strong>{{.Title}}</strong><small>{{.Summary}}</small></a>{{end}}{{end}}
     </nav>
     <section class="authoring-outline__steps" aria-labelledby="authoring-steps-title">
       <p class="eyebrow" id="authoring-steps-title">Quickstart steps</p>
       <ol>
-        {{range $page.Catalog.Lessons}}<li><a href="/authoring?section=quickstart&amp;step={{urlquery .ID}}&amp;pattern={{urlquery $page.Selection.Pattern}}&amp;level={{urlquery $page.Selection.Level}}&amp;view={{urlquery $page.Selection.View}}#step-{{.ID}}"{{if eq .ID $page.Selection.Step}} aria-current="step"{{end}}>{{.Title}}</a></li>{{end}}
+        {{range $page.Catalog.Lessons}}<li><a href="/authoring?section=quickstart&amp;step={{urlquery .ID}}&amp;pattern=flood&amp;level=basic&amp;view=yaml#step-{{.ID}}"{{if and (eq $page.Selection.Section "quickstart") (eq .ID $page.Selection.Step)}} aria-current="step"{{end}}>{{.Title}}</a></li>{{end}}
       </ol>
     </section>
   </aside>
 
   <div class="authoring-content">
-    <form class="authoring-controls" method="get" action="/authoring#{{$page.Selection.Section}}" aria-label="Authoring example selection">
-      <input type="hidden" name="section" value="{{$page.Selection.Section}}">
-      <input type="hidden" name="step" value="{{$page.Selection.Step}}">
-      <label>Pattern<select name="pattern" data-authoring-example-select>{{range $page.Contract.Patterns}}<option value="{{.ID}}"{{if eq .ID $page.Selection.Pattern}} selected{{end}}>{{.Title}}</option>{{end}}</select></label>
-      <label>Depth<select name="level" data-authoring-example-select><option value="basic"{{if eq $page.Selection.Level "basic"}} selected{{end}}>basic</option><option value="advanced"{{if eq $page.Selection.Level "advanced"}} selected{{end}}>advanced</option></select></label>
-      <label>Instrument view<select name="view" data-authoring-example-select>{{range $page.Catalog.Views}}<option value="{{.ID}}"{{if eq .ID $page.Selection.View}} selected{{end}}>{{.Title}}</option>{{end}}</select></label>
-      <button class="secondary-button" type="submit">Load example</button>
-    </form>
-
     {{template "authoring-quickstart" .}}
     {{template "authoring-schema" .}}
     {{template "authoring-pattern" .}}

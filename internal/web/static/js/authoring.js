@@ -16,13 +16,6 @@
     });
   }
 
-  function submitExampleSelection(select) {
-    var form = select.form;
-    if (!form) return;
-    if (typeof form.requestSubmit === 'function') form.requestSubmit();
-    else form.submit();
-  }
-
   function shouldEnhanceViewClick(event) {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey ||
       event.ctrlKey || event.shiftKey || event.altKey) return false;
@@ -54,9 +47,6 @@
   });
   document.querySelectorAll('[data-schema-filter]').forEach(function (input) {
     input.addEventListener('input', function () { filterRows(input); });
-  });
-  document.querySelectorAll('[data-authoring-example-select]').forEach(function (select) {
-    select.addEventListener('change', function () { submitExampleSelection(select); });
   });
   document.querySelectorAll('[data-authoring-view-link]').forEach(function (link) {
     link.addEventListener('click', function (event) {

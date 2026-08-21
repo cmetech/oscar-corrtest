@@ -6,6 +6,15 @@
     <span class="status-pill">{{$page.Selection.Level}} depth</span>
   </header>
 
+  <form class="authoring-controls" method="get" action="/authoring#patterns" aria-label="Cookbook example selection">
+    <input type="hidden" name="section" value="patterns">
+    <input type="hidden" name="step" value="{{$page.Selection.Step}}">
+    <input type="hidden" name="view" value="{{$page.Selection.View}}">
+    <label>Pattern<select name="pattern">{{range $page.Contract.Patterns}}<option value="{{.ID}}"{{if eq .ID $page.Selection.Pattern}} selected{{end}}>{{.Title}}</option>{{end}}</select></label>
+    <label>Depth<select name="level"><option value="basic"{{if eq $page.Selection.Level "basic"}} selected{{end}}>basic</option><option value="advanced"{{if eq $page.Selection.Level "advanced"}} selected{{end}}>advanced</option></select></label>
+    <button class="secondary-button" type="submit">Load cookbook example</button>
+  </form>
+
   <nav class="authoring-pattern-nav" aria-label="Cookbook patterns">
     {{range $page.Catalog.Patterns}}<a href="/authoring?section=patterns&amp;step={{urlquery $page.Selection.Step}}&amp;pattern={{urlquery .ID}}&amp;level={{urlquery $page.Selection.Level}}&amp;view={{urlquery $page.Selection.View}}#pattern-{{.ID}}"{{if eq .ID $page.Selection.Pattern}} aria-current="page"{{end}}><strong>{{.Title}}</strong><code>{{.ID}}</code></a>{{end}}
   </nav>
