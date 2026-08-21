@@ -1,0 +1,94 @@
+{{define "authoring-preview"}}
+{{$page := .Authoring}}
+<aside class="authoring-instrument" aria-label="Assembled scenario instrument panel">
+  <header>
+    <p class="eyebrow">Target-free inspection</p>
+    <h2>{{$page.Example.Title}}</h2>
+    <p class="muted"><code>{{$page.Example.ID}}</code> · no target, credential, persistence, or network contact</p>
+  </header>
+  <div class="button-row authoring-instrument__actions"><button class="secondary-button" type="button" data-copy-target="authoring-yaml">Copy YAML</button><a class="primary-button" href="/scenarios?selected=example:{{urlquery $page.Selection.Pattern}}:{{urlquery $page.Selection.Level}}">Open in Scenarios editor</a></div>
+
+  <nav class="authoring-view-nav" role="tablist" aria-label="Inspection view">
+    {{range $page.Catalog.Views}}<a id="authoring-view-tab-{{.ID}}" role="tab" href="/authoring?section={{urlquery $page.Selection.Section}}&amp;step={{urlquery $page.Selection.Step}}&amp;pattern={{urlquery $page.Selection.Pattern}}&amp;level={{urlquery $page.Selection.Level}}&amp;view={{urlquery .ID}}" data-authoring-view-link data-view-target="authoring-view-{{.ID}}" aria-controls="authoring-view-{{.ID}}" aria-selected="{{if eq .ID $page.Selection.View}}true{{else}}false{{end}}">{{.Title}}</a>{{end}}
+  </nav>
+
+  <section class="authoring-view-panel" id="authoring-view-yaml" data-authoring-view-panel role="tabpanel" aria-labelledby="authoring-view-tab-yaml" tabindex="-1"{{if ne $page.Selection.View "yaml"}} hidden{{end}}>
+    <header><div><p class="eyebrow">Canonical source</p><h3>Assembled YAML</h3></div><span class="status-pill">server rendered</span></header>
+    <pre id="authoring-yaml"><code>{{$page.Inspection.Source}}</code></pre>
+  </section>
+
+  <section class="authoring-view-panel" id="authoring-view-contract" data-authoring-view-panel role="tabpanel" aria-labelledby="authoring-view-tab-contract" tabindex="-1"{{if ne $page.Selection.View "contract"}} hidden{{end}}>
+    <header><div><p class="eyebrow">Compiler output</p><h3>Compiled contract</h3></div><span class="status-pill">{{len $page.Inspection.Plan.Cases}} cases</span></header>
+    <dl class="authoring-contract-summary">
+      <div><dt>Scenario</dt><dd><code>{{$page.Inspection.Plan.Scenario}}</code></dd></div>
+      <div><dt>Pattern</dt><dd><code>{{$page.Inspection.Plan.Pattern}}</code></dd></div>
+      <div><dt>Maximum duration</dt><dd>{{duration $page.Inspection.Plan.MaxDuration}}</dd></div>
+      <div><dt>Mutation budget</dt><dd>{{$page.Inspection.Plan.MutationBudget.Rules}} rules · {{$page.Inspection.Plan.MutationBudget.Alerts}} alerts</dd></div>
+    </dl>
+    <div class="authoring-contract-cases">
+      {{range $case := $page.Inspection.Plan.Cases}}
+      <article class="authoring-contract-case">
+        <header><div><strong>{{$case.Code}}</strong><span>{{$case.Polarity}}</span></div><code>{{$case.Name}}</code></header>
+        <dl>
+          <div><dt>Rule name</dt><dd><code>{{$case.Rule.Name}}</code></dd></div>
+          <div><dt>Pattern</dt><dd><code>{{$case.Rule.Pattern}}</code></dd></div>
+          <div><dt>Window</dt><dd>{{$case.Rule.WindowSeconds}} seconds</dd></div>
+          <div><dt>Group labels</dt><dd>{{if $case.Rule.GroupBy}}{{range $case.Rule.GroupBy}}<code class="token">{{.}}</code>{{end}}{{else}}None{{end}}</dd></div>
+          <div><dt>Observation budget</dt><dd>{{duration $case.ObservationWindow}}</dd></div>
+        </dl>
+        <section><h4>Match criteria</h4><pre><code>{{jsonValue $case.Rule.MatchCriteria}}</code></pre></section>
+        <section>
+          <h4>Emit spec</h4>
+          {{if $case.Rule.EmitAlertName}}<p><code>{{$case.Rule.EmitAlertName}}</code></p><dl class="authoring-labels">{{range $key, $value := $case.Rule.EmitLabels}}<div><dt><code>{{$key}}</code></dt><dd><code>{{$value}}</code></dd></div>{{end}}</dl>
+          {{else}}<p><strong>No emit spec.</strong> The parent-child compiler has no synthetic emit_spec and creates no synthetic parent.</p>{{end}}
+        </section>
+        <section><h4>Compiled alerts</h4><ol class="authoring-alerts">{{range $case.Alerts}}<li><span>Stimulus</span><code>{{.Name}}</code><small>{{.Status}} · scheduled {{duration .Delay}}</small></li>{{end}}</ol></section>
+        <section><h4>Assertions</h4><ul class="assertion-list">{{range $case.Assertions}}<li><code>{{.Kind}}</code><span>{{if .Outcome}}outcome <code>{{.Outcome}}</code> · {{end}}equals <strong>{{.Equals}}</strong></span></li>{{end}}</ul></section>
+      </article>
+      {{end}}
+    </div>
+  </section>
+
+  <section class="authoring-view-panel" id="authoring-view-api" data-authoring-view-panel role="tabpanel" aria-labelledby="authoring-view-tab-api" tabindex="-1"{{if ne $page.Selection.View "api"}} hidden{{end}}>
+    <header><div><p class="eyebrow">Credential-free exact requests</p><h3>OSCAR API</h3></div><span class="status-pill">server rendered</span></header>
+    <p class="authoring-runtime-legend"><span class="runtime-badge">Runtime-dependent</span> Values in braces are supplied only by OSCAR responses or authoritative history. The request envelope’s deterministic <code>fingerPrint</code> is Alertmanager-compatible transport data, never oracle identity; authoritative OSCAR history supplies <code>{server-fingerprint}</code>. No returned IDs, credentials, target URL, or response bodies are fabricated.</p>
+    <ol class="authoring-operation-list">
+      {{range $index, $operation := $page.Inspection.Operations}}
+      <li class="authoring-operation">
+        <header><span class="authoring-operation__index">{{$index}}</span><div><strong>{{$operation.Stage}}</strong>{{if $operation.CaseCode}}<span class="status-pill">{{$operation.CaseCode}}</span>{{end}}</div></header>
+        <p>{{$operation.Summary}}</p>
+        <div class="authoring-operation__request"><span class="method-badge">{{$operation.Method}}</span>{{if $operation.Path}}<code>{{$operation.Path}}</code>{{else}}<span class="muted">Local operation · no HTTP path</span>{{end}}</div>
+        {{if $operation.Attempt}}<dl class="authoring-operation__metadata"><div><dt>Attempt</dt><dd>{{$operation.Attempt}}</dd></div><div><dt>Scheduled delay</dt><dd>{{duration $operation.ScheduledDelay}}</dd></div></dl>{{end}}
+        {{if $operation.RuntimeFields}}<div class="authoring-runtime-fields"><span class="runtime-badge">Runtime-dependent</span>{{range $operation.RuntimeFields}}<code>&#123;{{.}}&#125;</code>{{end}}</div>{{end}}
+        {{if $operation.Body}}<pre><code>{{jsonPretty $operation.Body}}</code></pre>{{else}}<p class="muted authoring-no-body">No request body.</p>{{end}}
+      </li>
+      {{end}}
+    </ol>
+  </section>
+
+  <section class="authoring-view-panel" id="authoring-view-lifecycle" data-authoring-view-panel role="tabpanel" aria-labelledby="authoring-view-tab-lifecycle" tabindex="-1"{{if ne $page.Selection.View "lifecycle"}} hidden{{end}}>
+    <header><div><p class="eyebrow">Ordered execution</p><h3>Lifecycle</h3></div><span class="status-pill">read only</span></header>
+    <p class="authoring-lifecycle-clarification">CorrTest creates two temporary correlation rules (P01 and N01), injects source alerts directly through the public alert API, observes OSCAR evidence, deletes only the returned rule IDs, and resolves its injected alerts. It does not create ordinary OSCAR alert rules.</p>
+    <div class="authoring-lifecycle-legend" aria-label="Lifecycle groups">
+      <span>Compatibility preflight</span><span>Run mutation</span><span>Observation</span><span>Verdict persistence</span><span>Cleanup</span>
+    </div>
+    <p class="authoring-runtime-legend"><span class="runtime-badge">Runtime-dependent</span> <code>{returned-rule-id}</code> comes from rule creation; <code>{server-fingerprint}</code> comes from authoritative OSCAR history.</p>
+    <ol class="authoring-lifecycle-list">
+      {{range $index, $operation := $page.Inspection.Operations}}
+      <li data-stage="{{$operation.Stage}}">
+        <div class="authoring-lifecycle-list__rail"><span>{{$index}}</span></div>
+        <article>
+          <header><strong>{{$operation.Stage}}</strong>{{if $operation.CaseCode}}<span class="status-pill">{{$operation.CaseCode}}</span>{{end}}</header>
+          <p>{{$operation.Summary}}</p>
+          <div><span class="method-badge">{{$operation.Method}}</span>{{if $operation.Path}} <code>{{$operation.Path}}</code>{{else}} <span class="muted">local</span>{{end}}</div>
+          {{if $operation.Attempt}}<p class="muted">Attempt {{$operation.Attempt}} · Scheduled delay {{duration $operation.ScheduledDelay}}</p>{{end}}
+          {{if $operation.RuntimeFields}}<div class="authoring-runtime-fields"><span class="runtime-badge">Runtime-dependent</span>{{range $operation.RuntimeFields}}<code>&#123;{{.}}&#125;</code>{{end}}</div>{{end}}
+        </article>
+      </li>
+      {{end}}
+    </ol>
+  </section>
+
+  <dl class="authoring-instrument__facts"><div><dt>Cases</dt><dd>{{len $page.Inspection.Plan.Cases}} compiled P01/N01 cases</dd></div><div><dt>Pattern</dt><dd><code>{{$page.Inspection.Plan.Pattern}}</code></dd></div><div><dt>Preview</dt><dd>No target, credential, persistence, or network contact</dd></div></dl>
+</aside>
+{{end}}

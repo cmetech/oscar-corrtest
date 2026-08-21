@@ -32,19 +32,8 @@
 
     {{template "authoring-quickstart" .}}
     {{template "authoring-schema" .}}
-
-    <section class="authoring-reference-grid" aria-label="Pattern, assertion, and validation guidance">
-      <article class="authoring-reference-card" id="patterns"><p class="eyebrow">Patterns</p><h2>Compiler behavior</h2>{{range $page.Catalog.Patterns}}{{if eq .ID $page.Selection.Pattern}}<h3>{{.Title}}</h3><p>{{.Behavior}}</p><p><strong>Expected evidence:</strong> {{.ExpectedEvidence}}</p><p><strong>Fixed:</strong> {{range .FixedSemantics}}<span class="token">{{.}}</span>{{end}}</p><p><strong>Configurable:</strong> {{range .Configurable}}<code>{{.}}</code> {{end}}</p>{{range .Mistakes}}<p class="muted">{{.}}</p>{{end}}{{end}}{{end}}</article>
-      <article class="authoring-reference-card" id="assertions"><p class="eyebrow">Assertions</p><h2>Evidence discipline</h2>{{range $page.Catalog.AssertionNotes}}<section><h3>{{.Title}}</h3><p>{{.Content}}</p></section>{{end}}</article>
-      <article class="authoring-reference-card" id="validation"><p class="eyebrow">Validation</p><h2>Closed inputs</h2>{{range $page.Catalog.ValidationNotes}}<section><h3>{{.Title}}</h3><p>{{.Content}}</p></section>{{end}}</article>
-    </section>
+    {{template "authoring-pattern" .}}
   </div>
-
-  <aside class="authoring-instrument" aria-label="Assembled scenario instrument panel">
-    <header><p class="eyebrow">{{range $page.Catalog.Views}}{{if eq .ID $page.Selection.View}}{{.Title}}{{end}}{{end}}</p><h2>Assembled YAML</h2><p class="muted"><code>{{$page.Example.ID}}</code> · strict, canonical source</p></header>
-    <div class="button-row"><button class="secondary-button" type="button" data-copy-target="authoring-yaml">Copy YAML</button><a class="primary-button" href="/scenarios?selected=example:{{urlquery $page.Selection.Pattern}}:{{urlquery $page.Selection.Level}}">Open in Scenarios editor</a></div>
-    <pre id="authoring-yaml" tabindex="0"><code>{{$page.Inspection.Source}}</code></pre>
-    <dl class="authoring-instrument__facts"><div><dt>Cases</dt><dd>{{len $page.Inspection.Plan.Cases}} compiled P01/N01 cases</dd></div><div><dt>Pattern</dt><dd><code>{{$page.Inspection.Plan.Pattern}}</code></dd></div><div><dt>Preview</dt><dd>No target, credential, persistence, or network contact</dd></div></dl>
-  </aside>
+  {{template "authoring-preview" .}}
 </section>
 {{end}}

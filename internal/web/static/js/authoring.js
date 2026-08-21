@@ -16,10 +16,34 @@
     });
   }
 
+  function selectView(link) {
+    var target = document.getElementById(link.dataset.viewTarget);
+    if (!target) return false;
+
+    document.querySelectorAll('[data-authoring-view-link]').forEach(function (candidate) {
+      var selected = candidate === link;
+      candidate.setAttribute('aria-selected', selected ? 'true' : 'false');
+    });
+    document.querySelectorAll('[data-authoring-view-panel]').forEach(function (panel) {
+      panel.hidden = panel !== target;
+    });
+
+    if (window.history && window.history.replaceState) {
+      var destination = new URL(link.href, document.baseURI);
+      window.history.replaceState({}, '', destination.pathname + destination.search + destination.hash);
+    }
+    return true;
+  }
+
   document.querySelectorAll('[data-copy-target]').forEach(function (button) {
     button.addEventListener('click', function () { copyBlock(button); });
   });
   document.querySelectorAll('[data-schema-filter]').forEach(function (input) {
     input.addEventListener('input', function () { filterRows(input); });
+  });
+  document.querySelectorAll('[data-authoring-view-link]').forEach(function (link) {
+    link.addEventListener('click', function (event) {
+      if (selectView(link)) event.preventDefault();
+    });
   });
 }());

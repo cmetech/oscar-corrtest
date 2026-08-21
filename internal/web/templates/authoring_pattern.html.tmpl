@@ -1,0 +1,62 @@
+{{define "authoring-pattern"}}
+{{$page := .Authoring}}
+<section class="authoring-patterns" id="patterns" aria-labelledby="patterns-title">
+  <header class="authoring-section-heading">
+    <div><p class="eyebrow">Eight executable patterns</p><h2 id="patterns-title">Pattern cookbook</h2><p>Choose a compiler contract and compare its positive proof with the nearest negative control.</p></div>
+    <span class="status-pill">{{$page.Selection.Level}} depth</span>
+  </header>
+
+  <nav class="authoring-pattern-nav" aria-label="Cookbook patterns">
+    {{range $page.Catalog.Patterns}}<a href="/authoring?section=patterns&amp;step={{urlquery $page.Selection.Step}}&amp;pattern={{urlquery .ID}}&amp;level={{urlquery $page.Selection.Level}}&amp;view={{urlquery $page.Selection.View}}"{{if eq .ID $page.Selection.Pattern}} aria-current="page"{{end}}><strong>{{.Title}}</strong><code>{{.ID}}</code></a>{{end}}
+  </nav>
+  <nav class="authoring-level-nav" aria-label="Example depth">
+    <span>Example depth</span>
+    <a href="/authoring?section=patterns&amp;step={{urlquery $page.Selection.Step}}&amp;pattern={{urlquery $page.Selection.Pattern}}&amp;level=basic&amp;view={{urlquery $page.Selection.View}}"{{if eq $page.Selection.Level "basic"}} aria-current="page"{{end}}>Basic</a>
+    <a href="/authoring?section=patterns&amp;step={{urlquery $page.Selection.Step}}&amp;pattern={{urlquery $page.Selection.Pattern}}&amp;level=advanced&amp;view={{urlquery $page.Selection.View}}"{{if eq $page.Selection.Level "advanced"}} aria-current="page"{{end}}>Advanced</a>
+  </nav>
+
+  {{range $page.Catalog.Patterns}}{{if eq .ID $page.Selection.Pattern}}
+  <article class="authoring-pattern-guide">
+    <header><div><p class="eyebrow"><code>{{.ID}}</code> · {{$page.Selection.Level}}</p><h3>{{.Title}}</h3></div><p>{{.Behavior}}</p></header>
+    <div class="authoring-pattern-guide__grid">
+      <section><h4>Fixed compiler semantics</h4><ul>{{range .FixedSemantics}}<li><code>{{.}}</code></li>{{end}}</ul></section>
+      <section><h4>Configurable fields</h4><ul>{{range .Configurable}}<li><a href="#schema-{{.}}"><code>{{.}}</code></a></li>{{end}}</ul></section>
+      <section><h4>Expected evidence</h4><p>{{.ExpectedEvidence}}</p></section>
+      <section><h4>Common mistakes</h4><ul>{{range .Mistakes}}<li>{{.}}</li>{{end}}</ul></section>
+    </div>
+    {{if eq .ID "parent_child"}}<p class="authoring-contract-note"><strong>Parent-child contract:</strong> there is no synthetic emit_spec; CorrTest compiles the parent and child match policy without a synthetic parent rule.</p>{{end}}
+  </article>
+  {{end}}{{end}}
+
+  <section class="authoring-polarity" aria-labelledby="polarity-title">
+    <header><p class="eyebrow">Polarity-aware evidence</p><h3 id="polarity-title">P01 / N01 matrix</h3></header>
+    <div class="authoring-polarity__grid">
+      {{range $case := $page.Inspection.Plan.Cases}}
+      <article>
+        <header><strong>{{$case.Code}}</strong><span class="status-pill">{{$case.Polarity}}</span></header>
+        <h4>{{$case.Name}}</h4>
+        <p><code>{{$case.Rule.Name}}</code></p>
+        <dl>
+          <div><dt>Stimuli</dt><dd>{{len $case.Alerts}} compiled alerts</dd></div>
+          <div><dt>Observation budget</dt><dd>{{duration $case.ObservationWindow}}</dd></div>
+        </dl>
+        <ul class="assertion-list">{{range $case.Assertions}}<li><code>{{.Kind}}</code><span>{{if .Outcome}}<code>{{.Outcome}}</code> · {{end}}equals <strong>{{.Equals}}</strong></span></li>{{end}}</ul>
+      </article>
+      {{end}}
+    </div>
+  </section>
+</section>
+
+<section class="authoring-guidance-grid" aria-label="Assertion and validation guidance">
+  <article class="authoring-guidance" id="assertions">
+    <p class="eyebrow">Assertions</p><h2>Evidence discipline</h2>
+    {{range $page.Catalog.AssertionNotes}}<section><h3>{{.Title}}</h3><p>{{.Content}}</p></section>{{end}}
+  </article>
+  <article class="authoring-guidance" id="validation">
+    <p class="eyebrow">Validation</p><h2>Closed inputs</h2>
+    {{range $page.Catalog.ValidationNotes}}<section><h3>{{.Title}}</h3><p>{{.Content}}</p></section>{{end}}
+    <section><h3>Protected labels</h3><p>CorrTest compiler-owned identity labels and OSCAR transport fingerprint labels cannot be overridden by case or event labels.</p></section>
+    {{range $page.Contract.Fields}}{{if eq .ID "case.labels"}}<section><h3>Label budget</h3><p>{{.Limits}}. {{.CommonError}}</p></section>{{end}}{{end}}
+  </article>
+</section>
+{{end}}

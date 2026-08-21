@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"embed"
 	"encoding/json"
 	"html/template"
@@ -24,6 +25,13 @@ var parsedTemplates = template.Must(template.New("root").Funcs(template.FuncMap{
 			return "unavailable"
 		}
 		return string(encoded)
+	},
+	"jsonPretty": func(value string) string {
+		var formatted bytes.Buffer
+		if err := json.Indent(&formatted, []byte(value), "", "  "); err != nil {
+			return value
+		}
+		return formatted.String()
 	},
 }).ParseFS(assets, "templates/*.html.tmpl"))
 

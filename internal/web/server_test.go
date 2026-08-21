@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"errors"
+	"fmt"
 	"html/template"
 	"net"
 	"net/http"
@@ -164,6 +165,116 @@ func TestAuthoringSchemaFilterWorksWithoutJavaScript(t *testing.T) {
 	}
 	if strings.Contains(body, `id="schema-scenario.apiVersion"`) {
 		t.Fatal("unmatched schema field rendered despite native filter")
+	}
+}
+
+func TestAuthoringPatternCookbookRendersEveryExample(t *testing.T) {
+	handler := NewHandler(version.Info{Version: "test"})
+	fixed := map[string]string{
+		"flood": "min_count=5", "co_occurrence": "all compiled required alert names", "sequence": "login_failure then privileged_command",
+		"persistence": "unresolved for 30 seconds", "absence": "55-second observation", "parent_child": "no synthetic emit rule",
+		"cross_source": "required sources snmp and api", "threshold": "minimum distinct count 3",
+	}
+	for _, pattern := range scenario.SupportedPatterns() {
+		for _, level := range []string{"basic", "advanced"} {
+			for _, view := range []string{"yaml", "contract", "api", "lifecycle"} {
+				path := fmt.Sprintf("/authoring?section=patterns&pattern=%s&level=%s&view=%s", pattern, level, view)
+				response := httptest.NewRecorder()
+				handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+				if response.Code != http.StatusOK {
+					t.Fatalf("%s status=%d body=%s", path, response.Code, response.Body.String())
+				}
+				body := response.Body.String()
+				for _, want := range []string{
+					`class="authoring-patterns"`, "Pattern cookbook", "P01", "N01", "positive", "negative",
+					"Expected evidence", "Fixed compiler semantics", "Configurable fields", "Common mistakes", fixed[pattern],
+					"Open in Scenarios editor", "view=yaml", "view=contract", "view=api", "view=lifecycle",
+					"Exact zero needs the final window", "Phase A and Phase B", "Strict YAML", "Protected labels", "P01 / N01 matrix",
+				} {
+					if !strings.Contains(body, want) {
+						t.Errorf("%s missing %q", path, want)
+					}
+				}
+				selected := regexp.MustCompile(`id="authoring-view-tab-` + regexp.QuoteMeta(view) + `"[^>]+aria-selected="true"`)
+				if !selected.MatchString(body) {
+					t.Errorf("%s did not select the requested server-rendered panel", path)
+				}
+				for _, supported := range scenario.SupportedPatterns() {
+					if !strings.Contains(body, "pattern="+supported) {
+						t.Errorf("%s missing cookbook link for %q", path, supported)
+					}
+				}
+				for _, depth := range []string{"level=basic", "level=advanced"} {
+					if !strings.Contains(body, depth) {
+						t.Errorf("%s missing level link %q", path, depth)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestAuthoringAPIPreviewRendersExactCredentialFreeRequests(t *testing.T) {
+	handler := NewHandler(version.Info{Version: "test"})
+	for _, pattern := range scenario.SupportedPatterns() {
+		for _, level := range []string{"basic", "advanced"} {
+			path := fmt.Sprintf("/authoring?section=patterns&pattern=%s&level=%s&view=api", pattern, level)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+			if response.Code != http.StatusOK {
+				t.Fatalf("%s status=%d body=%s", path, response.Code, response.Body.String())
+			}
+			body := response.Body.String()
+			for _, want := range []string{
+				"OSCAR API", "POST", "/api/v1/correlation_rules/validate", "/api/v1/correlation_rules",
+				"/api/v1/alerts", "window_seconds", "group_by_labels", "match_criteria", "created_by",
+				"P01", "N01", "Attempt", "Scheduled delay", "Runtime-dependent", "{\n  &#34;receiver&#34;",
+			} {
+				if !strings.Contains(body, want) {
+					t.Errorf("%s missing %q", path, want)
+				}
+			}
+			for _, forbidden := range []string{
+				"X-API-Key", "Authorization: Bearer", "api_key", "https://oscar", "http://oscar",
+				`returned-rule-id&quot;:`, `server-fingerprint&quot;:`,
+			} {
+				if strings.Contains(body, forbidden) {
+					t.Errorf("%s leaked or fabricated %q", path, forbidden)
+				}
+			}
+			if pattern == "parent_child" && !strings.Contains(body, "no synthetic emit_spec") {
+				t.Errorf("%s does not explain the omitted parent-child emit_spec", path)
+			}
+		}
+	}
+}
+
+func TestAuthoringLifecycleRendersOrderedRuntimeHonestStages(t *testing.T) {
+	handler := NewHandler(version.Info{Version: "test"})
+	for _, pattern := range scenario.SupportedPatterns() {
+		for _, level := range []string{"basic", "advanced"} {
+			path := fmt.Sprintf("/authoring?section=patterns&pattern=%s&level=%s&view=lifecycle", pattern, level)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+			if response.Code != http.StatusOK {
+				t.Fatalf("%s status=%d body=%s", path, response.Code, response.Body.String())
+			}
+			body := response.Body.String()
+			for _, want := range []string{
+				"Compatibility preflight", "Run mutation", "Observation", "Verdict persistence", "Cleanup",
+				"preflight.validate_rule", "setup.create_rule", "stimulus.inject_alert", "evidence.read_history",
+				"evidence.persist_final_transaction", "cleanup.delete_rule", "cleanup.resolve_alert",
+				"{returned-rule-id}", "{server-fingerprint}", "Runtime-dependent",
+				"CorrTest creates two temporary correlation rules (P01 and N01), injects source alerts directly through the public alert API, observes OSCAR evidence, deletes only the returned rule IDs, and resolves its injected alerts. It does not create ordinary OSCAR alert rules.",
+			} {
+				if !strings.Contains(body, want) {
+					t.Errorf("%s missing %q", path, want)
+				}
+			}
+			if strings.Index(body, "preflight.validate_rule") > strings.Index(body, "cleanup.delete_rule") {
+				t.Errorf("%s rendered cleanup before preflight", path)
+			}
+		}
 	}
 }
 
