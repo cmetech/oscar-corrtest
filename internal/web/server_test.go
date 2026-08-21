@@ -91,6 +91,82 @@ func TestHandlerRoutes(t *testing.T) {
 	}
 }
 
+func TestAuthoringRouteRendersCompleteDefaultWithoutDataSource(t *testing.T) {
+	h := NewHandler(version.Info{Version: "test"})
+	r := httptest.NewRequest(http.MethodGet, "/authoring", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	for _, text := range []string{"Scenario Authoring", "Document identity", "Assembled YAML", "apiVersion", "Open in Scenarios editor"} {
+		if !strings.Contains(w.Body.String(), text) {
+			t.Errorf("missing %q", text)
+		}
+	}
+}
+
+func TestAuthoringRouteAcceptsEveryLegalSelectionDimension(t *testing.T) {
+	h := NewHandler(version.Info{Version: "test"})
+	tests := []struct {
+		name, query, want string
+	}{
+		{"section", "section=schema", "Schema reference"},
+		{"step", "step=cases", "P01 and N01"},
+		{"pattern", "pattern=sequence", "sequence"},
+		{"level", "level=advanced", "advanced"},
+		{"view", "view=api", "OSCAR API"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/authoring?"+test.query, nil))
+			if w.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), test.want) {
+				t.Fatalf("body missing %q", test.want)
+			}
+		})
+	}
+}
+
+func TestAuthoringRouteRejectsInvalidSelectionValues(t *testing.T) {
+	h := NewHandler(version.Info{Version: "test"})
+	for _, query := range []string{"pattern=typo", "level=expert", "view=secret"} {
+		t.Run(query, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/authoring?"+query, nil))
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestAuthoringNavigationIsSelected(t *testing.T) {
+	w := httptest.NewRecorder()
+	NewHandler(version.Info{}).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/authoring", nil))
+	if !strings.Contains(w.Body.String(), `<a href="/authoring" aria-current="page">Authoring</a>`) {
+		t.Fatal("authoring navigation is not selected")
+	}
+}
+
+func TestAuthoringSchemaFilterWorksWithoutJavaScript(t *testing.T) {
+	w := httptest.NewRecorder()
+	NewHandler(version.Info{}).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/authoring?filter=assertion", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `id="schema-assertion.kind"`) {
+		t.Fatal("filtered schema is missing assertion fields")
+	}
+	if strings.Contains(body, `id="schema-scenario.apiVersion"`) {
+		t.Fatal("unmatched schema field rendered despite native filter")
+	}
+}
+
 func TestDurableTargetsRunsAndSettingsPages(t *testing.T) {
 	settings := config.Settings{
 		DataDir: filepath.Join(t.TempDir(), "state"), ListenAddress: "127.0.0.1:8787",

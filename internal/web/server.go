@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/applog"
+	"github.com/cmetech/oscar-corrtest/internal/authoring"
 	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/evidence"
@@ -91,6 +92,9 @@ type pageData struct {
 	Operations         operations.Snapshot
 	OperationLogs      []applog.Record
 	OperationMessage   string
+	Authoring          *authoring.Page
+	AuthoringFilter    string
+	AuthoringFields    []scenario.FieldDefinition
 }
 
 type readinessView struct {
@@ -272,6 +276,19 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 			}
 		}
 		render(w, tmpl, nonce, view)
+	})
+	mux.HandleFunc("GET /authoring", func(w http.ResponseWriter, r *http.Request) {
+		page, err := authoring.New(info.Version).Build(authoringSelection(r.URL.Query()))
+		if err != nil {
+			if strings.HasPrefix(err.Error(), "invalid authoring ") {
+				http.Error(w, "authoring selection is unavailable", http.StatusNotFound)
+				return
+			}
+			http.Error(w, "authoring workspace is unavailable", http.StatusInternalServerError)
+			return
+		}
+		filter := strings.TrimSpace(r.URL.Query().Get("filter"))
+		render(w, tmpl, nonce, pageData{Version: info, Page: "authoring", Authoring: &page, AuthoringFilter: filter, AuthoringFields: authoringFields(page.Contract.Fields, filter)})
 	})
 	mux.HandleFunc("GET /scenarios", func(w http.ResponseWriter, r *http.Request) {
 		manager, ok := data.(scenarioManager)
@@ -778,6 +795,32 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 		render(w, tmpl, nonce, pageData{Version: info, Page: "reference", Readiness: readiness(data), ReferenceTopics: catalog.All()})
 	})
 	return mux
+}
+
+func authoringSelection(values url.Values) authoring.Selection {
+	return authoring.Selection{
+		Section: values.Get("section"), Step: values.Get("step"),
+		Pattern: values.Get("pattern"), Level: values.Get("level"), View: values.Get("view"),
+	}
+}
+
+func authoringFields(fields []scenario.FieldDefinition, filter string) []scenario.FieldDefinition {
+	filter = strings.ToLower(strings.TrimSpace(filter))
+	if filter == "" {
+		return fields
+	}
+	matched := make([]scenario.FieldDefinition, 0, len(fields))
+	for _, field := range fields {
+		searchable := strings.ToLower(strings.Join([]string{
+			field.ID, field.Group, field.YAMLName, field.ValueType, string(field.Requirement),
+			strings.Join(field.AllowedValues, " "), field.Limits, field.OmittedBehavior,
+			field.PatternRestriction, field.Effect, field.Example, field.CommonError,
+		}, " "))
+		if strings.Contains(searchable, filter) {
+			matched = append(matched, field)
+		}
+	}
+	return matched
 }
 
 func scenarioWorkbench(ctx context.Context, info version.Info, data DataSource, imported []domain.ScenarioRecord, selected string) (pageData, error) {

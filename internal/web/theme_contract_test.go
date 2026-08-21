@@ -89,6 +89,34 @@ func TestThemeToggleHasStableAccessibleState(t *testing.T) {
 	}
 }
 
+func TestAuthoringWorkspaceKeepsCoreControlsServerRendered(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/authoring?pattern=sequence&level=advanced", nil)
+	res := httptest.NewRecorder()
+	NewHandler(version.Info{}).ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
+	}
+	for _, fragment := range []string{
+		`class="authoring-workspace"`, `data-copy-target="authoring-yaml"`, `data-schema-filter`,
+		`/static/js/authoring.js`, `aria-current="step"`,
+	} {
+		if !strings.Contains(res.Body.String(), fragment) {
+			t.Errorf("authoring page missing %q", fragment)
+		}
+	}
+
+	pages := readAsset(t, "static/css/pages.css")
+	components := readAsset(t, "static/css/components.css")
+	for _, fragment := range []string{
+		".authoring-workspace", ".authoring-instrument", "@media (min-width: 1101px)", "position: sticky",
+		".primary-button:focus-visible", "outline-offset: 3px",
+	} {
+		if !strings.Contains(pages+components, fragment) {
+			t.Errorf("authoring presentation missing %q", fragment)
+		}
+	}
+}
+
 func readAsset(t *testing.T, path string) string {
 	t.Helper()
 	data, err := assets.ReadFile(path)

@@ -1,0 +1,9 @@
+{{define "authoring-quickstart"}}
+{{$page := .Authoring}}
+<section class="authoring-quickstart" id="quickstart" aria-labelledby="quickstart-title">
+  <header><p class="eyebrow">Quickstart</p><h2 id="quickstart-title">Progressive scenario build</h2><p>Every increment is visible in the assembled source panel. Select a step to keep its teaching card in view.</p></header>
+  <div class="authoring-lessons">
+    {{range $page.Catalog.Lessons}}<article class="authoring-lesson"{{if eq .ID $page.Selection.Step}} data-selected-step{{end}} id="step-{{.ID}}"><header><span>Step</span><h3>{{.Title}}</h3></header><p><strong>Concept:</strong> {{.Concept}}</p><p><strong>Compiler effect:</strong> {{.Effect}}</p><pre><code>{{.Fragment}}</code></pre><p class="authoring-fields"><strong>Introduces:</strong> {{range .FieldIDs}}<a href="#schema-{{.}}"><code>{{.}}</code></a> {{end}}</p><p class="authoring-mistake"><strong>Common mistake:</strong> {{.CommonMistake}}</p></article>{{end}}
+  </div>
+</section>
+{{end}}

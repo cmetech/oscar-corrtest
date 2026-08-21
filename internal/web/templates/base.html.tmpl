@@ -15,6 +15,7 @@
   <script defer src="/static/js/confirm-dialog.js"></script>
   <script defer src="/static/js/scenarios.js"></script>
   <script defer src="/static/js/operations.js"></script>
+  <script defer src="/static/js/authoring.js"></script>
 </head>
 <body>
   <header class="app-header">
@@ -36,6 +37,7 @@
 	  <a href="/run-test"{{if eq .Page "run-test"}} aria-current="page"{{end}}>Run test</a>
       <a href="/runs"{{if or (eq .Page "runs") (eq .Page "run-detail")}} aria-current="page"{{end}}>Runs</a>
       <a href="/scenarios"{{if eq .Page "scenarios"}} aria-current="page"{{end}}>Scenarios</a>
+      <a href="/authoring"{{if eq .Page "authoring"}} aria-current="page"{{end}}>Authoring</a>
       <a href="/targets"{{if eq .Page "targets"}} aria-current="page"{{end}}>Targets</a>
       <a href="/operations"{{if eq .Page "operations"}} aria-current="page"{{end}}>Operations</a>
       <a href="/reference"{{if eq .Page "reference"}} aria-current="page"{{end}}>Reference</a>
@@ -44,6 +46,7 @@
       {{if eq .Page "targets"}}{{template "targets" .}}
 	  {{else if eq .Page "run-test"}}{{template "run-test" .}}
       {{else if eq .Page "scenarios"}}{{template "scenarios" .}}
+      {{else if eq .Page "authoring"}}{{template "authoring" .}}
       {{else if eq .Page "runs"}}{{template "runs" .}}
       {{else if eq .Page "run-detail"}}{{template "run-detail" .}}
       {{else if eq .Page "operations"}}{{template "operations" .}}

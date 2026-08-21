@@ -1,0 +1,11 @@
+{{define "authoring-schema"}}
+{{$page := .Authoring}}
+<section class="authoring-schema" id="schema" aria-labelledby="schema-title">
+  <header><p class="eyebrow">Schema reference</p><h2 id="schema-title">Closed public contract</h2><p>All fields are decoded strictly. Filter works as a native GET request and is refined live when JavaScript is available.</p></header>
+  <form class="authoring-schema-filter" method="get" action="/authoring">
+    <input type="hidden" name="section" value="{{$page.Selection.Section}}"><input type="hidden" name="step" value="{{$page.Selection.Step}}"><input type="hidden" name="pattern" value="{{$page.Selection.Pattern}}"><input type="hidden" name="level" value="{{$page.Selection.Level}}"><input type="hidden" name="view" value="{{$page.Selection.View}}">
+    <label>Filter schema fields<input type="search" name="filter" value="{{$.AuthoringFilter}}" data-schema-filter placeholder="e.g. assertion, duration, labels"></label><button class="secondary-button" type="submit">Filter</button>
+  </form>
+  <div class="data-table-wrapper"><table><caption>Scenario, case, event, and assertion field contract</caption><thead><tr><th>Group</th><th>Field</th><th>YAML</th><th>Type</th><th>Requirement</th><th>Allowed values</th><th>Limits</th><th>Omitted behavior</th><th>Pattern restriction</th><th>Compiler effect</th><th>Example</th><th>Common error</th></tr></thead><tbody>{{range $.AuthoringFields}}<tr id="schema-{{.ID}}" data-schema-row data-search-value="{{.ID}} {{.Group}} {{.YAMLName}} {{.ValueType}} {{.Requirement}} {{range .AllowedValues}}{{.}} {{end}} {{.Limits}} {{.OmittedBehavior}} {{.PatternRestriction}} {{.Effect}} {{.CommonError}}"><td>{{.Group}}</td><td><code>{{.ID}}</code></td><td><code>{{.YAMLName}}</code></td><td>{{.ValueType}}</td><td>{{.Requirement}}</td><td>{{range .AllowedValues}}<span class="token">{{.}}</span>{{end}}</td><td>{{.Limits}}</td><td>{{.OmittedBehavior}}</td><td>{{.PatternRestriction}}</td><td>{{.Effect}}</td><td><code>{{.Example}}</code></td><td>{{.CommonError}}</td></tr>{{end}}</tbody></table></div>
+</section>
+{{end}}

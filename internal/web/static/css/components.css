@@ -25,6 +25,9 @@
   font-weight: 700;
 }
 
+.primary-button:focus-visible,
+.secondary-button:focus-visible { outline-offset: 3px; }
+
 .icon-button { width: 38px; padding: 0; font-size: 24px; }
 
 .help-overlay {
