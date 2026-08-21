@@ -91,7 +91,7 @@
       "minLength": 1,
       "x-corrtest-format": "go-duration",
       "x-corrtest-minimum": "\u003e 0",
-      "x-corrtest-maximum": "5m"
+      "x-corrtest-maximum": "5m0s"
     },
     "name": {
       "type": "string",
@@ -295,7 +295,7 @@
           "minLength": 1,
           "x-corrtest-format": "go-duration",
           "x-corrtest-minimum": "\u003e 0",
-          "x-corrtest-maximum": "2m"
+          "x-corrtest-maximum": "2m0s"
         }
       },
       "oneOf": [

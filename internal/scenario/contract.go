@@ -65,21 +65,14 @@ type Contract struct {
 
 var supportedPatterns = []string{"flood", "co_occurrence", "sequence", "persistence", "absence", "parent_child", "cross_source", "threshold"}
 
-var reservedLabelSet = map[string]struct{}{
-	"alertname": {}, "category": {}, "oscar_test": {}, "oscar_test_harness": {}, "oscar_test_schema_version": {},
-	"oscar_test_run_id": {}, "oscar_test_run_short": {}, "oscar_test_suite": {}, "oscar_test_scenario": {},
-	"oscar_test_pattern": {}, "oscar_test_case": {}, "oscar_test_case_code": {}, "oscar_test_polarity": {},
-	"oscar_test_alert_class": {}, "oscar_test_alert_role": {}, "oscar_test_rule_name": {}, "oscar_test_event_id": {},
-	"oscar_test_event_index": {}, "oscar_fingerprint": {}, "am_fingerprint": {},
-	"severity": {},
-}
-
 var reservedLabels = []string{
 	"alertname", "am_fingerprint", "category", "oscar_fingerprint", "oscar_test", "oscar_test_alert_class",
 	"oscar_test_alert_role", "oscar_test_case", "oscar_test_case_code", "oscar_test_event_id", "oscar_test_event_index",
 	"oscar_test_harness", "oscar_test_pattern", "oscar_test_polarity", "oscar_test_rule_name", "oscar_test_run_id",
 	"oscar_test_run_short", "oscar_test_scenario", "oscar_test_schema_version", "oscar_test_suite", "severity",
 }
+
+var reservedLabelSet = newReservedLabelSet(reservedLabels)
 
 // SupportedPatterns returns the canonical cookbook order without exposing internal storage.
 func SupportedPatterns() []string { return append([]string(nil), supportedPatterns...) }
@@ -91,6 +84,14 @@ func ReservedLabels() []string { return append([]string(nil), reservedLabels...)
 func IsReservedLabel(label string) bool {
 	_, found := reservedLabelSet[label]
 	return found
+}
+
+func newReservedLabelSet(labels []string) map[string]struct{} {
+	result := make(map[string]struct{}, len(labels))
+	for _, label := range labels {
+		result[label] = struct{}{}
+	}
+	return result
 }
 
 // PublicContract describes every closed scenario wire field and supported compiler pattern.

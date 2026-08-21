@@ -23,10 +23,18 @@ func Encode(document Scenario) ([]byte, error) {
 	for _, item := range document.Cases {
 		converted := wireCase{
 			Name: item.Name, Code: item.Code, Polarity: item.Polarity,
-			Role: item.Role, Repeat: item.Repeat, Window: item.Window.String(),
+			Window:  item.Window.String(),
 			GroupBy: append([]string(nil), item.GroupBy...), Labels: cloneStringMap(item.Labels),
 			SuppressForNotifiers: append([]string(nil), item.SuppressForNotifiers...),
 			TagForNotifiers:      append([]string(nil), item.TagForNotifiers...),
+		}
+		if item.Role != "" {
+			role := item.Role
+			converted.Role = &role
+		}
+		if item.Repeat != 0 {
+			repeat := item.Repeat
+			converted.Repeat = &repeat
 		}
 		for _, assertion := range item.Assertions {
 			encoded := wireAssertion{Kind: assertion.Kind, Equals: assertion.Equals}

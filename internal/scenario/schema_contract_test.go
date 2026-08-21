@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/scenario"
 )
@@ -65,5 +66,45 @@ func TestGeneratedJSONSchemaEncodesClosedObjectsAndCaseStimuli(t *testing.T) {
 		if got, ok := level["additionalProperties"].(bool); !ok || got {
 			t.Errorf("object level is not closed: %#v", level["additionalProperties"])
 		}
+	}
+}
+
+func TestReservedLabelsAndDurationBoundsComeFromThePublicContract(t *testing.T) {
+	labels := scenario.ReservedLabels()
+	for _, label := range labels {
+		if !scenario.IsReservedLabel(label) {
+			t.Errorf("listed reserved label %q is not recognized", label)
+		}
+	}
+	first := labels[0]
+	labels[0] = "operator_owned"
+	if got := scenario.ReservedLabels()[0]; got != first {
+		t.Errorf("ReservedLabels leaked mutable canonical storage: got %q, want %q", got, first)
+	}
+	if scenario.IsReservedLabel("operator_owned") {
+		t.Fatal("unlisted operator label is reserved")
+	}
+
+	raw, err := scenario.GenerateJSONSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	properties := document["properties"].(map[string]any)
+	maxDuration := properties["maxDuration"].(map[string]any)
+	if got, want := maxDuration["x-corrtest-maximum"], scenario.MaxScenarioDuration.String(); got != want {
+		t.Errorf("maxDuration upper bound = %q, want %q", got, want)
+	}
+	definitions := document["$defs"].(map[string]any)
+	caseProperties := definitions["case"].(map[string]any)["properties"].(map[string]any)
+	window := caseProperties["window"].(map[string]any)
+	if got, want := window["x-corrtest-maximum"], scenario.MaxCaseWindow.String(); got != want {
+		t.Errorf("window upper bound = %q, want %q", got, want)
+	}
+	if scenario.MaxScenarioDuration != 5*time.Minute || scenario.MaxCaseWindow != 2*time.Minute {
+		t.Fatal("approved duration budgets changed")
 	}
 }

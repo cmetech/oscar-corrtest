@@ -97,7 +97,7 @@ func buildSchema(contract Contract) jsonSchema {
 			"name":        {Type: "string", MinLength: integer(1), MaxLength: integer(MaxScenarioNameLength), Pattern: "^\\S(?:.*\\S)?$"},
 			"suite":       {Type: "string", MinLength: integer(1), MaxLength: integer(MaxSuiteLength), Pattern: "^\\S(?:.*\\S)?$"},
 			"pattern":     {Enum: patterns},
-			"maxDuration": duration("> 0", "5m"),
+			"maxDuration": duration("> 0", MaxScenarioDuration.String()),
 			"cases": {Type: "array", MinItems: integer(RequiredCaseCount), MaxItems: integer(RequiredCaseCount), Items: &schemaValue{Ref: "#/$defs/case"}, AllOf: []schemaValue{
 				{Contains: &casePositive, MinContains: integer(1), MaxContains: integer(1)},
 				{Contains: &caseNegative, MinContains: integer(1), MaxContains: integer(1)},
@@ -112,7 +112,7 @@ func buildSchema(contract Contract) jsonSchema {
 					"polarity":             {Enum: []string{"positive", "negative"}},
 					"role":                 {Type: "string", MinLength: integer(1), MaxLength: integer(MaxRoleLength)},
 					"repeat":               {Type: "integer", Minimum: integer(1), Maximum: integer(MaxEvents)},
-					"window":               duration("> 0", "2m"),
+					"window":               duration("> 0", MaxCaseWindow.String()),
 					"groupBy":              {Type: "array", MaxItems: integer(MaxGroupByLabels), UniqueItems: true, Items: &labelNames},
 					"labels":               labels,
 					"suppressForNotifiers": notifierSchema(),

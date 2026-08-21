@@ -27,8 +27,8 @@ type wireCase struct {
 	Name                 string            `yaml:"name"`
 	Code                 string            `yaml:"code"`
 	Polarity             string            `yaml:"polarity"`
-	Role                 string            `yaml:"role,omitempty"`
-	Repeat               int               `yaml:"repeat,omitempty"`
+	Role                 *string           `yaml:"role,omitempty"`
+	Repeat               *int              `yaml:"repeat,omitempty"`
 	Window               string            `yaml:"window"`
 	GroupBy              []string          `yaml:"groupBy"`
 	Labels               map[string]string `yaml:"labels,omitempty"`
@@ -127,7 +127,17 @@ func Decode(reader io.Reader) (Scenario, error) {
 		if parseErr != nil {
 			return Scenario{}, fmt.Errorf("case %q window: %w", item.Name, parseErr)
 		}
-		converted := Case{Name: item.Name, Code: item.Code, Polarity: item.Polarity, Role: item.Role, Repeat: item.Repeat, Window: window, GroupBy: item.GroupBy, Labels: item.Labels,
+		if len(item.Events) > 0 && (item.Role != nil || item.Repeat != nil) {
+			return Scenario{}, fmt.Errorf("case %q mixes event stimuli with role or repeat", item.Name)
+		}
+		role, repeat := "", 0
+		if item.Role != nil {
+			role = *item.Role
+		}
+		if item.Repeat != nil {
+			repeat = *item.Repeat
+		}
+		converted := Case{Name: item.Name, Code: item.Code, Polarity: item.Polarity, Role: role, Repeat: repeat, Window: window, GroupBy: item.GroupBy, Labels: item.Labels,
 			SuppressForNotifiers: item.SuppressForNotifiers, TagForNotifiers: item.TagForNotifiers}
 		for _, assertion := range item.Assertions {
 			if assertion.Kind == "synthetic-alert-count" && assertion.Outcome != nil {

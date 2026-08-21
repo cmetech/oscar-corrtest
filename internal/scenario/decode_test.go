@@ -82,3 +82,20 @@ func TestDecodeEnforcesConditionalAssertionOutcomes(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeRejectsExplicitRepeatOrRoleWithEventStimuli(t *testing.T) {
+	eventForm := strings.Replace(validCustom, "role: interface_down\n    repeat: 5", "events:\n      - {role: interface_down, status: firing}", 1)
+	if _, err := scenario.Decode(strings.NewReader(eventForm)); err != nil {
+		t.Fatalf("event form without repeat or role rejected: %v", err)
+	}
+	for name, input := range map[string]string{
+		"explicit zero repeat": strings.Replace(eventForm, "events:\n", "repeat: 0\n    events:\n", 1),
+		"explicit empty role":  strings.Replace(eventForm, "events:\n", "role: \"\"\n    events:\n", 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := scenario.Decode(strings.NewReader(input)); err == nil {
+				t.Fatal("event form accepted an explicit repeat or role field")
+			}
+		})
+	}
+}
