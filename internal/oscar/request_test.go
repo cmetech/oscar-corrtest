@@ -174,17 +174,43 @@ func TestLiveResolutionUsesPublicRequestBuilder(t *testing.T) {
 	client := newClient(t, server.URL())
 	record := oscar.HistoryRecord{
 		AlertName: "CORRTEST_FLOOD_P01_SOURCE_7Q9K2M4A", Fingerprint: "server-fingerprint", Status: "firing",
-		Labels:      map[string]string{"alertname": "CORRTEST_FLOOD_P01_SOURCE_7Q9K2M4A", "oscar_test_run_id": "crt_abc"},
-		Annotations: map[string]string{"summary": "source"},
+		Labels: map[string]string{"alertname": "CORRTEST_FLOOD_P01_SOURCE_7Q9K2M4A", "oscar_test_run_id": "crt_abc"},
+		Annotations: map[string]string{
+			"oscar_test_attempt_index": "2", "oscar_test_event_id": "crt_abc-P01-001",
+			"oscar_test_event_index": "1", "summary": "source",
+		},
 	}
 	want, err := oscar.BuildResolutionRequest(record)
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertResolutionAnnotations(t, want)
+	if want.CommonLabels["oscar_fingerprint"] != "server-fingerprint" || want.Alerts[0].Labels["oscar_fingerprint"] != "server-fingerprint" || want.Alerts[0].Fingerprint != "fedf414208e60c28" {
+		t.Fatalf("resolution identity=%+v", want)
+	}
 	if _, err := client.ResolveHistory(context.Background(), record); err != nil {
 		t.Fatal(err)
 	}
-	assertJSONValueEqual(t, server.Requests()[0].Body, want)
+	request := server.Requests()[0]
+	assertJSONValueEqual(t, request.Body, want)
+	var live oscar.AlertGroupRequest
+	if err := json.Unmarshal([]byte(request.Body), &live); err != nil {
+		t.Fatal(err)
+	}
+	assertResolutionAnnotations(t, live)
+}
+
+func assertResolutionAnnotations(t *testing.T, request oscar.AlertGroupRequest) {
+	t.Helper()
+	want := map[string]string{
+		"oscar_test_cleanup":     "resolved by oscar-corrtest after exact history read-back",
+		"oscar_test_event_id":    "crt_abc-P01-001",
+		"oscar_test_event_index": "1",
+		"summary":                "source",
+	}
+	if !reflect.DeepEqual(request.CommonAnnotations, want) || len(request.Alerts) != 1 || !reflect.DeepEqual(request.Alerts[0].Annotations, want) {
+		t.Fatalf("resolution annotations common=%v nested=%v", request.CommonAnnotations, request.Alerts)
+	}
 }
 
 func TestLiveProbeUsesPublicRequestBuilder(t *testing.T) {

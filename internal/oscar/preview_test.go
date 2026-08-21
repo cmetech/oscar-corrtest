@@ -229,15 +229,9 @@ func TestPreviewResolutionBodyUsesAuthoritativeRuntimePlaceholder(t *testing.T) 
 	}
 	operation := findPreview(t, operations, "cleanup.resolve_alert", "P01", 0)
 	alert := plan.Cases[0].Alerts[0]
-	annotations := make(map[string]string, len(alert.Annotations))
-	for key, value := range alert.Annotations {
-		if key != "oscar_test_attempt_index" {
-			annotations[key] = value
-		}
-	}
 	want, err := oscar.BuildResolutionRequest(oscar.HistoryRecord{
 		AlertName: alert.Name, Fingerprint: "{server-fingerprint}", Status: alert.Status,
-		Labels: alert.Labels, Annotations: annotations,
+		Labels: alert.Labels, Annotations: alert.Annotations,
 	})
 	if err != nil {
 		t.Fatal(err)

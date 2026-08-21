@@ -101,7 +101,7 @@ func BuildResolutionRequest(record HistoryRecord) (AlertGroupRequest, error) {
 	labels := cloneStringMap(record.Labels)
 	labels["alertname"] = record.AlertName
 	labels["oscar_fingerprint"] = record.Fingerprint
-	annotations := cloneStringMap(record.Annotations)
+	annotations := alertTransportAnnotations(record.Annotations)
 	if annotations == nil {
 		annotations = map[string]string{}
 	}

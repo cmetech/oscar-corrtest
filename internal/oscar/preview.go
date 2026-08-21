@@ -229,7 +229,7 @@ func canonicalPreviewCases(input []compiler.CasePlan) ([]compiler.CasePlan, erro
 func appendResolution(operations *[]OperationPreview, caseCode, alertName, status string, labels, annotations map[string]string) error {
 	request, err := BuildResolutionRequest(HistoryRecord{
 		AlertName: alertName, Fingerprint: "{server-fingerprint}", Status: status,
-		Labels: labels, Annotations: alertTransportAnnotations(annotations),
+		Labels: labels, Annotations: annotations,
 	})
 	if err != nil {
 		return fmt.Errorf("build %s resolution template: %w", caseCode, err)
