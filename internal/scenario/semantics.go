@@ -12,6 +12,7 @@ type semanticEvent struct {
 	Status   string
 	Labels   map[string]string
 	At       time.Duration
+	Ordinal  int
 	GroupKey string
 	Identity string
 }
@@ -69,7 +70,7 @@ func expandSemanticEvents(testCase Case) []semanticEvent {
 		for key, value := range event.Labels {
 			labels[key] = value
 		}
-		observation := semanticEvent{Role: event.Role, Status: event.Status, Labels: labels, At: event.Delay}
+		observation := semanticEvent{Role: event.Role, Status: event.Status, Labels: labels, At: event.Delay, Ordinal: index}
 		observation.GroupKey = semanticGroupKey(testCase.GroupBy, labels)
 		if event.Status == "resolved" {
 			if firing, found := active[event.Role]; found {
@@ -227,7 +228,7 @@ func validateSequenceSemantics(testCase Case, events []semanticEvent) error {
 			continue
 		}
 		for _, command := range events {
-			if command.Status == "firing" && command.Role == "privileged_command" && command.GroupKey == login.GroupKey && command.At > login.At && command.At-login.At <= testCase.Window {
+			if command.Status == "firing" && command.Role == "privileged_command" && command.GroupKey == login.GroupKey && precedes(login, command) && command.At-login.At <= testCase.Window {
 				valid = true
 			}
 		}
@@ -303,21 +304,21 @@ func validateAbsenceSemantics(testCase Case, events []semanticEvent) error {
 }
 
 func validateParentChildSemantics(testCase Case, events []semanticEvent) error {
-	activeParents := map[string]map[string]time.Duration{}
+	activeParents := map[string]map[string]semanticEvent{}
 	childCount, matchedChild := 0, false
 	for _, event := range chronological(events) {
 		switch {
 		case event.Role == "parent" && event.Status == "firing":
 			if activeParents[event.GroupKey] == nil {
-				activeParents[event.GroupKey] = map[string]time.Duration{}
+				activeParents[event.GroupKey] = map[string]semanticEvent{}
 			}
-			activeParents[event.GroupKey][event.Identity] = event.At
+			activeParents[event.GroupKey][event.Identity] = event
 		case event.Role == "parent" && event.Status == "resolved":
 			delete(activeParents[event.GroupKey], event.Identity)
 		case event.Role == "child" && event.Status == "firing":
 			childCount++
-			for _, parentAt := range activeParents[event.GroupKey] {
-				matchedChild = matchedChild || (event.At > parentAt && event.At-parentAt <= testCase.Window)
+			for _, parent := range activeParents[event.GroupKey] {
+				matchedChild = matchedChild || (precedes(parent, event) && event.At-parent.At <= testCase.Window)
 			}
 		}
 	}
@@ -396,4 +397,8 @@ func chronological(events []semanticEvent) []semanticEvent {
 	result := append([]semanticEvent(nil), events...)
 	sort.SliceStable(result, func(i, j int) bool { return result[i].At < result[j].At })
 	return result
+}
+
+func precedes(first, second semanticEvent) bool {
+	return first.At < second.At || (first.At == second.At && first.Ordinal < second.Ordinal)
 }

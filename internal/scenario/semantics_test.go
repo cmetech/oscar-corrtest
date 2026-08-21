@@ -120,6 +120,30 @@ func TestPatternSemanticValidationKeepsEqualAndIncreasingDelayOrder(t *testing.T
 	}
 }
 
+func TestPatternSemanticValidationUsesDeclarationOrderForEqualDelayPrecedence(t *testing.T) {
+	tests := []struct {
+		name    string
+		pattern string
+		code    string
+		events  []Event
+	}{
+		{"sequence P01 ordered", "sequence", "P01", []Event{{Role: "login_failure", Status: "firing", Delay: 5 * time.Second}, {Role: "privileged_command", Status: "firing", Delay: 5 * time.Second}}},
+		{"sequence N01 reversed", "sequence", "N01", []Event{{Role: "privileged_command", Status: "firing", Delay: 5 * time.Second}, {Role: "login_failure", Status: "firing", Delay: 5 * time.Second}}},
+		{"parent child P01 ordered", "parent_child", "P01", []Event{{Role: "parent", Status: "firing", Delay: 5 * time.Second}, {Role: "child", Status: "firing", Delay: 5 * time.Second}}},
+		{"parent child N01 reversed", "parent_child", "N01", []Event{{Role: "child", Status: "firing", Delay: 5 * time.Second}, {Role: "parent", Status: "firing", Delay: 5 * time.Second}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			document := Builtin(test.pattern)
+			caseByCode(&document, test.code).Events = test.events
+			raw := encodeWireWithoutValidation(t, document)
+			if _, err := Decode(bytes.NewReader(raw)); err != nil {
+				t.Fatalf("equal-delay declaration order rejected: %v", err)
+			}
+		})
+	}
+}
+
 func TestParentChildOverlappingParentIdentityRemainsActive(t *testing.T) {
 	document := Builtin("parent_child")
 	caseByCode(&document, "N01").Events = []Event{
