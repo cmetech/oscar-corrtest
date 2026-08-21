@@ -74,7 +74,7 @@ func TestBuildOperationPreviewShowsOrderedCredentialFreeLifecycle(t *testing.T) 
 	}
 
 	last := operations[len(operations)-1]
-	if last.Stage != "cleanup.resolve_alert" {
+	if last.Stage != "evidence.persist_final_transaction" {
 		t.Fatalf("last operation=%+v", last)
 	}
 	if !containsStage(operations, "evidence.read_history") || !containsStage(operations, "evidence.read_correlation_audit") || !containsStage(operations, "evidence.read_notification_audit") || !containsStage(operations, "evidence.evaluate_assertions") || !containsStage(operations, "evidence.persist_final_transaction") {
@@ -94,16 +94,17 @@ func TestBuildOperationPreviewShowsOrderedCredentialFreeLifecycle(t *testing.T) 
 	}
 }
 
-func TestPreviewEvaluatesAssertionsImmediatelyBeforeFinalPersistenceAndCleanup(t *testing.T) {
+func TestPreviewEvaluatesAssertionsBeforeCleanupAndPersistsTerminalEvidenceLast(t *testing.T) {
 	operations, err := oscar.BuildOperationPreview(compilePreviewPlan(t, "flood"), "test-version")
 	if err != nil {
 		t.Fatal(err)
 	}
 	evaluateIndex := findPreviewIndex(t, operations, "evidence.evaluate_assertions", "", 0)
 	persistIndex := findPreviewIndex(t, operations, "evidence.persist_final_transaction", "", 0)
-	cleanupIndex := findPreviewIndex(t, operations, "cleanup.delete_rule", "P01", 0)
-	if evaluateIndex+1 != persistIndex || persistIndex >= cleanupIndex {
-		t.Fatalf("evaluate=%d persist=%d cleanup=%d", evaluateIndex, persistIndex, cleanupIndex)
+	firstCleanupIndex := findPreviewIndex(t, operations, "cleanup.delete_rule", "P01", 0)
+	lastCleanupIndex := persistIndex - 1
+	if evaluateIndex >= firstCleanupIndex || persistIndex != len(operations)-1 || lastCleanupIndex < 0 || operations[lastCleanupIndex].Stage != "cleanup.resolve_alert" {
+		t.Fatalf("evaluate=%d first cleanup=%d last cleanup=%d persist=%d operations=%d", evaluateIndex, firstCleanupIndex, lastCleanupIndex, persistIndex, len(operations))
 	}
 	evaluate := operations[evaluateIndex]
 	if evaluate.Method != "LOCAL" || evaluate.Path != "" || evaluate.Body != "" || evaluate.CaseCode != "" || len(evaluate.RuntimeFields) != 0 ||

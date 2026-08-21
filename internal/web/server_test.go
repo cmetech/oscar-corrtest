@@ -267,19 +267,19 @@ func TestAuthoringLifecycleRendersOrderedRuntimeHonestStages(t *testing.T) {
 			}
 			body := response.Body.String()
 			for _, want := range []string{
-				"Compatibility preflight", "Run mutation", "Observation", "Assertion evaluation", "Evidence persistence", "Cleanup",
+				"Compatibility preflight", "Run mutation", "Observation", "Assertion evaluation</span><span>Cleanup</span><span>Evidence persistence",
 				"preflight.validate_rule", "setup.create_rule", "stimulus.inject_alert", "evidence.read_history",
 				"evidence.evaluate_assertions", "evidence.persist_final_transaction", "cleanup.delete_rule", "cleanup.resolve_alert",
 				"{returned-rule-id}", "{server-fingerprint}", "Runtime-dependent",
-				"CorrTest creates two temporary correlation rules (P01 and N01), injects source alerts directly through the public alert API, observes OSCAR evidence, deletes only the returned rule IDs, and resolves its injected alerts. It does not create ordinary OSCAR alert rules.",
+				"CorrTest creates two temporary correlation rules (P01 and N01), injects source alerts directly through the public alert API, observes OSCAR evidence, deletes only the returned rule IDs, resolves its injected alerts, and then persists terminal facts and evidence. It does not create ordinary OSCAR alert rules.",
 			} {
 				if !strings.Contains(body, want) {
 					t.Errorf("%s missing %q", path, want)
 				}
 			}
 			if strings.Index(body, "preflight.validate_rule") > strings.Index(body, "evidence.evaluate_assertions") ||
-				strings.Index(body, "evidence.evaluate_assertions") > strings.Index(body, "evidence.persist_final_transaction") ||
-				strings.Index(body, "evidence.persist_final_transaction") > strings.Index(body, "cleanup.delete_rule") {
+				strings.Index(body, "evidence.evaluate_assertions") > strings.Index(body, "cleanup.delete_rule") ||
+				strings.Index(body, "cleanup.resolve_alert") > strings.Index(body, "evidence.persist_final_transaction") {
 				t.Errorf("%s rendered lifecycle out of order", path)
 			}
 		}

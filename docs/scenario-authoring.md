@@ -217,11 +217,13 @@ For a valid, compatible target, one scenario run follows this order:
    authoritative history and audit evidence, and evaluate the declared counts.
    Returned IDs and server fingerprints are runtime-dependent; previews never
    fabricate them.
-4. **Persist evidence:** record the final result and evidence before cleanup.
-5. **Cleanup:** resolve CorrTest's injected alerts using authoritative-history
+4. **Cleanup:** resolve CorrTest's injected alerts using authoritative-history
    identities and delete only the exact returned IDs for the two temporary
    correlation rules. Cleanup never broad-prefix deletes and does not delete
    operator-owned rules.
+5. **Persist terminal evidence:** after cleanup completes, record normalized
+   assertions, cleanup status, terminal facts, and evidence in the final
+   transaction.
 
 Behavioral verdict and cleanup status are independent. A failed or interrupted
 run remains visible so an operator can inspect it and use the exact cleanup

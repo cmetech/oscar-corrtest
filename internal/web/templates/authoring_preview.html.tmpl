@@ -85,10 +85,10 @@
 {{if .PipelineMode.IsAuditOnly}}
 <div class="notice notice--warning" role="note"><strong>Phase A audit-only limitation.</strong> This mode cannot prove dispatched synthetic-parent or notifier evidence. The ordered operations below are the unchanged compiled structural contract, not a claim that a Phase A live run executes the dispatch lifecycle.</div>
 {{else}}
-<p class="authoring-lifecycle-clarification">CorrTest creates two temporary correlation rules (P01 and N01), injects source alerts directly through the public alert API, observes OSCAR evidence, deletes only the returned rule IDs, and resolves its injected alerts. It does not create ordinary OSCAR alert rules.</p>
+<p class="authoring-lifecycle-clarification">CorrTest creates two temporary correlation rules (P01 and N01), injects source alerts directly through the public alert API, observes OSCAR evidence, deletes only the returned rule IDs, resolves its injected alerts, and then persists terminal facts and evidence. It does not create ordinary OSCAR alert rules.</p>
 {{end}}
 <div class="authoring-lifecycle-legend" aria-label="Lifecycle groups">
-  <span>Compatibility preflight</span><span>Run mutation</span><span>Observation</span><span>Assertion evaluation</span><span>Evidence persistence</span><span>Cleanup</span>
+  <span>Compatibility preflight</span><span>Run mutation</span><span>Observation</span><span>Assertion evaluation</span><span>Cleanup</span><span>Evidence persistence</span>
 </div>
 <p class="authoring-runtime-legend"><span class="runtime-badge">Runtime-dependent</span> <code>{returned-rule-id}</code> comes from rule creation; <code>{server-fingerprint}</code> comes from authoritative OSCAR history.</p>
 <ol class="authoring-lifecycle-list">
