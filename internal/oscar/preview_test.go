@@ -94,6 +94,90 @@ func TestBuildOperationPreviewShowsOrderedCredentialFreeLifecycle(t *testing.T) 
 	}
 }
 
+func TestPreviewRecordsProposedOwnershipImmediatelyBeforeEachRuleMutation(t *testing.T) {
+	operations, err := oscar.BuildOperationPreview(compilePreviewPlan(t, "flood"), "test-version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []string{"P01", "N01"} {
+		validateIndex := findPreviewIndex(t, operations, "setup.validate_rule", code, 0)
+		if validateIndex == 0 || validateIndex+1 >= len(operations) {
+			t.Fatalf("validate index for %s=%d", code, validateIndex)
+		}
+		ownership := operations[validateIndex-1]
+		create := operations[validateIndex+1]
+		if ownership.Stage != "setup.record_proposed_ownership" || ownership.CaseCode != code || ownership.Method != "LOCAL" || ownership.Path != "" || ownership.Body != "" ||
+			!strings.Contains(strings.ToLower(ownership.Summary), "proposed ownership is durably recorded before oscar mutation") {
+			t.Fatalf("ownership before %s validation=%+v", code, ownership)
+		}
+		if create.Stage != "setup.create_rule" || create.CaseCode != code {
+			t.Fatalf("operation after %s validation=%+v", code, create)
+		}
+	}
+}
+
+func TestPreviewCanonicalizesReversedSourceAndPlanToP01ThenN01(t *testing.T) {
+	canonical := compilePreviewPlan(t, "flood")
+	want, err := oscar.BuildOperationPreview(canonical, "test-version")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := scenario.Builtin("flood")
+	source.Cases[0], source.Cases[1] = source.Cases[1], source.Cases[0]
+	reversedSource, err := compiler.Compile(
+		domain.Run{ID: "crt_0123456789ABCDEFGHJKMNPQRS", ShortToken: "7Q9K2M4A"},
+		source, compiler.Capabilities{PipelineMode: "phase_b_dispatch"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reversedPlan := canonical
+	reversedPlan.Cases = append([]compiler.CasePlan(nil), canonical.Cases...)
+	reversedPlan.Cases[0], reversedPlan.Cases[1] = reversedPlan.Cases[1], reversedPlan.Cases[0]
+
+	for name, plan := range map[string]compiler.Plan{"reversed source": reversedSource, "reversed plan": reversedPlan} {
+		t.Run(name, func(t *testing.T) {
+			got, err := oscar.BuildOperationPreview(plan, "test-version")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("preview changed with input case ordering")
+			}
+			if !strings.Contains(got[0].Body, canonical.Cases[0].Rule.Name) {
+				t.Fatalf("compatibility preflight did not use P01: %+v", got[0])
+			}
+			for _, stage := range []string{"setup.record_proposed_ownership", "setup.validate_rule", "setup.create_rule", "stimulus.inject_alert", "evidence.read_history", "cleanup.delete_rule", "cleanup.resolve_alert"} {
+				codes := distinctStageCaseCodes(got, stage)
+				if !reflect.DeepEqual(codes, []string{"P01", "N01"}) {
+					t.Fatalf("stage=%s codes=%v", stage, codes)
+				}
+			}
+		})
+	}
+}
+
+func TestPreviewRejectsMissingOrDuplicateRequiredCaseCodes(t *testing.T) {
+	base := compilePreviewPlan(t, "flood")
+	tests := []struct {
+		name  string
+		cases []compiler.CasePlan
+	}{
+		{name: "missing N01", cases: []compiler.CasePlan{base.Cases[0]}},
+		{name: "duplicate P01", cases: []compiler.CasePlan{base.Cases[0], base.Cases[0], base.Cases[1]}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			plan := base
+			plan.Cases = test.cases
+			if _, err := oscar.BuildOperationPreview(plan, "test-version"); err == nil {
+				t.Fatalf("invalid case codes accepted: %+v", test.cases)
+			}
+		})
+	}
+}
+
 func TestPreviewEvidenceQueriesMatchLiveClientContract(t *testing.T) {
 	plan := compilePreviewPlan(t, "parent_child")
 	operations, err := oscar.BuildOperationPreview(plan, "test-version")
@@ -145,9 +229,15 @@ func TestPreviewResolutionBodyUsesAuthoritativeRuntimePlaceholder(t *testing.T) 
 	}
 	operation := findPreview(t, operations, "cleanup.resolve_alert", "P01", 0)
 	alert := plan.Cases[0].Alerts[0]
+	annotations := make(map[string]string, len(alert.Annotations))
+	for key, value := range alert.Annotations {
+		if key != "oscar_test_attempt_index" {
+			annotations[key] = value
+		}
+	}
 	want, err := oscar.BuildResolutionRequest(oscar.HistoryRecord{
 		AlertName: alert.Name, Fingerprint: "{server-fingerprint}", Status: alert.Status,
-		Labels: alert.Labels, Annotations: alert.Annotations,
+		Labels: alert.Labels, Annotations: annotations,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -169,6 +259,63 @@ func TestOperationPreviewBuildsEveryBuiltinPlan(t *testing.T) {
 	}
 }
 
+func TestPreviewEvidenceReadsOncePerDistinctExpectedSourceIdentity(t *testing.T) {
+	t.Run("persistence firing and resolved share one audit identity", func(t *testing.T) {
+		plan := compilePreviewPlan(t, "persistence")
+		operations, err := oscar.BuildOperationPreview(plan, "test-version")
+		if err != nil {
+			t.Fatal(err)
+		}
+		n01 := plan.Cases[1]
+		if len(n01.Alerts) != 2 || n01.Alerts[0].Labels["oscar_test_event_id"] != n01.Alerts[1].Labels["oscar_test_event_id"] {
+			t.Fatalf("fixture does not reuse identity: %+v", n01.Alerts)
+		}
+		audits := previewsFor(operations, "evidence.read_correlation_audit", "N01")
+		if len(audits) != 1 || !strings.Contains(audits[0].Summary, n01.Alerts[0].Name) || !strings.Contains(audits[0].Summary, n01.Alerts[0].Labels["oscar_test_event_id"]) {
+			t.Fatalf("N01 audit previews=%+v", audits)
+		}
+	})
+
+	t.Run("parent child audits and notifications follow distinct identity order", func(t *testing.T) {
+		plan := compilePreviewPlan(t, "parent_child")
+		operations, err := oscar.BuildOperationPreview(plan, "test-version")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range plan.Cases {
+			audits := previewsFor(operations, "evidence.read_correlation_audit", item.Code)
+			notifications := previewsFor(operations, "evidence.read_notification_audit", item.Code)
+			if len(audits) != len(item.Alerts) || len(notifications) != len(item.Alerts) {
+				t.Fatalf("case=%s audits=%d notifications=%d alerts=%d", item.Code, len(audits), len(notifications), len(item.Alerts))
+			}
+			for index, alert := range item.Alerts {
+				for _, operation := range []oscar.OperationPreview{audits[index], notifications[index]} {
+					if !strings.Contains(operation.Summary, alert.Name) || !strings.Contains(operation.Summary, alert.Labels["oscar_test_event_id"]) {
+						t.Fatalf("case=%s identity %d operation=%+v", item.Code, index, operation)
+					}
+				}
+			}
+		}
+	})
+}
+
+func TestPreviewKeepsAttemptOrderOnlyInOperationMetadata(t *testing.T) {
+	plan := compilePreviewPlan(t, "persistence")
+	operations, err := oscar.BuildOperationPreview(plan, "test-version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stimulus := findPreview(t, operations, "stimulus.inject_alert", "N01", 2)
+	if stimulus.Attempt != 2 || stimulus.ScheduledDelay != 10*time.Second {
+		t.Fatalf("stimulus metadata=%+v", stimulus)
+	}
+	for _, operation := range operations {
+		if strings.Contains(operation.Body, "oscar_test_attempt_index") || strings.Contains(operation.Body, `"delay"`) {
+			t.Fatalf("attempt or delay leaked into %s OSCAR body: %s", operation.Stage, operation.Body)
+		}
+	}
+}
+
 func compilePreviewPlan(t *testing.T, pattern string) compiler.Plan {
 	t.Helper()
 	plan, err := compiler.Compile(
@@ -183,13 +330,38 @@ func compilePreviewPlan(t *testing.T, pattern string) compiler.Plan {
 
 func findPreview(t *testing.T, operations []oscar.OperationPreview, stage, caseCode string, attempt int) oscar.OperationPreview {
 	t.Helper()
-	for _, operation := range operations {
+	return operations[findPreviewIndex(t, operations, stage, caseCode, attempt)]
+}
+
+func findPreviewIndex(t *testing.T, operations []oscar.OperationPreview, stage, caseCode string, attempt int) int {
+	t.Helper()
+	for index, operation := range operations {
 		if operation.Stage == stage && operation.CaseCode == caseCode && (attempt == 0 || operation.Attempt == attempt) {
-			return operation
+			return index
 		}
 	}
 	t.Fatalf("preview stage=%q case=%q attempt=%d not found", stage, caseCode, attempt)
-	return oscar.OperationPreview{}
+	return -1
+}
+
+func previewsFor(operations []oscar.OperationPreview, stage, caseCode string) []oscar.OperationPreview {
+	var result []oscar.OperationPreview
+	for _, operation := range operations {
+		if operation.Stage == stage && operation.CaseCode == caseCode {
+			result = append(result, operation)
+		}
+	}
+	return result
+}
+
+func distinctStageCaseCodes(operations []oscar.OperationPreview, stage string) []string {
+	var result []string
+	for _, operation := range operations {
+		if operation.Stage == stage && (len(result) == 0 || result[len(result)-1] != operation.CaseCode) {
+			result = append(result, operation.CaseCode)
+		}
+	}
+	return result
 }
 
 func containsStage(operations []oscar.OperationPreview, stage string) bool {

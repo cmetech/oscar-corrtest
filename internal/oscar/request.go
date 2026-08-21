@@ -82,7 +82,7 @@ func BuildAlertRequest(alert compiler.AlertPlan) (AlertGroupRequest, error) {
 	if err != nil {
 		return AlertGroupRequest{}, err
 	}
-	annotations := cloneStringMap(alert.Annotations)
+	annotations := alertTransportAnnotations(alert.Annotations)
 	return AlertGroupRequest{
 		Receiver: "oscar-corrtest", Status: status, GroupKey: labels["oscar_test_run_id"] + ":" + name,
 		GroupLabels: map[string]string{"alertname": name}, CommonLabels: cloneStringMap(labels),
@@ -175,6 +175,12 @@ func cloneStringMap(input map[string]string) map[string]string {
 	for key, value := range input {
 		result[key] = value
 	}
+	return result
+}
+
+func alertTransportAnnotations(input map[string]string) map[string]string {
+	result := cloneStringMap(input)
+	delete(result, "oscar_test_attempt_index")
 	return result
 }
 

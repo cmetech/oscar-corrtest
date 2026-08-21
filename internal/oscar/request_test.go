@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
@@ -82,6 +83,47 @@ func TestBuildAlertRequestPinsEnvelopeAndDoesNotMutatePlan(t *testing.T) {
 	}
 	if _, err := oscar.BuildAlertRequest(compiler.AlertPlan{Name: "A", Status: "firing"}); err == nil {
 		t.Fatal("alert without compiler-supplied labels was accepted")
+	}
+}
+
+func TestBuildAlertRequestKeepsEventIdentityButExcludesAttemptMetadata(t *testing.T) {
+	plan := compilePreviewPlan(t, "persistence")
+	alert := plan.Cases[1].Alerts[1]
+	if alert.Delay != 10*time.Second || alert.Annotations["oscar_test_attempt_index"] != "2" || alert.Annotations["oscar_test_event_id"] == "" {
+		t.Fatalf("fixture is not a literal compiled alert: %+v", alert)
+	}
+	request, err := oscar.BuildAlertRequest(alert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAnnotations := map[string]string{
+		"oscar_test_event_id":    "crt_0123456789ABCDEFGHJKMNPQRS-N01-001",
+		"oscar_test_event_index": "1",
+		"summary":                "[CORRTEST][PERSISTENCE][N01][7Q9K2M4A] source alert 2 of 2",
+	}
+	if !reflect.DeepEqual(request.CommonAnnotations, wantAnnotations) || !reflect.DeepEqual(request.Alerts[0].Annotations, wantAnnotations) {
+		t.Fatalf("annotations common=%v nested=%v", request.CommonAnnotations, request.Alerts[0].Annotations)
+	}
+	encoded, err := oscar.CanonicalJSON(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "oscar_test_attempt_index") || strings.Contains(string(encoded), `"delay"`) {
+		t.Fatalf("attempt or delay metadata leaked into OSCAR body: %s", encoded)
+	}
+
+	server := testoscar.New(t)
+	server.Enqueue(testoscar.Response{Status: 200, Body: `{"status":"accepted","task_id":"job-1"}`})
+	if _, err := newClient(t, server.URL()).Inject(context.Background(), alert); err != nil {
+		t.Fatal(err)
+	}
+	operations, err := oscar.BuildOperationPreview(plan, "test-version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview := findPreview(t, operations, "stimulus.inject_alert", "N01", 2)
+	if server.Requests()[0].Body != string(encoded) || preview.Body != string(encoded) || preview.Attempt != 2 || preview.ScheduledDelay != 10*time.Second {
+		t.Fatalf("live=%s preview=%+v builder=%s", server.Requests()[0].Body, preview, encoded)
 	}
 }
 

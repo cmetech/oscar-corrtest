@@ -40,13 +40,14 @@ type OperationPreview struct {
 // BuildOperationPreview renders the same ordered OSCAR request contracts used
 // by live execution without resolving a target or credential and without I/O.
 func BuildOperationPreview(plan compiler.Plan, harnessVersion string) ([]OperationPreview, error) {
-	if len(plan.Cases) == 0 {
-		return nil, fmt.Errorf("compiled plan contains no cases")
+	cases, err := canonicalPreviewCases(plan.Cases)
+	if err != nil {
+		return nil, err
 	}
 	if plan.RunID == "" || plan.ShortToken == "" {
 		return nil, fmt.Errorf("compiled plan lacks preview identity")
 	}
-	operations := make([]OperationPreview, 0, 3+len(plan.Cases)*8+plan.MutationBudget.Alerts*3)
+	operations := make([]OperationPreview, 0, 3+len(cases)*9+plan.MutationBudget.Alerts*3)
 	appendBody := func(operation OperationPreview, body any) error {
 		encoded, err := CanonicalJSON(body)
 		if err != nil {
@@ -57,7 +58,7 @@ func BuildOperationPreview(plan compiler.Plan, harnessVersion string) ([]Operati
 		return nil
 	}
 
-	if err := appendBody(OperationPreview{Stage: "preflight.validate_rule", Method: http.MethodPost, Path: validateRulePath, Summary: "Validate the first compiled rule schema before compatibility probing."}, BuildRuleRequest(plan.Cases[0].Rule, harnessVersion)); err != nil {
+	if err := appendBody(OperationPreview{Stage: "preflight.validate_rule", Method: http.MethodPost, Path: validateRulePath, Summary: "Validate the P01 compiled rule schema before compatibility probing."}, BuildRuleRequest(cases[0].Rule, harnessVersion)); err != nil {
 		return nil, err
 	}
 	probe, err := BuildLabelProbeAlert(plan.RunID, plan.ShortToken)
@@ -78,7 +79,11 @@ func BuildOperationPreview(plan compiler.Plan, harnessVersion string) ([]Operati
 		Summary: "Read the probe back from authoritative OSCAR history.", RuntimeFields: []string{"probe-start", "probe-end"},
 	})
 
-	for _, item := range plan.Cases {
+	for _, item := range cases {
+		operations = append(operations, OperationPreview{
+			Stage: "setup.record_proposed_ownership", CaseCode: item.Code, Method: "LOCAL", Path: "",
+			Summary: "Proposed ownership is durably recorded before OSCAR mutation.",
+		})
 		ruleRequest := BuildRuleRequest(item.Rule, harnessVersion)
 		if err := appendBody(OperationPreview{Stage: "setup.validate_rule", CaseCode: item.Code, Method: http.MethodPost, Path: validateRulePath, Summary: "Validate this temporary correlation rule."}, ruleRequest); err != nil {
 			return nil, err
@@ -88,7 +93,7 @@ func BuildOperationPreview(plan compiler.Plan, harnessVersion string) ([]Operati
 		}
 	}
 
-	for _, item := range plan.Cases {
+	for _, item := range cases {
 		for index, alert := range item.Alerts {
 			request, err := BuildAlertRequest(alert)
 			if err != nil {
@@ -103,16 +108,22 @@ func BuildOperationPreview(plan compiler.Plan, harnessVersion string) ([]Operati
 		}
 	}
 
-	for _, item := range plan.Cases {
+	for _, item := range cases {
 		seenNames := map[string]bool{}
+		seenIdentities := map[string]bool{}
 		for _, alert := range item.Alerts {
 			if !seenNames[alert.Name] {
 				operations = append(operations, historyPreview(item.Code, alert.Name, "Read source-alert history for this case."))
 				seenNames[alert.Name] = true
 			}
-			operations = append(operations, auditPreview(item.Code))
+			identity := alert.Name + "\x00" + alert.Labels["oscar_test_event_id"]
+			if seenIdentities[identity] {
+				continue
+			}
+			seenIdentities[identity] = true
+			operations = append(operations, auditPreview(item.Code, alert.Name, alert.Labels["oscar_test_event_id"]))
 			if item.Rule.Pattern == "parent_child" {
-				operations = append(operations, notificationPreview(item.Code))
+				operations = append(operations, notificationPreview(item.Code, alert.Name, alert.Labels["oscar_test_event_id"]))
 			}
 		}
 		if item.Rule.EmitAlertName != "" && !seenNames[item.Rule.EmitAlertName] {
@@ -124,14 +135,14 @@ func BuildOperationPreview(plan compiler.Plan, harnessVersion string) ([]Operati
 		Summary: "Persist normalized assertions and terminal evidence in the runtime's final SQLite transaction; this is not an OSCAR request.",
 	})
 
-	for _, item := range plan.Cases {
+	for _, item := range cases {
 		operations = append(operations, OperationPreview{
 			Stage: "cleanup.delete_rule", CaseCode: item.Code, Method: http.MethodDelete,
 			Path: createRulePath + "/{returned-rule-id}", Summary: "Delete the exact rule ID returned by OSCAR.", RuntimeFields: []string{runtimeRuleID},
 		})
 	}
 	seenResolutions := map[string]bool{}
-	for _, item := range plan.Cases {
+	for _, item := range cases {
 		for _, alert := range item.Alerts {
 			key, err := resolutionKey(alert.Name, alert.Labels)
 			if err != nil {
@@ -172,29 +183,53 @@ func historyPreview(caseCode, alertName, summary string) OperationPreview {
 	}
 }
 
-func auditPreview(caseCode string) OperationPreview {
+func auditPreview(caseCode, alertName, eventID string) OperationPreview {
 	query := correlationAuditQueryValues("{server-fingerprint}")
 	query.Set("page", "1")
 	return OperationPreview{
 		Stage: "evidence.read_correlation_audit", CaseCode: caseCode, Method: http.MethodGet, Path: pathWithQuery(correlationAuditPath, query),
-		Summary: "Read correlation audit rows for an authoritative history fingerprint.", RuntimeFields: []string{runtimeFingerprint},
+		Summary: fmt.Sprintf("Read correlation audit rows for expected source identity %s / %s.", alertName, eventID), RuntimeFields: []string{runtimeFingerprint},
 	}
 }
 
-func notificationPreview(caseCode string) OperationPreview {
+func notificationPreview(caseCode, alertName, eventID string) OperationPreview {
 	query := notificationAuditQueryValues("{server-fingerprint}", "{observation-start}", "{observation-end}")
 	query.Set("page", "1")
 	return OperationPreview{
 		Stage: "evidence.read_notification_audit", CaseCode: caseCode, Method: http.MethodGet, Path: pathWithQuery(notificationAuditPath, query),
-		Summary:       "Read notification audit rows for an authoritative history fingerprint.",
+		Summary:       fmt.Sprintf("Read notification audit rows for expected source identity %s / %s.", alertName, eventID),
 		RuntimeFields: []string{runtimeFingerprint, runtimeObservationFrom, runtimeObservationTo},
 	}
+}
+
+func canonicalPreviewCases(input []compiler.CasePlan) ([]compiler.CasePlan, error) {
+	var positive, negative *compiler.CasePlan
+	for index := range input {
+		switch input[index].Code {
+		case "P01":
+			if positive != nil {
+				return nil, fmt.Errorf("compiled plan contains duplicate P01 case")
+			}
+			positive = &input[index]
+		case "N01":
+			if negative != nil {
+				return nil, fmt.Errorf("compiled plan contains duplicate N01 case")
+			}
+			negative = &input[index]
+		default:
+			return nil, fmt.Errorf("compiled plan contains unsupported case code %q", input[index].Code)
+		}
+	}
+	if positive == nil || negative == nil {
+		return nil, fmt.Errorf("compiled plan requires exactly one P01 and one N01 case")
+	}
+	return []compiler.CasePlan{*positive, *negative}, nil
 }
 
 func appendResolution(operations *[]OperationPreview, caseCode, alertName, status string, labels, annotations map[string]string) error {
 	request, err := BuildResolutionRequest(HistoryRecord{
 		AlertName: alertName, Fingerprint: "{server-fingerprint}", Status: status,
-		Labels: labels, Annotations: annotations,
+		Labels: labels, Annotations: alertTransportAnnotations(annotations),
 	})
 	if err != nil {
 		return fmt.Errorf("build %s resolution template: %w", caseCode, err)
