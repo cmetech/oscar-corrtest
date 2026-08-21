@@ -241,8 +241,21 @@ not something proven by the credential-free Authoring preview.
 ## Generated schema and drift check
 
 The distributable schema is
-`docs/schema/correlation-scenario.schema.json`. Regenerate it from the typed
-scenario contract with:
+`docs/schema/correlation-scenario.schema.json`. Draft 2020-12 constraints reject
+reserved case/event label keys, reject notifier fields unless `pattern` is
+`parent_child`, forbid labels on resolved events, close every object, and enforce
+the conditional assertion shape.
+
+Standard JSON Schema cannot compare arbitrary values across two arrays, so it
+cannot enforce that `suppressForNotifiers` and `tagForNotifiers` are disjoint.
+It also cannot express declaration-order/prior-firing identity checks,
+cross-field duration parsing and budgets, uniqueness by `cases[].name`, YAML-only
+duplicate-key/alias/document-count protections, or the closed pattern-specific
+P01/N01 semantics. The schema's `x-corrtest-format: go-duration` annotations
+document CorrTest duration rules but require consumer support. Strict CorrTest
+decode/validation remains authoritative for all of these semantic-only checks.
+
+Regenerate the schema from the typed scenario contract with:
 
 ```sh
 go run ./cmd/generate-scenario-schema

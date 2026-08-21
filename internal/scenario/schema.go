@@ -9,6 +9,7 @@ type jsonSchema struct {
 	Schema               string                 `json:"$schema"`
 	ID                   string                 `json:"$id"`
 	Title                string                 `json:"title"`
+	Description          string                 `json:"description,omitempty"`
 	Type                 string                 `json:"type"`
 	AdditionalProperties *bool                  `json:"additionalProperties,omitempty"`
 	Required             []string               `json:"required,omitempty"`
@@ -75,7 +76,19 @@ func buildSchema(contract Contract) jsonSchema {
 		return schemaValue{Type: "string", MinLength: integer(1), Format: "go-duration", MinimumDescription: minimum, MaximumDescription: maximum}
 	}
 	labelNames := schemaValue{Type: "string", MinLength: integer(1), MaxLength: integer(MaxLabelNameLength), Pattern: "^[A-Za-z_][A-Za-z0-9_]*$"}
-	labels := schemaValue{Type: "object", MaxProperties: integer(MaxLabels), PropertyNames: &labelNames, AdditionalProperties: schemaValue{Type: "string", MaxLength: integer(MaxLabelValueLength), Pattern: "^[^\\r\\n\\u0000]*$"}}
+	labelPropertyNames := labelNames
+	labelPropertyNames.Not = &schemaValue{Enum: ReservedLabels()}
+	labels := schemaValue{Type: "object", MaxProperties: integer(MaxLabels), PropertyNames: &labelPropertyNames, AdditionalProperties: schemaValue{Type: "string", MaxLength: integer(MaxLabelValueLength), Pattern: "^[^\\r\\n\\u0000]*$"}}
+	nonParentChildPatterns := make([]string, 0, len(patterns)-1)
+	for _, pattern := range patterns {
+		if pattern != "parent_child" {
+			nonParentChildPatterns = append(nonParentChildPatterns, pattern)
+		}
+	}
+	forbidNotifierFields := schemaValue{Not: &schemaValue{AnyOf: []schemaValue{
+		{Required: []string{"suppressForNotifiers"}},
+		{Required: []string{"tagForNotifiers"}},
+	}}}
 	casePositive := schemaValue{AllOf: []schemaValue{
 		{Properties: map[string]schemaValue{"code": {Const: "P01"}}, Required: []string{"code"}},
 		{Properties: map[string]schemaValue{"polarity": {Const: "positive"}}, Required: []string{"polarity"}},
@@ -88,6 +101,7 @@ func buildSchema(contract Contract) jsonSchema {
 		Schema:               "https://json-schema.org/draft/2020-12/schema",
 		ID:                   "https://github.com/cmetech/oscar-corrtest/docs/schema/correlation-scenario.schema.json",
 		Title:                "OSCAR Correlation Scenario",
+		Description:          "Draft 2020-12 enforces closed objects, reserved label exclusion, pattern-restricted notifier fields, resolved-event labels, and conditional assertions. Cross-array notifier disjointness, event ordering and prior-firing identity, cross-field duration budgets, unique case names, YAML-only syntax protections, and pattern semantics remain strict decoder checks.",
 		Type:                 "object",
 		AdditionalProperties: closed(),
 		Required:             []string{"apiVersion", "kind", "name", "suite", "pattern", "maxDuration", "cases"},
@@ -103,6 +117,12 @@ func buildSchema(contract Contract) jsonSchema {
 				{Contains: &caseNegative, MinContains: integer(1), MaxContains: integer(1)},
 			}},
 		},
+		AllOf: []schemaValue{{
+			If: &schemaValue{Properties: map[string]schemaValue{"pattern": {Enum: nonParentChildPatterns}}, Required: []string{"pattern"}},
+			Then: &schemaValue{Properties: map[string]schemaValue{
+				"cases": {Items: &forbidNotifierFields},
+			}},
+		}},
 		Defs: map[string]schemaValue{
 			"case": {
 				Type: "object", AdditionalProperties: false, Required: []string{"name", "code", "polarity", "window", "assertions"},
@@ -133,6 +153,10 @@ func buildSchema(contract Contract) jsonSchema {
 					"labels": labels,
 					"delay":  duration(">= 0", "scenario and observation budgets"),
 				},
+				AllOf: []schemaValue{{
+					If:   &schemaValue{Properties: map[string]schemaValue{"status": {Const: "resolved"}}, Required: []string{"status"}},
+					Then: &schemaValue{Not: &schemaValue{Required: []string{"labels"}}},
+				}},
 			},
 			"assertion": {
 				Type: "object", AdditionalProperties: false, Required: []string{"kind", "equals"},

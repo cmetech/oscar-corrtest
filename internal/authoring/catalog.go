@@ -99,6 +99,7 @@ func DefaultCatalog() Catalog {
 			{ID: "shape", Title: "Document shape", Content: "Use exactly P01 positive and N01 negative cases with exclusive repeat or event stimulus forms."},
 			{ID: "budgets", Title: "Safe budgets", Content: "Durations, event counts, labels, assertions, grouping labels, and notifier names are bounded."},
 			{ID: "pattern-aware", Title: "Pattern-aware semantics", Content: "Structural YAML still fails when its P01 or N01 cannot exercise the selected pattern contract."},
+			{ID: "schema-limits", Title: "JSON Schema boundary", Content: "The public schema rejects reserved label keys, non-parent-child notifier fields, resolved-event labels, closed fields, and conditional assertions. Cross-array notifier disjointness, event ordering and identity, cross-field timing, unique case names, YAML-only protections, and pattern semantics remain strict decoder checks."},
 		},
 	}
 }

@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/cmetech/oscar-corrtest/docs/schema/correlation-scenario.schema.json",
   "title": "OSCAR Correlation Scenario",
+  "description": "Draft 2020-12 enforces closed objects, reserved label exclusion, pattern-restricted notifier fields, resolved-event labels, and conditional assertions. Cross-array notifier disjointness, event ordering and prior-firing identity, cross-field duration budgets, unique case names, YAML-only syntax protections, and pattern semantics remain strict decoder checks.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -244,7 +245,32 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 100,
-            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+            "not": {
+              "enum": [
+                "alertname",
+                "am_fingerprint",
+                "category",
+                "oscar_fingerprint",
+                "oscar_test",
+                "oscar_test_alert_class",
+                "oscar_test_alert_role",
+                "oscar_test_case",
+                "oscar_test_case_code",
+                "oscar_test_event_id",
+                "oscar_test_event_index",
+                "oscar_test_harness",
+                "oscar_test_pattern",
+                "oscar_test_polarity",
+                "oscar_test_rule_name",
+                "oscar_test_run_id",
+                "oscar_test_run_short",
+                "oscar_test_scenario",
+                "oscar_test_schema_version",
+                "oscar_test_suite",
+                "severity"
+              ]
+            }
           }
         },
         "name": {
@@ -358,7 +384,32 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 100,
-            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+            "not": {
+              "enum": [
+                "alertname",
+                "am_fingerprint",
+                "category",
+                "oscar_fingerprint",
+                "oscar_test",
+                "oscar_test_alert_class",
+                "oscar_test_alert_role",
+                "oscar_test_case",
+                "oscar_test_case_code",
+                "oscar_test_event_id",
+                "oscar_test_event_index",
+                "oscar_test_harness",
+                "oscar_test_pattern",
+                "oscar_test_polarity",
+                "oscar_test_rule_name",
+                "oscar_test_run_id",
+                "oscar_test_run_short",
+                "oscar_test_scenario",
+                "oscar_test_schema_version",
+                "oscar_test_suite",
+                "severity"
+              ]
+            }
           }
         },
         "role": {
@@ -372,7 +423,72 @@
             "resolved"
           ]
         }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "status"
+            ],
+            "properties": {
+              "status": {
+                "const": "resolved"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "labels"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "pattern"
+        ],
+        "properties": {
+          "pattern": {
+            "enum": [
+              "flood",
+              "co_occurrence",
+              "sequence",
+              "persistence",
+              "absence",
+              "cross_source",
+              "threshold"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "cases": {
+            "items": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "suppressForNotifiers"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "tagForNotifiers"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        }
       }
     }
-  }
+  ]
 }

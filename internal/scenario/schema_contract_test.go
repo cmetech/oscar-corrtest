@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"reflect"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -107,4 +110,99 @@ func TestReservedLabelsAndDurationBoundsComeFromThePublicContract(t *testing.T) 
 	if scenario.MaxScenarioDuration != 5*time.Minute || scenario.MaxCaseWindow != 2*time.Minute {
 		t.Fatal("approved duration budgets changed")
 	}
+}
+
+func TestGeneratedJSONSchemaRejectsReservedLabelsAndPatternRestrictedNotifiers(t *testing.T) {
+	document := generatedSchemaDocument(t)
+	definitions := document["$defs"].(map[string]any)
+	for _, definitionName := range []string{"case", "event"} {
+		properties := definitions[definitionName].(map[string]any)["properties"].(map[string]any)
+		propertyNames := properties["labels"].(map[string]any)["propertyNames"].(map[string]any)
+		not, ok := propertyNames["not"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s label property names do not reject reserved keys: %#v", definitionName, propertyNames)
+		}
+		got := stringSlice(not["enum"])
+		want := scenario.ReservedLabels()
+		sort.Strings(got)
+		sort.Strings(want)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s reserved label rejection=%v want=%v", definitionName, got, want)
+		}
+	}
+
+	conditionals, ok := document["allOf"].([]any)
+	if !ok || len(conditionals) == 0 {
+		t.Fatal("root schema has no pattern-aware conditional")
+	}
+	restriction := conditionals[0].(map[string]any)
+	ifPattern := restriction["if"].(map[string]any)["properties"].(map[string]any)["pattern"].(map[string]any)
+	gotPatterns := stringSlice(ifPattern["enum"])
+	wantPatterns := []string{}
+	for _, pattern := range scenario.SupportedPatterns() {
+		if pattern != "parent_child" {
+			wantPatterns = append(wantPatterns, pattern)
+		}
+	}
+	sort.Strings(gotPatterns)
+	sort.Strings(wantPatterns)
+	if !reflect.DeepEqual(gotPatterns, wantPatterns) {
+		t.Fatalf("notifier rejection patterns=%v want=%v", gotPatterns, wantPatterns)
+	}
+	caseItems := restriction["then"].(map[string]any)["properties"].(map[string]any)["cases"].(map[string]any)["items"].(map[string]any)
+	forbidden := caseItems["not"].(map[string]any)["anyOf"].([]any)
+	gotFields := []string{}
+	for _, branch := range forbidden {
+		gotFields = append(gotFields, stringSlice(branch.(map[string]any)["required"])...)
+	}
+	sort.Strings(gotFields)
+	if !reflect.DeepEqual(gotFields, []string{"suppressForNotifiers", "tagForNotifiers"}) {
+		t.Fatalf("non-parent-child notifier rejection=%v", gotFields)
+	}
+}
+
+func TestGeneratedJSONSchemaRejectsLabelsOnResolvedEventsAndDocumentsSemanticLimits(t *testing.T) {
+	document := generatedSchemaDocument(t)
+	description, _ := document["description"].(string)
+	for _, phrase := range []string{"reserved label exclusion", "pattern-restricted notifier fields", "cross-array notifier disjointness", "event ordering", "strict decoder"} {
+		if !strings.Contains(strings.ToLower(description), phrase) {
+			t.Errorf("schema description missing %q: %q", phrase, description)
+		}
+	}
+	event := document["$defs"].(map[string]any)["event"].(map[string]any)
+	conditionals, ok := event["allOf"].([]any)
+	if !ok || len(conditionals) == 0 {
+		t.Fatal("event schema has no status-aware conditional")
+	}
+	conditional := conditionals[0].(map[string]any)
+	status := conditional["if"].(map[string]any)["properties"].(map[string]any)["status"].(map[string]any)["const"]
+	if status != "resolved" {
+		t.Fatalf("event conditional status=%v", status)
+	}
+	forbidden := stringSlice(conditional["then"].(map[string]any)["not"].(map[string]any)["required"])
+	if !reflect.DeepEqual(forbidden, []string{"labels"}) {
+		t.Fatalf("resolved event forbidden fields=%v", forbidden)
+	}
+}
+
+func generatedSchemaDocument(t *testing.T) map[string]any {
+	t.Helper()
+	raw, err := scenario.GenerateJSONSchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	return document
+}
+
+func stringSlice(value any) []string {
+	items, _ := value.([]any)
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		result = append(result, item.(string))
+	}
+	return result
 }
