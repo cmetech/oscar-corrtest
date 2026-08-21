@@ -12,7 +12,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := os.WriteFile("docs/schema/correlation-scenario.schema.json", raw, 0o644); err != nil {
+	if err := os.WriteFile("docs/schema/correlation-scenario.schema.json", raw, 0o644); err != nil { // #nosec G306 -- fixed output is an intentionally public checked-in and distributed JSON Schema.
 		log.Fatal(err)
 	}
 }
