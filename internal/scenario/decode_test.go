@@ -65,3 +65,20 @@ func TestDecodeRejectsUnsafeOrAmbiguousDocuments(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeEnforcesConditionalAssertionOutcomes(t *testing.T) {
+	tests := map[string]string{
+		"audit count needs outcome":             strings.Replace(validCustom, "{kind: synthetic-alert-count, equals: 1}", "{kind: audit-count, equals: 1}", 1),
+		"audit count needs nonblank outcome":    strings.Replace(validCustom, "{kind: synthetic-alert-count, equals: 1}", "{kind: audit-count, outcome: ' ', equals: 1}", 1),
+		"parent link count needs outcome":       strings.Replace(validCustom, "{kind: synthetic-alert-count, equals: 1}", "{kind: parent-link-count, equals: 1}", 1),
+		"synthetic count forbids outcome":       strings.Replace(validCustom, "{kind: synthetic-alert-count, equals: 1}", "{kind: synthetic-alert-count, outcome: parent_emitted, equals: 1}", 1),
+		"synthetic count forbids empty outcome": strings.Replace(validCustom, "{kind: synthetic-alert-count, equals: 1}", "{kind: synthetic-alert-count, outcome: '', equals: 1}", 1),
+	}
+	for name, input := range tests {
+		t.Run(name, func(t *testing.T) {
+			if _, err := scenario.Decode(strings.NewReader(input)); err == nil {
+				t.Fatal("invalid assertion outcome contract accepted")
+			}
+		})
+	}
+}

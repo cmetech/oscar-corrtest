@@ -27,7 +27,14 @@ func Encode(document Scenario) ([]byte, error) {
 			GroupBy: append([]string(nil), item.GroupBy...), Labels: cloneStringMap(item.Labels),
 			SuppressForNotifiers: append([]string(nil), item.SuppressForNotifiers...),
 			TagForNotifiers:      append([]string(nil), item.TagForNotifiers...),
-			Assertions:           append([]Assertion(nil), item.Assertions...),
+		}
+		for _, assertion := range item.Assertions {
+			encoded := wireAssertion{Kind: assertion.Kind, Equals: assertion.Equals}
+			if assertion.Outcome != "" {
+				outcome := assertion.Outcome
+				encoded.Outcome = &outcome
+			}
+			converted.Assertions = append(converted.Assertions, encoded)
 		}
 		for _, event := range item.Events {
 			delay := ""

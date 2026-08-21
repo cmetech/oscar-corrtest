@@ -70,8 +70,6 @@ type Inspection struct {
 	Filters         map[string]string `json:"filters"`
 }
 
-var reservedLabels = map[string]struct{}{"alertname": {}, "category": {}, "oscar_test": {}, "oscar_test_harness": {}, "oscar_test_schema_version": {}, "oscar_test_run_id": {}, "oscar_test_run_short": {}, "oscar_test_suite": {}, "oscar_test_scenario": {}, "oscar_test_pattern": {}, "oscar_test_case": {}, "oscar_test_case_code": {}, "oscar_test_polarity": {}, "oscar_test_alert_class": {}, "oscar_test_alert_role": {}, "oscar_test_rule_name": {}, "oscar_test_event_id": {}, "oscar_test_event_index": {}}
-
 func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities) (Plan, error) {
 	if run.ID == "" || len(run.ShortToken) != 8 {
 		return Plan{}, fmt.Errorf("run identity is invalid")
@@ -80,10 +78,10 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 		return Plan{}, fmt.Errorf("pipeline mode %q cannot support correlation execution", capabilities.PipelineMode)
 	}
 	patternCode, supported := patternCodes[input.Pattern]
-	if input.APIVersion != "corrtest.oscar/v1alpha1" || input.Kind != "CorrelationScenario" || !supported || len(input.Cases) != 2 {
+	if input.APIVersion != scenario.APIVersion || input.Kind != scenario.Kind || !supported || len(input.Cases) != scenario.RequiredCaseCount {
 		return Plan{}, fmt.Errorf("unsupported or incomplete scenario")
 	}
-	if input.MaxDuration <= 0 || input.MaxDuration > 5*time.Minute {
+	if input.MaxDuration <= 0 || input.MaxDuration > scenario.MaxScenarioDuration {
 		return Plan{}, fmt.Errorf("scenario maximum duration is outside the safe budget")
 	}
 	plan := Plan{APIVersion: input.APIVersion, Scenario: input.Name, Suite: input.Suite, Pattern: input.Pattern, RunID: run.ID, ShortToken: strings.ToUpper(run.ShortToken), MaxDuration: input.MaxDuration}
@@ -94,19 +92,19 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 				events = append(events, scenario.Event{Role: source.Role, Status: "firing"})
 			}
 		}
-		if len(events) < 1 || len(events) > 100 || source.Window <= 0 || source.Window > 2*time.Minute {
+		if len(events) < 1 || len(events) > scenario.MaxEvents || source.Window <= 0 || source.Window > scenario.MaxCaseWindow {
 			return Plan{}, fmt.Errorf("case %q exceeds the mutation or timing budget", source.Name)
 		}
 		for key := range source.Labels {
-			if _, reserved := reservedLabels[key]; reserved {
+			if scenario.IsReservedLabel(key) {
 				return Plan{}, fmt.Errorf("case %q overrides reserved label %q", source.Name, key)
 			}
 		}
-		if len(source.SuppressForNotifiers) > 16 || len(source.TagForNotifiers) > 16 {
+		if len(source.SuppressForNotifiers) > scenario.MaxNotifierNames || len(source.TagForNotifiers) > scenario.MaxNotifierNames {
 			return Plan{}, fmt.Errorf("case %q exceeds the notifier budget", source.Name)
 		}
 		for _, notifier := range append(append([]string{}, source.SuppressForNotifiers...), source.TagForNotifiers...) {
-			if strings.TrimSpace(notifier) != notifier || notifier == "" || len(notifier) > 100 {
+			if strings.TrimSpace(notifier) != notifier || notifier == "" || len(notifier) > scenario.MaxNotifierNameLength {
 				return Plan{}, fmt.Errorf("case %q contains an invalid notifier name", source.Name)
 			}
 		}
@@ -161,7 +159,7 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 					labels[key] = value
 				}
 				for key, value := range event.Labels {
-					if _, reserved := reservedLabels[key]; reserved {
+					if scenario.IsReservedLabel(key) {
 						return Plan{}, fmt.Errorf("case %q event overrides reserved label %q", source.Name, key)
 					}
 					labels[key] = value

@@ -61,9 +61,11 @@ func TestCompileRejectsUnsafeCapabilitiesAndReservedLabels(t *testing.T) {
 		}
 	}
 	custom := scenario.Builtin("flood")
-	custom.Cases[0].Labels = map[string]string{"oscar_test_run_id": "forged"}
-	if _, err := compiler.Compile(run, custom, compiler.Capabilities{PipelineMode: "phase_b_dispatch"}); err == nil {
-		t.Fatal("reserved label override accepted")
+	for _, reserved := range []string{"oscar_test_run_id", "oscar_test_event_id", "oscar_fingerprint", "am_fingerprint", "severity"} {
+		custom.Cases[0].Labels = map[string]string{reserved: "forged"}
+		if _, err := compiler.Compile(run, custom, compiler.Capabilities{PipelineMode: "phase_b_dispatch"}); err == nil {
+			t.Fatalf("reserved label override %q accepted", reserved)
+		}
 	}
 }
 
