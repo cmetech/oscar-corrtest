@@ -87,3 +87,95 @@ func TestCatalogValidateRejectsBrokenLinksAndNarrative(t *testing.T) {
 		})
 	}
 }
+
+func TestCatalogValidateRequiresExactStableCatalogSets(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Catalog)
+	}{
+		{"missing section", func(c *Catalog) { c.Sections = c.Sections[1:] }},
+		{"extra section", func(c *Catalog) {
+			c.Sections = append(c.Sections, Section{ID: "extra", Title: "Extra", Summary: "Extra"})
+		}},
+		{"unknown section", func(c *Catalog) { c.Sections[0].ID = "unknown" }},
+		{"missing lesson", func(c *Catalog) { c.Lessons = c.Lessons[1:] }},
+		{"extra lesson", func(c *Catalog) {
+			c.Lessons = append(c.Lessons, Lesson{ID: "extra", Title: "Extra", Concept: "Concept", Effect: "Effect", Fragment: "# fragment", CommonMistake: "Mistake"})
+		}},
+		{"unknown lesson", func(c *Catalog) { c.Lessons[0].ID = "unknown" }},
+		{"missing view", func(c *Catalog) { c.Views = c.Views[1:] }},
+		{"extra view", func(c *Catalog) { c.Views = append(c.Views, View{ID: "extra", Title: "Extra", Summary: "Extra"}) }},
+		{"unknown view", func(c *Catalog) { c.Views[0].ID = "unknown" }},
+		{"missing pattern guide", func(c *Catalog) { c.Patterns = c.Patterns[1:] }},
+		{"extra pattern guide", func(c *Catalog) {
+			c.Patterns = append(c.Patterns, PatternGuide{ID: "extra", Title: "Extra", Behavior: "Behavior", ExpectedEvidence: "Evidence"})
+		}},
+		{"empty lesson concept", func(c *Catalog) { c.Lessons[0].Concept = "" }},
+		{"empty section summary", func(c *Catalog) { c.Sections[0].Summary = "" }},
+		{"empty view summary", func(c *Catalog) { c.Views[0].Summary = "" }},
+		{"empty assertion note", func(c *Catalog) { c.AssertionNotes[0].Content = "" }},
+		{"empty validation note", func(c *Catalog) { c.ValidationNotes[0].Content = "" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			catalog := cloneCatalog(DefaultCatalog())
+			test.mutate(&catalog)
+			if err := catalog.Validate(scenario.PublicContract(), scenario.AllExamples()); err == nil {
+				t.Fatal("invalid catalog accepted")
+			}
+		})
+	}
+}
+
+func TestCatalogValidateRequiresExactExampleRegistry(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*[]scenario.ExampleDefinition)
+	}{
+		{"missing example", func(examples *[]scenario.ExampleDefinition) { *examples = (*examples)[1:] }},
+		{"extra unknown example", func(examples *[]scenario.ExampleDefinition) {
+			*examples = append(*examples, scenario.ExampleDefinition{ID: "unknown:basic", Pattern: "unknown", Level: "basic", Scenario: scenario.Builtin("flood")})
+		}},
+		{"duplicate ID", func(examples *[]scenario.ExampleDefinition) { *examples = append(*examples, (*examples)[0]) }},
+		{"duplicate slot", func(examples *[]scenario.ExampleDefinition) {
+			duplicate := (*examples)[0]
+			duplicate.ID = "another-id"
+			*examples = append(*examples, duplicate)
+		}},
+		{"malformed ID", func(examples *[]scenario.ExampleDefinition) { (*examples)[0].ID = "wrong" }},
+		{"unknown level", func(examples *[]scenario.ExampleDefinition) { (*examples)[0].Level = "expert" }},
+		{"unknown pattern", func(examples *[]scenario.ExampleDefinition) { (*examples)[0].Pattern = "unknown" }},
+		{"scenario pattern mismatch", func(examples *[]scenario.ExampleDefinition) { (*examples)[0].Scenario.Pattern = "threshold" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			examples := scenario.AllExamples()
+			test.mutate(&examples)
+			if err := DefaultCatalog().Validate(scenario.PublicContract(), examples); err == nil {
+				t.Fatal("invalid example registry accepted")
+			}
+		})
+	}
+}
+
+func TestCatalogValidateIdentifiesDuplicateExampleSlots(t *testing.T) {
+	examples := scenario.AllExamples()
+	duplicate := examples[0]
+	duplicate.ID = "another-id"
+	examples = append(examples, duplicate)
+	err := DefaultCatalog().Validate(scenario.PublicContract(), examples)
+	if err == nil || !strings.Contains(err.Error(), "duplicate example slot") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func cloneCatalog(input Catalog) Catalog {
+	result := input
+	result.Sections = append([]Section(nil), input.Sections...)
+	result.Lessons = append([]Lesson(nil), input.Lessons...)
+	result.Patterns = append([]PatternGuide(nil), input.Patterns...)
+	result.Views = append([]View(nil), input.Views...)
+	result.AssertionNotes = append([]Note(nil), input.AssertionNotes...)
+	result.ValidationNotes = append([]Note(nil), input.ValidationNotes...)
+	return result
+}

@@ -107,21 +107,22 @@ func patternGuide(id, title, behavior string, fixed, configurable []string, evid
 	return PatternGuide{ID: id, Title: title, Behavior: behavior, FixedSemantics: fixed, Configurable: configurable, ExpectedEvidence: evidence, Mistakes: []string{falsePositive, falseNegative}}
 }
 
-// Validate verifies that narrative references resolve against the public
-// contract and that each cookbook pattern has both executable levels.
+// Validate verifies the exact stable authoring registry, narrative references,
+// and executable example slots against the public scenario contract.
 func (c Catalog) Validate(contract scenario.Contract, examples []scenario.ExampleDefinition) error {
 	fields := make(map[string]struct{}, len(contract.Fields))
 	for _, field := range contract.Fields {
 		fields[field.ID] = struct{}{}
 	}
-	patterns := make(map[string]struct{}, len(contract.Patterns))
-	for _, pattern := range contract.Patterns {
-		patterns[pattern.ID] = struct{}{}
+	patternIDs := scenario.SupportedPatterns()
+	patterns := make(map[string]struct{}, len(patternIDs))
+	for _, patternID := range patternIDs {
+		patterns[patternID] = struct{}{}
 	}
-	if err := validateUniqueSections(c.Sections); err != nil {
+	if err := validateSections(c.Sections); err != nil {
 		return err
 	}
-	if err := validateUniqueLessons(c.Lessons, fields); err != nil {
+	if err := validateLessons(c.Lessons, fields); err != nil {
 		return err
 	}
 	seenPatterns := make(map[string]struct{}, len(c.Patterns))
@@ -133,8 +134,17 @@ func (c Catalog) Validate(contract scenario.Contract, examples []scenario.Exampl
 			return fmt.Errorf("duplicate pattern %q", guide.ID)
 		}
 		seenPatterns[guide.ID] = struct{}{}
-		if strings.TrimSpace(guide.Behavior) == "" || strings.TrimSpace(guide.ExpectedEvidence) == "" {
+		if strings.TrimSpace(guide.Title) == "" || strings.TrimSpace(guide.Behavior) == "" || strings.TrimSpace(guide.ExpectedEvidence) == "" {
 			return fmt.Errorf("pattern %q has empty narrative", guide.ID)
+		}
+		if err := validateNarrativeList("pattern "+guide.ID+" fixed semantics", guide.FixedSemantics); err != nil {
+			return err
+		}
+		if err := validateNarrativeList("pattern "+guide.ID+" configurable inputs", guide.Configurable); err != nil {
+			return err
+		}
+		if err := validateNarrativeList("pattern "+guide.ID+" mistakes", guide.Mistakes); err != nil {
+			return err
 		}
 		for _, fieldID := range guide.Configurable {
 			if _, found := fields[fieldID]; !found {
@@ -142,39 +152,40 @@ func (c Catalog) Validate(contract scenario.Contract, examples []scenario.Exampl
 			}
 		}
 	}
-	available := make(map[string]struct{}, len(examples))
-	for _, example := range examples {
-		available[example.Pattern+":"+example.Level] = struct{}{}
+	if err := validateExactIDs("pattern guide", seenPatterns, patternIDs); err != nil {
+		return err
 	}
-	for patternID := range patterns {
-		for _, level := range []string{"basic", "advanced"} {
-			if _, found := available[patternID+":"+level]; !found {
-				return fmt.Errorf("missing %s example for pattern %q", level, patternID)
-			}
-		}
+	if err := validateViews(c.Views); err != nil {
+		return err
 	}
-	return validateViews(c.Views)
+	if err := validateNotes("assertion note", c.AssertionNotes); err != nil {
+		return err
+	}
+	if err := validateNotes("validation note", c.ValidationNotes); err != nil {
+		return err
+	}
+	return validateExamples(examples, patterns, patternIDs)
 }
 
-func validateUniqueSections(sections []Section) error {
+func validateSections(sections []Section) error {
 	seen := make(map[string]struct{}, len(sections))
 	for _, section := range sections {
-		if strings.TrimSpace(section.ID) == "" || strings.TrimSpace(section.Title) == "" {
-			return fmt.Errorf("section has empty ID or title")
+		if strings.TrimSpace(section.ID) == "" || strings.TrimSpace(section.Title) == "" || strings.TrimSpace(section.Summary) == "" {
+			return fmt.Errorf("section has empty narrative")
 		}
 		if _, duplicate := seen[section.ID]; duplicate {
 			return fmt.Errorf("duplicate section %q", section.ID)
 		}
 		seen[section.ID] = struct{}{}
 	}
-	return nil
+	return validateExactIDs("section", seen, []string{"quickstart", "schema", "patterns", "assertions", "validation"})
 }
 
-func validateUniqueLessons(lessons []Lesson, fields map[string]struct{}) error {
+func validateLessons(lessons []Lesson, fields map[string]struct{}) error {
 	seen := make(map[string]struct{}, len(lessons))
 	for _, lesson := range lessons {
-		if strings.TrimSpace(lesson.ID) == "" || strings.TrimSpace(lesson.Title) == "" {
-			return fmt.Errorf("lesson has empty ID or title")
+		if strings.TrimSpace(lesson.ID) == "" || strings.TrimSpace(lesson.Title) == "" || strings.TrimSpace(lesson.Concept) == "" || strings.TrimSpace(lesson.Effect) == "" || strings.TrimSpace(lesson.CommonMistake) == "" {
+			return fmt.Errorf("lesson has empty narrative")
 		}
 		if _, duplicate := seen[lesson.ID]; duplicate {
 			return fmt.Errorf("duplicate lesson %q", lesson.ID)
@@ -189,24 +200,97 @@ func validateUniqueLessons(lessons []Lesson, fields map[string]struct{}) error {
 			}
 		}
 	}
-	return nil
+	return validateExactIDs("lesson", seen, []string{"identity", "cases", "stimuli", "assertions", "validate"})
 }
 
 func validateViews(views []View) error {
 	seen := make(map[string]struct{}, len(views))
 	for _, view := range views {
-		if strings.TrimSpace(view.ID) == "" || strings.TrimSpace(view.Title) == "" {
-			return fmt.Errorf("view has empty ID or title")
+		if strings.TrimSpace(view.ID) == "" || strings.TrimSpace(view.Title) == "" || strings.TrimSpace(view.Summary) == "" {
+			return fmt.Errorf("view has empty narrative")
 		}
 		if _, duplicate := seen[view.ID]; duplicate {
 			return fmt.Errorf("duplicate view %q", view.ID)
 		}
 		seen[view.ID] = struct{}{}
 	}
-	for _, required := range []string{"yaml", "contract", "api", "lifecycle"} {
-		if _, found := seen[required]; !found {
-			return fmt.Errorf("missing required view %q", required)
+	return validateExactIDs("view", seen, []string{"yaml", "contract", "api", "lifecycle"})
+}
+
+func validateNotes(kind string, notes []Note) error {
+	seen := make(map[string]struct{}, len(notes))
+	for _, note := range notes {
+		if strings.TrimSpace(note.ID) == "" || strings.TrimSpace(note.Title) == "" || strings.TrimSpace(note.Content) == "" {
+			return fmt.Errorf("%s has empty narrative", kind)
 		}
+		if _, duplicate := seen[note.ID]; duplicate {
+			return fmt.Errorf("duplicate %s %q", kind, note.ID)
+		}
+		seen[note.ID] = struct{}{}
+	}
+	return nil
+}
+
+func validateNarrativeList(name string, values []string) error {
+	if len(values) == 0 {
+		return fmt.Errorf("%s is empty", name)
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("%s contains empty content", name)
+		}
+	}
+	return nil
+}
+
+func validateExactIDs(kind string, seen map[string]struct{}, expected []string) error {
+	if len(seen) != len(expected) {
+		return fmt.Errorf("%s set has %d IDs, want exactly %d", kind, len(seen), len(expected))
+	}
+	for _, id := range expected {
+		if _, found := seen[id]; !found {
+			return fmt.Errorf("missing %s %q", kind, id)
+		}
+	}
+	return nil
+}
+
+func validateExamples(examples []scenario.ExampleDefinition, patterns map[string]struct{}, patternIDs []string) error {
+	seenIDs := make(map[string]struct{}, len(examples))
+	seenSlots := make(map[string]struct{}, len(examples))
+	for _, example := range examples {
+		if _, found := patterns[example.Pattern]; !found {
+			return fmt.Errorf("example %q has unknown pattern %q", example.ID, example.Pattern)
+		}
+		if example.Level != "basic" && example.Level != "advanced" {
+			return fmt.Errorf("example %q has unknown level %q", example.ID, example.Level)
+		}
+		slot := example.Pattern + ":" + example.Level
+		if _, duplicate := seenSlots[slot]; duplicate {
+			return fmt.Errorf("duplicate example slot %q", slot)
+		}
+		seenSlots[slot] = struct{}{}
+		if _, duplicate := seenIDs[example.ID]; duplicate {
+			return fmt.Errorf("duplicate example ID %q", example.ID)
+		}
+		seenIDs[example.ID] = struct{}{}
+		if example.ID != slot {
+			return fmt.Errorf("example ID %q must equal %q", example.ID, slot)
+		}
+		if example.Scenario.Pattern != example.Pattern {
+			return fmt.Errorf("example %q scenario pattern %q does not match %q", example.ID, example.Scenario.Pattern, example.Pattern)
+		}
+	}
+	for _, patternID := range patternIDs {
+		for _, level := range []string{"basic", "advanced"} {
+			slot := patternID + ":" + level
+			if _, found := seenSlots[slot]; !found {
+				return fmt.Errorf("missing %s example for pattern %q", level, patternID)
+			}
+		}
+	}
+	if len(examples) != len(patternIDs)*2 {
+		return fmt.Errorf("example registry has %d examples, want exactly %d", len(examples), len(patternIDs)*2)
 	}
 	return nil
 }
