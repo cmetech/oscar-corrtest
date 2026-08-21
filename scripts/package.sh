@@ -90,7 +90,10 @@ archive_tmp="$archive.tmp"
 trap 'if [ -f "$archive_tmp" ]; then rm -f -- "$archive_tmp"; fi; cleanup' EXIT HUP INT TERM
 
 if [ "$os_name" = windows ]; then
-  GOWORK=off go run "$root_dir/cmd/package-zip" "$archive" "$stage" "$source_date_epoch"
+  (
+    cd "$root_dir"
+    GOWORK=off go run ./cmd/package-zip "$archive" "$stage" "$source_date_epoch"
+  )
 else
   if command -v gtar >/dev/null 2>&1; then
     tar_bin=$(command -v gtar)
