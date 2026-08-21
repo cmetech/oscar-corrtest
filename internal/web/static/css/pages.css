@@ -45,6 +45,10 @@ pre { overflow: auto; white-space: pre-wrap; }
 .reference-toc a { padding: 7px 9px; color: var(--ct-fg-muted); text-decoration: none; }
 .reference-content { min-width: 0; }
 .reference-topic { scroll-margin-top: 76px; }
+.reference-topic__links, .help-drawer__links { display: flex; flex-wrap: wrap; gap: var(--ct-space-2); margin: var(--ct-space-3) 0; }
+.reference-topic__links a, .help-drawer__links a { padding: 5px 8px; border: 1px solid var(--ct-border); border-radius: var(--ct-radius-input); color: var(--ct-fg); font-size: 12px; text-decoration: none; }
+.reference-topic__links a:hover, .help-drawer__links a:hover { border-color: var(--ct-accent); background: var(--ct-card-hover); }
+.reference-topic__links a:focus-visible, .help-drawer__links a:focus-visible { outline: 3px solid var(--ct-accent); outline-offset: 2px; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; clip-path: inset(50%); }
 
 .scenario-workbench { display: grid; min-height: 720px; margin-top: var(--ct-space-6); border: 1px solid var(--ct-border); border-radius: var(--ct-radius-card); background: var(--ct-card); grid-template-columns: minmax(210px, .62fr) minmax(350px, 1.08fr) minmax(390px, 1.3fr); overflow: hidden; }
@@ -76,6 +80,15 @@ pre { overflow: auto; white-space: pre-wrap; }
 .copy-status { min-height: 1.5em; margin: var(--ct-space-2) 0 0; font-size: 12px; }
 .scenario-contract { max-height: 820px; overflow-y: auto; background: color-mix(in srgb, var(--ct-card) 92%, var(--ct-bg)); }
 .contract-header { position: sticky; z-index: 2; top: calc(var(--ct-space-4) * -1); margin: calc(var(--ct-space-4) * -1) calc(var(--ct-space-4) * -1) 0; padding: var(--ct-space-4); border-bottom: 1px solid var(--ct-border); background: var(--ct-card); }
+.scenario-inspection-tabs { display: grid; margin: 0 calc(var(--ct-space-4) * -1) var(--ct-space-3); border-bottom: 1px solid var(--ct-border); grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.scenario-inspection-tabs a { min-width: 0; padding: 10px 6px; border-bottom: 3px solid transparent; color: var(--ct-fg-muted); font-size: 11px; font-weight: 800; text-align: center; text-decoration: none; }
+.scenario-inspection-tabs a:hover { color: var(--ct-fg); }
+.scenario-inspection-tabs a[aria-selected="true"] { border-bottom-color: var(--ct-accent); color: var(--ct-fg); }
+.scenario-inspection-tabs a:focus-visible { outline: 3px solid var(--ct-accent); outline-offset: -3px; }
+.scenario-inspection-panel[hidden] { display: none; }
+.scenario-inspection-panel.authoring-view-panel { padding-top: var(--ct-space-2); }
+.scenario-authoring-link { margin: 0 0 var(--ct-space-3); color: var(--ct-fg-muted); font-size: 11px; }
+.scenario-authoring-link a, .catalog-guidance a { color: var(--ct-fg); text-decoration-color: var(--ct-activity); text-underline-offset: 3px; }
 .contract-summary { display: grid; margin: 0 calc(var(--ct-space-4) * -1); grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .contract-summary div { min-width: 0; padding: var(--ct-space-3) var(--ct-space-4); border-bottom: 1px solid var(--ct-border); }
 .contract-summary div + div { border-left: 1px solid var(--ct-border); }

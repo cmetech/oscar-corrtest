@@ -8,6 +8,7 @@
   <p class="muted">{{.Help.Summary}}</p>
   <div class="help-drawer__content">
     {{range .Help.Sections}}<section><h3>{{.Heading}}</h3>{{range .Paragraphs}}<p>{{.}}</p>{{end}}{{if .Bullets}}<ul>{{range .Bullets}}<li>{{.}}</li>{{end}}</ul>{{end}}{{if .Code}}<pre><code>{{.Code}}</code></pre>{{end}}</section>{{end}}
+	{{if .Help.Links}}<nav class="help-drawer__links" aria-label="Related console guidance">{{range .Help.Links}}<a href="{{.Href}}">{{.Label}}</a>{{end}}</nav>{{end}}
   </div>
   <footer><a href="/reference#{{.Help.ID}}">Open full reference</a></footer>
 </aside>

@@ -82,4 +82,39 @@
     });
   });
   if (tabs.length) activate(tabs[0].dataset.caseTab, false);
+
+  var inspectionTabs = workbench.querySelectorAll('[data-inspection-tab]');
+  var inspectionPanels = workbench.querySelectorAll('[data-inspection-panel]');
+  function activateInspection(view, focus) {
+    Array.prototype.forEach.call(inspectionTabs, function (tab) {
+      var active = tab.dataset.inspectionTab === view;
+      tab.setAttribute('aria-selected', String(active));
+      tab.tabIndex = active ? 0 : -1;
+      if (active && focus) tab.focus();
+    });
+    Array.prototype.forEach.call(inspectionPanels, function (panel) {
+      panel.hidden = panel.dataset.inspectionPanel !== view;
+    });
+  }
+  function shouldEnhanceInspectionClick(event) {
+    return !event.defaultPrevented && event.button === 0 &&
+      !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+  }
+  Array.prototype.forEach.call(inspectionTabs, function (tab, index) {
+    tab.addEventListener('click', function (event) {
+      if (!shouldEnhanceInspectionClick(event)) return;
+      event.preventDefault();
+      activateInspection(tab.dataset.inspectionTab, false);
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState(null, '', tab.href);
+      }
+    });
+    tab.addEventListener('keydown', function (event) {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      event.preventDefault();
+      var offset = event.key === 'ArrowRight' ? 1 : -1;
+      var next = (index + offset + inspectionTabs.length) % inspectionTabs.length;
+      activateInspection(inspectionTabs[next].dataset.inspectionTab, true);
+    });
+  });
 }());

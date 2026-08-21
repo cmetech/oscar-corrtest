@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/applog"
+	"github.com/cmetech/oscar-corrtest/internal/authoring"
 	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
@@ -661,29 +662,62 @@ func TestScenarioWorkbenchPreviewsBuiltinSourceAndOpensUnsavedDraft(t *testing.T
 	}
 }
 
-func TestScenarioWorkbenchOpensServerKnownExamplesAsEditableReadOnlyDrafts(t *testing.T) {
+func TestScenarioExampleGETInspectsWithoutPersisting(t *testing.T) {
 	data := &authoringExampleSpy{records: []domain.ScenarioRecord{{ID: "scn_existing", Name: "existing", SourceDocument: webScenarioSource}}}
 	handler := NewHandlerWithData(version.Info{Version: "test"}, data)
-	examples := scenario.AllExamples()
-	for _, example := range examples {
-		t.Run(example.ID, func(t *testing.T) {
+	for requestNumber := 0; requestNumber < 2; requestNumber++ {
+		t.Run(fmt.Sprintf("request-%d", requestNumber+1), func(t *testing.T) {
 			response := httptest.NewRecorder()
-			request := httptest.NewRequest(http.MethodGet, "http://example.com/scenarios?selected="+url.QueryEscape("example:"+example.ID), nil)
+			request := httptest.NewRequest(http.MethodGet, "http://example.com/scenarios?selected="+url.QueryEscape("example:flood:advanced"), nil)
 			handler.ServeHTTP(response, request)
 			if response.Code != http.StatusOK {
 				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 			}
 			body := response.Body.String()
-			for _, required := range []string{`name="source"`, "Unsaved draft", example.Scenario.Name} {
-				if !strings.Contains(body, required) {
-					t.Errorf("example page missing %q", required)
+			for _, want := range []string{
+				"flood-advanced", "Unsaved example", "corrtest-flood-p01-prev1ew1",
+				"OSCAR API JSON", "Lifecycle", "/authoring?section=patterns&amp;pattern=flood&amp;level=advanced",
+			} {
+				if !strings.Contains(body, want) {
+					t.Errorf("missing %q", want)
 				}
 			}
 			if strings.Contains(body, `data-scenario-source readonly`) {
 				t.Fatal("server-known example source is not editable")
 			}
+			if strings.Contains(body, "Delete custom scenario") {
+				t.Fatal("unsaved example exposed a delete action")
+			}
 		})
 	}
+	if data.listCalls != 2 || data.inspectCalls != 2 || len(data.records) != 1 {
+		t.Fatalf("example GETs must be read-only: list=%d inspect=%d records=%d", data.listCalls, data.inspectCalls, len(data.records))
+	}
+}
+
+func TestScenarioExamplesOpenEveryServerKnownDocument(t *testing.T) {
+	data := &authoringExampleSpy{}
+	handler := NewHandlerWithData(version.Info{Version: "test"}, data)
+	for _, example := range scenario.AllExamples() {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://example.com/scenarios?selected="+url.QueryEscape("example:"+example.ID), nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", example.ID, response.Code, response.Body.String())
+		}
+		for _, want := range []string{`name="source"`, "Unsaved example", example.Scenario.Name} {
+			if !strings.Contains(response.Body.String(), want) {
+				t.Errorf("%s missing %q", example.ID, want)
+			}
+		}
+	}
+	if data.listCalls != len(scenario.AllExamples()) || data.inspectCalls != len(scenario.AllExamples()) || len(data.records) != 0 {
+		t.Fatalf("all example GETs must be inspect-only: list=%d inspect=%d records=%d", data.listCalls, data.inspectCalls, len(data.records))
+	}
+}
+
+func TestScenarioExampleRejectsInvalidIDs(t *testing.T) {
+	data := &authoringExampleSpy{}
+	handler := NewHandlerWithData(version.Info{Version: "test"}, data)
 	for _, selected := range []string{"example", "example:flood", "example:flood:basic:extra", "example:unknown:basic", "example:flood:expert"} {
 		t.Run("reject-"+selected, func(t *testing.T) {
 			response := httptest.NewRecorder()
@@ -693,8 +727,120 @@ func TestScenarioWorkbenchOpensServerKnownExamplesAsEditableReadOnlyDrafts(t *te
 			}
 		})
 	}
-	if data.listCalls != len(examples)+5 || data.importCalls != 0 || data.previewCalls != 0 || data.targetMutations != 0 || len(data.records) != 1 {
-		t.Fatalf("example GETs must be read-only: list=%d import=%d preview=%d target=%d records=%d", data.listCalls, data.importCalls, data.previewCalls, data.targetMutations, len(data.records))
+	if data.listCalls != 5 || data.inspectCalls != 0 || len(data.records) != 0 {
+		t.Fatalf("example GETs must be read-only: list=%d inspect=%d records=%d", data.listCalls, data.inspectCalls, len(data.records))
+	}
+}
+
+func TestScenarioInspectionViewsRenderAfterPreviewAndImport(t *testing.T) {
+	runtime, err := appruntime.Open(context.Background(), config.Settings{DataDir: t.TempDir(), ListenAddress: "127.0.0.1:8787"}, version.Info{Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	handler := NewHandlerWithData(version.Info{Version: "test"}, runtime)
+	getResponse := httptest.NewRecorder()
+	handler.ServeHTTP(getResponse, httptest.NewRequest(http.MethodGet, "http://example.com/scenarios?selected=draft:flood", nil))
+	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(getResponse.Body.String())
+	if len(match) != 2 {
+		t.Fatal("scenario CSRF token missing")
+	}
+
+	for _, action := range []string{"preview", "import"} {
+		values := url.Values{
+			"csrf_token": {match[1]}, "action": {action}, "source": {webScenarioSource},
+			"pipeline_mode": {"phase_b_dispatch"},
+		}
+		request := httptest.NewRequest(http.MethodPost, "http://example.com/scenarios?selected=draft:flood", strings.NewReader(values.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Origin", "http://example.com")
+		request.AddCookie(getResponse.Result().Cookies()[0])
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", action, response.Code, response.Body.String())
+		}
+		body := response.Body.String()
+		for _, want := range []string{
+			`role="tablist" aria-label="Scenario inspection views"`, `role="tab"`, `role="tabpanel"`,
+			"Compiled contract", "OSCAR API JSON", "Lifecycle", "preflight.validate_rule",
+			"evidence.evaluate_assertions", "cleanup.delete_rule",
+			"/authoring?section=patterns&amp;pattern=flood",
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s missing %q", action, want)
+			}
+		}
+		if strings.Contains(body, `onclick=`) {
+			t.Errorf("%s rendered an inline event handler", action)
+		}
+	}
+}
+
+func TestScenarioInspectionViewLinksWorkWithoutJavaScript(t *testing.T) {
+	data := &authoringExampleSpy{}
+	handler := NewHandlerWithData(version.Info{Version: "test"}, data)
+	for _, view := range []string{"contract", "api", "lifecycle"} {
+		path := "http://example.com/scenarios?selected=example%3Aflood%3Abasic&view=" + view
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", view, response.Code, response.Body.String())
+		}
+		body := response.Body.String()
+		selectedTab := regexp.MustCompile(`id="scenario-inspection-tab-` + view + `"[^>]*aria-selected="true"`)
+		if !selectedTab.MatchString(body) {
+			t.Errorf("%s did not select its server-rendered tab", view)
+		}
+		panel := regexp.MustCompile(`<section id="scenario-inspection-` + view + `"[^>]*>`).FindString(body)
+		if panel == "" || strings.Contains(panel, " hidden") {
+			t.Errorf("%s server-rendered panel is not visible: %q", view, panel)
+		}
+		for _, linkedView := range []string{"contract", "api", "lifecycle"} {
+			want := "/scenarios?selected=example%3Aflood%3Abasic&amp;view=" + linkedView
+			if !strings.Contains(body, want) {
+				t.Errorf("%s missing ordinary fallback link %q", view, want)
+			}
+		}
+	}
+	invalid := httptest.NewRecorder()
+	handler.ServeHTTP(invalid, httptest.NewRequest(http.MethodGet, "http://example.com/scenarios?selected=example%3Aflood%3Abasic&view=unknown", nil))
+	if invalid.Code != http.StatusNotFound {
+		t.Fatalf("invalid view status=%d body=%s", invalid.Code, invalid.Body.String())
+	}
+}
+
+func TestScenarioInspectionErrorDiscardsPriorPlanAndOperations(t *testing.T) {
+	for _, action := range []string{"preview", "import"} {
+		t.Run(action, func(t *testing.T) {
+			data := &failingSubmittedInspectionData{}
+			handler := NewHandlerWithData(version.Info{Version: "test"}, data)
+			getResponse := httptest.NewRecorder()
+			handler.ServeHTTP(getResponse, httptest.NewRequest(http.MethodGet, "http://example.com/scenarios?selected=draft:flood", nil))
+			match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(getResponse.Body.String())
+			if len(match) != 2 {
+				t.Fatal("scenario CSRF token missing")
+			}
+			values := url.Values{
+				"csrf_token": {match[1]}, "action": {action}, "source": {webScenarioSource},
+				"pipeline_mode": {"phase_b_dispatch"},
+			}
+			request := httptest.NewRequest(http.MethodPost, "http://example.com/scenarios?selected=draft:flood", strings.NewReader(values.Encode()))
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			request.Header.Set("Origin", "http://example.com")
+			request.AddCookie(getResponse.Result().Cookies()[0])
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			body := response.Body.String()
+			if !strings.Contains(body, "submitted inspection failed") {
+				t.Fatalf("%s did not render inspection failure: status=%d body=%s", action, response.Code, body)
+			}
+			for _, stale := range []string{"Structurally valid", "preflight.validate_rule", "corrtest-flood-p01-prev1ew1"} {
+				if strings.Contains(body, stale) {
+					t.Errorf("%s retained stale inspection content %q", action, stale)
+				}
+			}
+		})
 	}
 }
 
@@ -1204,30 +1350,56 @@ type scenarioUIData struct {
 }
 
 type authoringExampleSpy struct {
-	diagnosticData
-	records         []domain.ScenarioRecord
-	listCalls       int
-	importCalls     int
-	previewCalls    int
-	targetMutations int
+	records      []domain.ScenarioRecord
+	listCalls    int
+	inspectCalls int
+}
+
+type failingSubmittedInspectionData struct {
+	scenarioUIData
+	inspectCalls int
+}
+
+func (d *failingSubmittedInspectionData) InspectScenario(ctx context.Context, source []byte, mode string) (appruntime.ScenarioInspection, error) {
+	d.inspectCalls++
+	if d.inspectCalls == 3 {
+		return appruntime.ScenarioInspection{}, errors.New("submitted inspection failed")
+	}
+	return authoring.New("test").Inspect(ctx, source, mode)
 }
 
 func (d *authoringExampleSpy) ReadyStatus() (bool, string) { return true, "" }
 func (d *authoringExampleSpy) CreateTarget(context.Context, domain.TargetInput) (domain.Target, error) {
-	d.targetMutations++
-	return domain.Target{}, errors.New("target mutation is not allowed")
+	panic("example GET must not create a target")
+}
+func (d *authoringExampleSpy) ListTargets(context.Context) ([]domain.Target, error) {
+	panic("example GET must not resolve a target")
+}
+func (d *authoringExampleSpy) ListRuns(context.Context, domain.RunFilter) ([]domain.Run, error) {
+	panic("example GET must not list runs")
+}
+func (d *authoringExampleSpy) GetRun(context.Context, string) (domain.Run, error) {
+	panic("example GET must not resolve a run")
+}
+func (d *authoringExampleSpy) ListRunEvents(context.Context, string) ([]domain.RunEvent, error) {
+	panic("example GET must not resolve run events")
+}
+func (d *authoringExampleSpy) ListArtifactEvidence(context.Context, string) ([]domain.ArtifactEvidence, error) {
+	panic("example GET must not resolve evidence")
 }
 func (d *authoringExampleSpy) ListScenarios(context.Context) ([]domain.ScenarioRecord, error) {
 	d.listCalls++
 	return append([]domain.ScenarioRecord(nil), d.records...), nil
 }
 func (d *authoringExampleSpy) PreviewScenario(context.Context, string, scenario.Scenario, string) (compiler.Plan, error) {
-	d.previewCalls++
-	return compiler.Plan{}, errors.New("preview is not allowed")
+	panic("example GET must not preview through a target")
 }
 func (d *authoringExampleSpy) ImportScenario(context.Context, []byte, scenario.Scenario) (domain.ScenarioRecord, error) {
-	d.importCalls++
-	return domain.ScenarioRecord{}, errors.New("import is not allowed")
+	panic("example GET must not import")
+}
+func (d *authoringExampleSpy) InspectScenario(ctx context.Context, source []byte, mode string) (appruntime.ScenarioInspection, error) {
+	d.inspectCalls++
+	return authoring.New("test").Inspect(ctx, source, mode)
 }
 
 func (d *scenarioUIData) ListScenarios(context.Context) ([]domain.ScenarioRecord, error) {

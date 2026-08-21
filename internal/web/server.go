@@ -79,7 +79,7 @@ type pageData struct {
 	CanDelete          bool
 	ImportedScenarios  []domain.ScenarioRecord
 	ScenarioSource     string
-	ScenarioPlan       *compiler.Plan
+	ScenarioInspection *appruntime.ScenarioInspection
 	Help               HelpTopic
 	ReferenceTopics    []HelpTopic
 	ScenarioCatalog    []scenarioCatalogItem
@@ -89,6 +89,9 @@ type pageData struct {
 	SelectedPattern    string
 	SelectedBuiltIn    bool
 	SelectedDraft      bool
+	SelectedExample    bool
+	SelectedLevel      string
+	ScenarioView       string
 	Operations         operations.Snapshot
 	OperationLogs      []applog.Record
 	OperationMessage   string
@@ -301,7 +304,7 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 			http.Error(w, "scenario management unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		view, err := scenarioWorkbench(r.Context(), info, data, items, r.URL.Query().Get("selected"))
+		view, err := scenarioWorkbench(r.Context(), info, data, items, r.URL.Query().Get("selected"), r.URL.Query().Get("view"))
 		if err != nil {
 			http.Error(w, "scenario selection is unavailable", http.StatusNotFound)
 			return
@@ -359,11 +362,12 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 			http.Error(w, "scenario management unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		view, viewErr := scenarioWorkbench(r.Context(), info, data, items, r.URL.Query().Get("selected"))
+		view, viewErr := scenarioWorkbench(r.Context(), info, data, items, r.URL.Query().Get("selected"), r.URL.Query().Get("view"))
 		if viewErr != nil {
 			view = pageData{Version: info, Page: "scenarios", Readiness: readiness(data)}
 		}
 		view.ScenarioSource = source
+		view.ScenarioInspection = nil
 		view.SelectedBuiltIn = false
 		view.CSRFToken = csrfToken(w, r, csrfSecret)
 		document, decodeErr := scenario.Decode(strings.NewReader(source))
@@ -382,20 +386,23 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 				renderStatus(w, tmpl, nonce, http.StatusUnprocessableEntity, view)
 				return
 			}
-			var plan compiler.Plan
-			var err error
 			if inspector, ok := data.(scenarioInspector); ok {
-				inspection, inspectErr := inspector.InspectScenario(r.Context(), []byte(source), mode)
-				plan, err = inspection.Plan, inspectErr
+				inspection, err := inspector.InspectScenario(r.Context(), []byte(source), mode)
+				if err != nil {
+					view.Error = err.Error()
+					renderStatus(w, tmpl, nonce, http.StatusUnprocessableEntity, view)
+					return
+				}
+				view.ScenarioInspection = &inspection
 			} else {
-				plan, err = manager.PreviewScenario(r.Context(), r.FormValue("target_id"), document, mode)
+				plan, err := manager.PreviewScenario(r.Context(), r.FormValue("target_id"), document, mode)
+				if err != nil {
+					view.Error = err.Error()
+					renderStatus(w, tmpl, nonce, http.StatusUnprocessableEntity, view)
+					return
+				}
+				view.ScenarioInspection = &appruntime.ScenarioInspection{Document: document, Source: source, Plan: plan}
 			}
-			if err != nil {
-				view.Error = err.Error()
-				renderStatus(w, tmpl, nonce, http.StatusUnprocessableEntity, view)
-				return
-			}
-			view.ScenarioPlan = &plan
 			view.Status = "Preview compiled without contacting or mutating OSCAR"
 		case "import":
 			record, err := manager.ImportScenario(r.Context(), []byte(source), document)
@@ -408,6 +415,8 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 			view.SelectedScenario = selectedRef
 			view.SelectedScenarioID = record.ID
 			view.SelectedDraft = false
+			view.SelectedExample = false
+			view.SelectedLevel = ""
 			found := false
 			catalog := make([]scenarioCatalogItem, 0, len(view.ScenarioCatalog))
 			for index := range view.ScenarioCatalog {
@@ -431,7 +440,7 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 				if inspectErr != nil {
 					view.Error = inspectErr.Error()
 				} else {
-					view.ScenarioPlan = &inspection.Plan
+					view.ScenarioInspection = &inspection
 				}
 			}
 			view.Status = "Saved custom scenario " + record.Name + " as an immutable version"
@@ -823,11 +832,17 @@ func authoringFields(fields []scenario.FieldDefinition, filter string) []scenari
 	return matched
 }
 
-func scenarioWorkbench(ctx context.Context, info version.Info, data DataSource, imported []domain.ScenarioRecord, selected string) (pageData, error) {
+func scenarioWorkbench(ctx context.Context, info version.Info, data DataSource, imported []domain.ScenarioRecord, selected, inspectionView string) (pageData, error) {
 	if selected == "" {
 		selected = "builtin:flood"
 	}
-	view := pageData{Version: info, Page: "scenarios", Readiness: readiness(data), ImportedScenarios: imported, SelectedScenario: selected}
+	if inspectionView == "" {
+		inspectionView = "contract"
+	}
+	if inspectionView != "contract" && inspectionView != "api" && inspectionView != "lifecycle" {
+		return pageData{}, fmt.Errorf("scenario inspection view is unavailable")
+	}
+	view := pageData{Version: info, Page: "scenarios", Readiness: readiness(data), ImportedScenarios: imported, SelectedScenario: selected, ScenarioView: inspectionView}
 	for _, builtin := range scenario.AllBuiltins() {
 		ref := "builtin:" + builtin.Pattern
 		view.ScenarioCatalog = append(view.ScenarioCatalog, scenarioCatalogItem{Ref: ref, Name: builtin.Name, Pattern: builtin.Pattern, Kind: "Built-in", Selected: ref == selected})
@@ -838,7 +853,6 @@ func scenarioWorkbench(ctx context.Context, info version.Info, data DataSource, 
 		view.ScenarioCatalog = append(view.ScenarioCatalog, scenarioCatalogItem{Ref: ref, Name: item.Name, Pattern: document.Pattern, Kind: "Custom", Selected: ref == selected})
 	}
 	var source []byte
-	serverKnownExample := false
 	if pattern, ok := strings.CutPrefix(selected, "builtin:"); ok {
 		var err error
 		source, err = scenario.BuiltinSource(pattern)
@@ -889,9 +903,10 @@ func scenarioWorkbench(ctx context.Context, info version.Info, data DataSource, 
 		if err != nil {
 			return pageData{}, err
 		}
-		serverKnownExample = true
 		view.SelectedDraft = true
-		view.ScenarioCatalog = append(view.ScenarioCatalog, scenarioCatalogItem{Ref: selected, Name: example.Scenario.Name, Pattern: example.Pattern, Kind: "Unsaved draft", Selected: true})
+		view.SelectedExample = true
+		view.SelectedLevel = example.Level
+		view.ScenarioCatalog = append(view.ScenarioCatalog, scenarioCatalogItem{Ref: selected, Name: example.Scenario.Name, Pattern: example.Pattern, Kind: "Unsaved example", Selected: true})
 	} else {
 		return pageData{}, fmt.Errorf("selected scenario reference is invalid")
 	}
@@ -900,14 +915,12 @@ func scenarioWorkbench(ctx context.Context, info version.Info, data DataSource, 
 		return pageData{}, err
 	}
 	view.SelectedName, view.SelectedPattern, view.ScenarioSource = document.Name, document.Pattern, string(source)
-	if !serverKnownExample {
-		if inspector, ok := data.(scenarioInspector); ok {
-			inspection, inspectErr := inspector.InspectScenario(ctx, source, "phase_b_dispatch")
-			if inspectErr != nil {
-				view.Error = inspectErr.Error()
-			} else {
-				view.ScenarioPlan = &inspection.Plan
-			}
+	if inspector, ok := data.(scenarioInspector); ok {
+		inspection, inspectErr := inspector.InspectScenario(ctx, source, "phase_b_dispatch")
+		if inspectErr != nil {
+			view.Error = inspectErr.Error()
+		} else {
+			view.ScenarioInspection = &inspection
 		}
 	}
 	return view, nil

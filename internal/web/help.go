@@ -1,5 +1,13 @@
 package web
 
+import (
+	"fmt"
+	"net/url"
+	"strings"
+
+	"github.com/cmetech/oscar-corrtest/internal/scenario"
+)
+
 // HelpSection is escaped, static operator guidance rendered in the drawer and Reference page.
 type HelpSection struct {
 	Heading    string
@@ -29,6 +37,37 @@ type HelpCatalog struct {
 	index  map[string]int
 }
 
+var helpRoutes = map[string]struct{}{
+	"/": {}, "/targets": {}, "/run-test": {}, "/scenarios": {}, "/authoring": {},
+	"/runs": {}, "/operations": {}, "/reference": {},
+}
+
+func newHelpCatalog(topics []HelpTopic) (HelpCatalog, error) {
+	index := make(map[string]int, len(topics))
+	for position, topic := range topics {
+		if strings.TrimSpace(topic.ID) == "" || strings.TrimSpace(topic.Title) == "" || strings.TrimSpace(topic.Summary) == "" {
+			return HelpCatalog{}, fmt.Errorf("help topic at position %d has blank identity or narrative", position)
+		}
+		if _, duplicate := index[topic.ID]; duplicate {
+			return HelpCatalog{}, fmt.Errorf("duplicate help topic %q", topic.ID)
+		}
+		for _, link := range topic.Links {
+			if strings.TrimSpace(link.Label) == "" {
+				return HelpCatalog{}, fmt.Errorf("help topic %q has a blank link label", topic.ID)
+			}
+			parsed, err := url.Parse(link.Href)
+			if err != nil || parsed.IsAbs() || parsed.Host != "" || parsed.Path == "" {
+				return HelpCatalog{}, fmt.Errorf("help topic %q has an invalid local link %q", topic.ID, link.Href)
+			}
+			if _, known := helpRoutes[parsed.Path]; !known {
+				return HelpCatalog{}, fmt.Errorf("help topic %q links to unknown route %q", topic.ID, parsed.Path)
+			}
+		}
+		index[topic.ID] = position
+	}
+	return HelpCatalog{topics: append([]HelpTopic(nil), topics...), index: index}, nil
+}
+
 func (c HelpCatalog) Topic(id string) (HelpTopic, bool) {
 	index, ok := c.index[id]
 	if !ok {
@@ -51,6 +90,7 @@ func defaultHelpCatalog() HelpCatalog {
 		{"targets", "Targets reference", "Store endpoint metadata and credential references without storing resolved credential values.", "Add the OSCAR external API base URL. Leave credential source empty to use the global OSCAR_API_KEY, or select an advanced per-target reference.", "Target creation is local only; connection and rule validation happen during doctor or run preflight.", "Target metadata is stored in SQLite. API keys are never included.", "oscar-corrtest target add --name lab --url https://oscar.example/ext/mw"},
 		{"run-test", "Run test reference", "Launch a positive and negative black-box test for one built-in correlation pattern.", "Choose a target, pattern, and the target's known pipeline mode. Phase B is required for synthetic-parent assertions.", "The harness validates and creates temporary rules, injects reserved-label alerts, observes audit/history evidence, resolves alerts, and removes owned rules.", "A PASS requires declared assertions plus complete cleanup evidence; absence alone is never proof.", "oscar-corrtest run builtin:flood --target <target-id> --pipeline-mode phase_b_dispatch"},
 		{"scenarios", "Scenario workbench reference", "Inspect canonical built-ins or author strict custom YAML before any live mutation.", "Select a built-in, review P01 and N01, then choose Edit a copy. The draft is not stored until Save custom scenario. Editing a saved scenario creates a separate immutable version. Unused custom versions can be deleted; versions referenced by historical runs are retained.", "Drafting, preview, validation, and local catalog maintenance never contact OSCAR. A live run performs the same guarded OSCAR lifecycle as a built-in.", "Saved source and its digest are immutable. Compiled plans, assertion rows, raw observations, and cleanup state remain attached to historical run evidence.", "oscar-corrtest scenario validate scenario.yaml"},
+		{"authoring", "Scenario Authoring Guide", "Build strict scenario YAML from the public schema, executable pattern cookbook, and target-free OSCAR lifecycle preview.", "Follow the quickstart, check the schema and validation limits, then open a selected example in Scenarios to edit or save explicitly.", "Authoring examples and inspection are target-free: they do not resolve credentials, persist scenarios or runs, or contact OSCAR.", "The compiled P01/N01 contract and ordered request preview show what a future live run will attempt without claiming live results.", "oscar-corrtest scenario validate scenario.yaml"},
 		{"runs", "Runs reference", "Filter durable run history by status, verdict, cleanup, and correlation pattern.", "Filter a run, open its timeline, then export the verified bundle when the run is terminal.", "Filtering and reading runs are local-only operations.", "Each run preserves normalized case/assertion/attempt rows and immutable evidence artifacts.", "oscar-corrtest runs --status COMPLETED --verdict PASS --pattern flood"},
 		{"run-detail", "Run detail reference", "Inspect the complete lifecycle, assertion verdict, cleanup state, and manual OSCAR filter contract for one run.", "Confirm terminal state, read failures or inconclusive evidence, inspect exact labels in OSCAR, and export the evidence bundle.", "Cancel requests stop active injection and enter bounded cleanup. Delete is allowed only after clean/not-required cleanup.", "The timeline, report, compiled plan, artifact digests, and cleanup ownership are the proof chain.", "oscar-corrtest export --run <run-id> --output evidence.zip"},
 		{"operations", "Operations reference", "Manage the global OSCAR key, effective user paths, background service, and redacted application logs.", "Save or clear the write-only key, inspect service state, and use live logs for operational diagnosis.", "A replaced key is used by newly constructed OSCAR clients. Service stop/restart controls only this user's CorrTest service.", "Operational logs are redacted diagnostics and are not correlation verdict evidence.", "oscar-corrtest service status; oscar-corrtest service logs"},
@@ -58,13 +98,32 @@ func defaultHelpCatalog() HelpCatalog {
 	}
 	var topics []HelpTopic
 	for _, page := range pages {
-		topics = append(topics, HelpTopic{ID: page.id, Title: page.title, Summary: page.summary, Sections: []HelpSection{
+		topic := HelpTopic{ID: page.id, Title: page.title, Summary: page.summary, Sections: []HelpSection{
 			{Heading: "Purpose", Paragraphs: []string{page.summary}},
 			{Heading: "Workflow", Paragraphs: []string{page.workflow}},
 			{Heading: "OSCAR effect", Paragraphs: []string{page.effect}},
 			{Heading: "Evidence", Paragraphs: []string{page.evidence}},
 			{Heading: "CLI equivalent", Code: page.cli},
-		}})
+		}}
+		switch page.id {
+		case "scenarios":
+			topic.Links = []HelpLink{
+				{Label: "Open the Scenario Authoring Guide", Href: "/authoring?section=quickstart"},
+				{Label: "Browse the public YAML schema", Href: "/authoring?section=schema"},
+			}
+		case "authoring":
+			topic.Links = []HelpLink{
+				{Label: "Open Scenarios", Href: "/scenarios"},
+				{Label: "Quickstart", Href: "/authoring?section=quickstart"},
+				{Label: "Schema", Href: "/authoring?section=schema"},
+				{Label: "Assertions", Href: "/authoring?section=assertions"},
+				{Label: "Validation", Href: "/authoring?section=validation"},
+			}
+			for _, pattern := range scenario.SupportedPatterns() {
+				topic.Links = append(topic.Links, HelpLink{Label: pattern + " pattern", Href: "/authoring?section=patterns&pattern=" + pattern})
+			}
+		}
+		topics = append(topics, topic)
 	}
 	patterns := []struct{ id, title, detail string }{
 		{"pattern-co-occurrence", "co_occurrence", "Required alert roles occur in the same grouping window."},
@@ -92,11 +151,11 @@ func defaultHelpCatalog() HelpCatalog {
 		{Heading: "Evidence", Paragraphs: []string{"Server read-back proves labels and fingerprints rather than trusting the sent payload."}},
 		{Heading: "CLI equivalent", Code: "oscar-corrtest runs --pattern <pattern>"},
 	}})
-	index := make(map[string]int, len(topics))
-	for position, topic := range topics {
-		index[topic.ID] = position
+	catalog, err := newHelpCatalog(topics)
+	if err != nil {
+		panic(err)
 	}
-	return HelpCatalog{topics: topics, index: index}
+	return catalog
 }
 
 func cloneTopic(topic HelpTopic) HelpTopic {

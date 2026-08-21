@@ -49,46 +49,54 @@
     </div>
   </section>
 
-  <section class="authoring-view-panel" id="authoring-view-api" data-authoring-view-panel aria-labelledby="authoring-view-link-api"{{if ne $page.Selection.View "api"}} hidden{{end}}>
-    <header><div><p class="eyebrow">Credential-free exact requests</p><h3>OSCAR API</h3></div><span class="status-pill">server rendered</span></header>
-    <p class="authoring-runtime-legend"><span class="runtime-badge">Runtime-dependent</span> Values in braces are supplied only by OSCAR responses or authoritative history. The request envelope’s deterministic <code>fingerPrint</code> is Alertmanager-compatible transport data, never oracle identity; authoritative OSCAR history supplies <code>{server-fingerprint}</code>. No returned IDs, credentials, target URL, or response bodies are fabricated.</p>
-    <ol class="authoring-operation-list">
-      {{range $index, $operation := $page.Inspection.Operations}}
-      <li class="authoring-operation">
-        <header><span class="authoring-operation__index">{{$index}}</span><div><strong>{{$operation.Stage}}</strong>{{if $operation.CaseCode}}<span class="status-pill">{{$operation.CaseCode}}</span>{{end}}</div></header>
-        <p>{{$operation.Summary}}</p>
-        <div class="authoring-operation__request"><span class="method-badge">{{$operation.Method}}</span>{{if $operation.Path}}<code>{{$operation.Path}}</code>{{else}}<span class="muted">Local operation · no HTTP path</span>{{end}}</div>
-        {{if $operation.Attempt}}<dl class="authoring-operation__metadata"><div><dt>Attempt</dt><dd>{{$operation.Attempt}}</dd></div><div><dt>Scheduled delay</dt><dd>{{duration $operation.ScheduledDelay}}</dd></div></dl>{{end}}
-        {{if $operation.RuntimeFields}}<div class="authoring-runtime-fields"><span class="runtime-badge">Runtime-dependent</span>{{range $operation.RuntimeFields}}<code>&#123;{{.}}&#125;</code>{{end}}</div>{{end}}
-        {{if $operation.Body}}<pre><code>{{jsonPretty $operation.Body}}</code></pre>{{else}}<p class="muted authoring-no-body">No request body.</p>{{end}}
-      </li>
-      {{end}}
-    </ol>
-  </section>
+	  <section class="authoring-view-panel" id="authoring-view-api" data-authoring-view-panel aria-labelledby="authoring-view-link-api"{{if ne $page.Selection.View "api"}} hidden{{end}}>
+	    {{template "inspection-api" $page.Inspection}}
+	  </section>
 
-  <section class="authoring-view-panel" id="authoring-view-lifecycle" data-authoring-view-panel aria-labelledby="authoring-view-link-lifecycle"{{if ne $page.Selection.View "lifecycle"}} hidden{{end}}>
-    <header><div><p class="eyebrow">Ordered execution</p><h3>Lifecycle</h3></div><span class="status-pill">read only</span></header>
-    <p class="authoring-lifecycle-clarification">CorrTest creates two temporary correlation rules (P01 and N01), injects source alerts directly through the public alert API, observes OSCAR evidence, deletes only the returned rule IDs, and resolves its injected alerts. It does not create ordinary OSCAR alert rules.</p>
-    <div class="authoring-lifecycle-legend" aria-label="Lifecycle groups">
-      <span>Compatibility preflight</span><span>Run mutation</span><span>Observation</span><span>Assertion evaluation</span><span>Evidence persistence</span><span>Cleanup</span>
-    </div>
-    <p class="authoring-runtime-legend"><span class="runtime-badge">Runtime-dependent</span> <code>{returned-rule-id}</code> comes from rule creation; <code>{server-fingerprint}</code> comes from authoritative OSCAR history.</p>
-    <ol class="authoring-lifecycle-list">
-      {{range $index, $operation := $page.Inspection.Operations}}
-      <li data-stage="{{$operation.Stage}}">
-        <div class="authoring-lifecycle-list__rail"><span>{{$index}}</span></div>
-        <article>
-          <header><strong>{{$operation.Stage}}</strong>{{if $operation.CaseCode}}<span class="status-pill">{{$operation.CaseCode}}</span>{{end}}</header>
-          <p>{{$operation.Summary}}</p>
-          <div><span class="method-badge">{{$operation.Method}}</span>{{if $operation.Path}} <code>{{$operation.Path}}</code>{{else}} <span class="muted">local</span>{{end}}</div>
-          {{if $operation.Attempt}}<p class="muted">Attempt {{$operation.Attempt}} · Scheduled delay {{duration $operation.ScheduledDelay}}</p>{{end}}
-          {{if $operation.RuntimeFields}}<div class="authoring-runtime-fields"><span class="runtime-badge">Runtime-dependent</span>{{range $operation.RuntimeFields}}<code>&#123;{{.}}&#125;</code>{{end}}</div>{{end}}
-        </article>
-      </li>
-      {{end}}
-    </ol>
-  </section>
+	  <section class="authoring-view-panel" id="authoring-view-lifecycle" data-authoring-view-panel aria-labelledby="authoring-view-link-lifecycle"{{if ne $page.Selection.View "lifecycle"}} hidden{{end}}>
+	    {{template "inspection-lifecycle" $page.Inspection}}
+	  </section>
 
   <dl class="authoring-instrument__facts"><div><dt>Cases</dt><dd>{{len $page.Inspection.Plan.Cases}} compiled P01/N01 cases</dd></div><div><dt>Pattern</dt><dd><code>{{$page.Inspection.Plan.Pattern}}</code></dd></div><div><dt>Preview</dt><dd>No target, credential, persistence, or network contact</dd></div></dl>
 </aside>
+{{end}}
+
+{{define "inspection-api"}}
+<header><div><p class="eyebrow">Credential-free exact requests</p><h3>OSCAR API JSON</h3></div><span class="status-pill">server rendered</span></header>
+<p class="authoring-runtime-legend"><span class="runtime-badge">Runtime-dependent</span> Values in braces are supplied only by OSCAR responses or authoritative history. The request envelope’s deterministic <code>fingerPrint</code> is Alertmanager-compatible transport data, never oracle identity; authoritative OSCAR history supplies <code>{server-fingerprint}</code>. No returned IDs, credentials, target URL, or response bodies are fabricated.</p>
+<ol class="authoring-operation-list">
+  {{range $index, $operation := .Operations}}
+  <li class="authoring-operation">
+    <header><span class="authoring-operation__index">{{$index}}</span><div><strong>{{$operation.Stage}}</strong>{{if $operation.CaseCode}}<span class="status-pill">{{$operation.CaseCode}}</span>{{end}}</div></header>
+    <p>{{$operation.Summary}}</p>
+    <div class="authoring-operation__request"><span class="method-badge">{{$operation.Method}}</span>{{if $operation.Path}}<code>{{$operation.Path}}</code>{{else}}<span class="muted">Local operation · no HTTP path</span>{{end}}</div>
+    {{if $operation.Attempt}}<dl class="authoring-operation__metadata"><div><dt>Attempt</dt><dd>{{$operation.Attempt}}</dd></div><div><dt>Scheduled delay</dt><dd>{{duration $operation.ScheduledDelay}}</dd></div></dl>{{end}}
+    {{if $operation.RuntimeFields}}<div class="authoring-runtime-fields"><span class="runtime-badge">Runtime-dependent</span>{{range $operation.RuntimeFields}}<code>&#123;{{.}}&#125;</code>{{end}}</div>{{end}}
+    {{if $operation.Body}}<pre><code>{{jsonPretty $operation.Body}}</code></pre>{{else}}<p class="muted authoring-no-body">No request body.</p>{{end}}
+  </li>
+  {{end}}
+</ol>
+{{end}}
+
+{{define "inspection-lifecycle"}}
+<header><div><p class="eyebrow">Ordered execution</p><h3>Lifecycle</h3></div><span class="status-pill">read only</span></header>
+<p class="authoring-lifecycle-clarification">CorrTest creates two temporary correlation rules (P01 and N01), injects source alerts directly through the public alert API, observes OSCAR evidence, deletes only the returned rule IDs, and resolves its injected alerts. It does not create ordinary OSCAR alert rules.</p>
+<div class="authoring-lifecycle-legend" aria-label="Lifecycle groups">
+  <span>Compatibility preflight</span><span>Run mutation</span><span>Observation</span><span>Assertion evaluation</span><span>Evidence persistence</span><span>Cleanup</span>
+</div>
+<p class="authoring-runtime-legend"><span class="runtime-badge">Runtime-dependent</span> <code>{returned-rule-id}</code> comes from rule creation; <code>{server-fingerprint}</code> comes from authoritative OSCAR history.</p>
+<ol class="authoring-lifecycle-list">
+  {{range $index, $operation := .Operations}}
+  <li data-stage="{{$operation.Stage}}">
+    <div class="authoring-lifecycle-list__rail"><span>{{$index}}</span></div>
+    <article>
+      <header><strong>{{$operation.Stage}}</strong>{{if $operation.CaseCode}}<span class="status-pill">{{$operation.CaseCode}}</span>{{end}}</header>
+      <p>{{$operation.Summary}}</p>
+      <div><span class="method-badge">{{$operation.Method}}</span>{{if $operation.Path}} <code>{{$operation.Path}}</code>{{else}} <span class="muted">local</span>{{end}}</div>
+      {{if $operation.Attempt}}<p class="muted">Attempt {{$operation.Attempt}} · Scheduled delay {{duration $operation.ScheduledDelay}}</p>{{end}}
+      {{if $operation.RuntimeFields}}<div class="authoring-runtime-fields"><span class="runtime-badge">Runtime-dependent</span>{{range $operation.RuntimeFields}}<code>&#123;{{.}}&#125;</code>{{end}}</div>{{end}}
+    </article>
+  </li>
+  {{end}}
+</ol>
 {{end}}

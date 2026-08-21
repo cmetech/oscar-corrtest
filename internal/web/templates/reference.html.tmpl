@@ -2,6 +2,6 @@
 <section class="page-heading page-heading--row"><div><p class="eyebrow">Operator documentation</p><h1>Reference</h1><p>Technical behavior, pattern contracts, evidence semantics, and CLI equivalents.</p></div></section>
 <div class="reference-layout">
   <nav class="reference-toc" aria-label="Reference topics">{{range .ReferenceTopics}}<a href="#{{.ID}}">{{.Title}}</a>{{end}}</nav>
-  <div class="reference-content">{{range .ReferenceTopics}}<article id="{{.ID}}" class="panel reference-topic"><p class="eyebrow">{{.ID}}</p><h2>{{.Title}}</h2><p class="muted">{{.Summary}}</p>{{range .Sections}}<section><h3>{{.Heading}}</h3>{{range .Paragraphs}}<p>{{.}}</p>{{end}}{{if .Bullets}}<ul>{{range .Bullets}}<li>{{.}}</li>{{end}}</ul>{{end}}{{if .Code}}<pre><code>{{.Code}}</code></pre>{{end}}</section>{{end}}</article>{{end}}</div>
+	<div class="reference-content">{{range .ReferenceTopics}}<article id="{{.ID}}" class="panel reference-topic"><p class="eyebrow">{{.ID}}</p><h2>{{.Title}}</h2><p class="muted">{{.Summary}}</p>{{if .Links}}<nav class="reference-topic__links" aria-label="{{.Title}} links">{{range .Links}}<a href="{{.Href}}">{{.Label}}</a>{{end}}</nav>{{end}}{{range .Sections}}<section><h3>{{.Heading}}</h3>{{range .Paragraphs}}<p>{{.}}</p>{{end}}{{if .Bullets}}<ul>{{range .Bullets}}<li>{{.}}</li>{{end}}</ul>{{end}}{{if .Code}}<pre><code>{{.Code}}</code></pre>{{end}}</section>{{end}}</article>{{end}}</div>
 </div>
 {{end}}
