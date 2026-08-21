@@ -196,10 +196,10 @@ Schema drift evidence:
 
 ```text
 $ shasum -a 256 docs/schema/correlation-scenario.schema.json
-7ea997a1d7324491cddfaed693fa38482916474e969b7fc647a020f7f87e910b
+f3e2096a39c0dee2acfa60652f940856a90cbab428325d9bcc255bd4c7a4a387
 $ go run ./cmd/generate-scenario-schema
 $ shasum -a 256 docs/schema/correlation-scenario.schema.json
-7ea997a1d7324491cddfaed693fa38482916474e969b7fc647a020f7f87e910b
+f3e2096a39c0dee2acfa60652f940856a90cbab428325d9bcc255bd4c7a4a387
 ```
 
 Result: the schema rejects all compiler/transport-reserved case and event label keys, rejects notifier fields for every non-`parent_child` root pattern, and rejects labels on resolved events. Existing closed-field, P01/N01 pairing, stimulus-choice, and conditional assertion behavior remains. Schema and guide descriptions explicitly identify cross-array notifier disjointness, prior-firing/event ordering, cross-field timing, case-name uniqueness, YAML-only protections, and pattern semantics as strict-decoder checks that standard draft 2020-12 cannot accurately express.
