@@ -16,13 +16,20 @@
     });
   }
 
+  function shouldEnhanceViewClick(event) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey ||
+      event.ctrlKey || event.shiftKey || event.altKey) return false;
+    return true;
+  }
+
   function selectView(link) {
     var target = document.getElementById(link.dataset.viewTarget);
     if (!target) return false;
 
     document.querySelectorAll('[data-authoring-view-link]').forEach(function (candidate) {
       var selected = candidate === link;
-      candidate.setAttribute('aria-selected', selected ? 'true' : 'false');
+      if (selected) candidate.setAttribute('aria-current', 'page');
+      else candidate.removeAttribute('aria-current');
     });
     document.querySelectorAll('[data-authoring-view-panel]').forEach(function (panel) {
       panel.hidden = panel !== target;
@@ -43,6 +50,7 @@
   });
   document.querySelectorAll('[data-authoring-view-link]').forEach(function (link) {
     link.addEventListener('click', function (event) {
+      if (!shouldEnhanceViewClick(event)) return;
       if (selectView(link)) event.preventDefault();
     });
   });

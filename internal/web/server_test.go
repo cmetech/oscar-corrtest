@@ -195,9 +195,14 @@ func TestAuthoringPatternCookbookRendersEveryExample(t *testing.T) {
 						t.Errorf("%s missing %q", path, want)
 					}
 				}
-				selected := regexp.MustCompile(`id="authoring-view-tab-` + regexp.QuoteMeta(view) + `"[^>]+aria-selected="true"`)
+				selected := regexp.MustCompile(`id="authoring-view-link-` + regexp.QuoteMeta(view) + `"[^>]+aria-current="page"`)
 				if !selected.MatchString(body) {
 					t.Errorf("%s did not select the requested server-rendered panel", path)
+				}
+				for _, forbidden := range []string{`role="tablist"`, `role="tab"`, `role="tabpanel"`, `aria-selected=`} {
+					if strings.Contains(body, forbidden) {
+						t.Errorf("%s retained incomplete tab semantics %q", path, forbidden)
+					}
 				}
 				for _, supported := range scenario.SupportedPatterns() {
 					if !strings.Contains(body, "pattern="+supported) {
@@ -261,9 +266,9 @@ func TestAuthoringLifecycleRendersOrderedRuntimeHonestStages(t *testing.T) {
 			}
 			body := response.Body.String()
 			for _, want := range []string{
-				"Compatibility preflight", "Run mutation", "Observation", "Verdict persistence", "Cleanup",
+				"Compatibility preflight", "Run mutation", "Observation", "Assertion evaluation", "Evidence persistence", "Cleanup",
 				"preflight.validate_rule", "setup.create_rule", "stimulus.inject_alert", "evidence.read_history",
-				"evidence.persist_final_transaction", "cleanup.delete_rule", "cleanup.resolve_alert",
+				"evidence.evaluate_assertions", "evidence.persist_final_transaction", "cleanup.delete_rule", "cleanup.resolve_alert",
 				"{returned-rule-id}", "{server-fingerprint}", "Runtime-dependent",
 				"CorrTest creates two temporary correlation rules (P01 and N01), injects source alerts directly through the public alert API, observes OSCAR evidence, deletes only the returned rule IDs, and resolves its injected alerts. It does not create ordinary OSCAR alert rules.",
 			} {
@@ -271,10 +276,34 @@ func TestAuthoringLifecycleRendersOrderedRuntimeHonestStages(t *testing.T) {
 					t.Errorf("%s missing %q", path, want)
 				}
 			}
-			if strings.Index(body, "preflight.validate_rule") > strings.Index(body, "cleanup.delete_rule") {
-				t.Errorf("%s rendered cleanup before preflight", path)
+			if strings.Index(body, "preflight.validate_rule") > strings.Index(body, "evidence.evaluate_assertions") ||
+				strings.Index(body, "evidence.evaluate_assertions") > strings.Index(body, "evidence.persist_final_transaction") ||
+				strings.Index(body, "evidence.persist_final_transaction") > strings.Index(body, "cleanup.delete_rule") {
+				t.Errorf("%s rendered lifecycle out of order", path)
 			}
 		}
+	}
+}
+
+func TestAuthoringViewEnhancementPreservesModifiedAndNonPrimaryClicks(t *testing.T) {
+	response := httptest.NewRecorder()
+	NewHandler(version.Info{}).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/static/js/authoring.js", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	source := response.Body.String()
+	for _, want := range []string{
+		"event.defaultPrevented", "event.button !== 0", "event.metaKey", "event.ctrlKey", "event.shiftKey", "event.altKey",
+		"if (!shouldEnhanceViewClick(event)) return;",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("authoring enhancement missing %q", want)
+		}
+	}
+	guard := strings.Index(source, "if (!shouldEnhanceViewClick(event)) return;")
+	intercept := strings.Index(source, "event.preventDefault()")
+	if guard < 0 || intercept < 0 || guard > intercept {
+		t.Error("authoring view navigation intercepts before checking ordinary-link semantics")
 	}
 }
 

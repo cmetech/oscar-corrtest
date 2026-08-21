@@ -236,7 +236,7 @@ pre { overflow: auto; white-space: pre-wrap; }
 .authoring-view-nav { display: grid; margin: var(--ct-space-4) 0; border-bottom: 1px solid var(--ct-border); grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .authoring-view-nav a { min-width: 0; padding: 8px 5px; border-bottom: 3px solid transparent; color: var(--ct-fg-muted); font-size: 11px; font-weight: 800; text-align: center; text-decoration: none; }
 .authoring-view-nav a:hover { color: var(--ct-fg); }
-.authoring-view-nav a[aria-selected="true"] { border-bottom-color: var(--ct-accent); color: var(--ct-fg); }
+.authoring-view-nav a[aria-current="page"] { border-bottom-color: var(--ct-accent); color: var(--ct-fg); }
 .authoring-view-panel[hidden] { display: none; }
 .authoring-view-panel > header { padding-bottom: var(--ct-space-3); border-bottom: 1px solid var(--ct-border); }
 .authoring-view-panel > header h3 { margin: 0; font-size: 17px; }

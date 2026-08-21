@@ -77,7 +77,7 @@ func TestBuildOperationPreviewShowsOrderedCredentialFreeLifecycle(t *testing.T) 
 	if last.Stage != "cleanup.resolve_alert" {
 		t.Fatalf("last operation=%+v", last)
 	}
-	if !containsStage(operations, "evidence.read_history") || !containsStage(operations, "evidence.read_correlation_audit") || !containsStage(operations, "evidence.read_notification_audit") || !containsStage(operations, "evidence.persist_final_transaction") {
+	if !containsStage(operations, "evidence.read_history") || !containsStage(operations, "evidence.read_correlation_audit") || !containsStage(operations, "evidence.read_notification_audit") || !containsStage(operations, "evidence.evaluate_assertions") || !containsStage(operations, "evidence.persist_final_transaction") {
 		t.Fatalf("evidence lifecycle incomplete: %+v", operations)
 	}
 	if !containsStage(operations, "cleanup.delete_rule") {
@@ -91,6 +91,24 @@ func TestBuildOperationPreviewShowsOrderedCredentialFreeLifecycle(t *testing.T) 
 				t.Fatalf("preview leaked target, credential, or invented identity in %q", wire)
 			}
 		}
+	}
+}
+
+func TestPreviewEvaluatesAssertionsImmediatelyBeforeFinalPersistenceAndCleanup(t *testing.T) {
+	operations, err := oscar.BuildOperationPreview(compilePreviewPlan(t, "flood"), "test-version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	evaluateIndex := findPreviewIndex(t, operations, "evidence.evaluate_assertions", "", 0)
+	persistIndex := findPreviewIndex(t, operations, "evidence.persist_final_transaction", "", 0)
+	cleanupIndex := findPreviewIndex(t, operations, "cleanup.delete_rule", "P01", 0)
+	if evaluateIndex+1 != persistIndex || persistIndex >= cleanupIndex {
+		t.Fatalf("evaluate=%d persist=%d cleanup=%d", evaluateIndex, persistIndex, cleanupIndex)
+	}
+	evaluate := operations[evaluateIndex]
+	if evaluate.Method != "LOCAL" || evaluate.Path != "" || evaluate.Body != "" || evaluate.CaseCode != "" || len(evaluate.RuntimeFields) != 0 ||
+		!strings.Contains(strings.ToLower(evaluate.Summary), "declared assertions") || !strings.Contains(strings.ToLower(evaluate.Summary), "timing and evidence readiness") {
+		t.Fatalf("assertion evaluation operation=%+v", evaluate)
 	}
 }
 

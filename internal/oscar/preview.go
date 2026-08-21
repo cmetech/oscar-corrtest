@@ -131,6 +131,9 @@ func BuildOperationPreview(plan compiler.Plan, harnessVersion string) ([]Operati
 		}
 	}
 	operations = append(operations, OperationPreview{
+		Stage: "evidence.evaluate_assertions", Method: "LOCAL", Path: "",
+		Summary: "Evaluate declared assertions only after timing and evidence readiness requirements are satisfied; this is not an OSCAR request.",
+	}, OperationPreview{
 		Stage: "evidence.persist_final_transaction", Method: "LOCAL", Path: "",
 		Summary: "Persist normalized assertions and terminal evidence in the runtime's final SQLite transaction; this is not an OSCAR request.",
 	})

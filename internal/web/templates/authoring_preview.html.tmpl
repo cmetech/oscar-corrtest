@@ -8,16 +8,16 @@
   </header>
   <div class="button-row authoring-instrument__actions"><button class="secondary-button" type="button" data-copy-target="authoring-yaml">Copy YAML</button><a class="primary-button" href="/scenarios?selected=example:{{urlquery $page.Selection.Pattern}}:{{urlquery $page.Selection.Level}}">Open in Scenarios editor</a></div>
 
-  <nav class="authoring-view-nav" role="tablist" aria-label="Inspection view">
-    {{range $page.Catalog.Views}}<a id="authoring-view-tab-{{.ID}}" role="tab" href="/authoring?section={{urlquery $page.Selection.Section}}&amp;step={{urlquery $page.Selection.Step}}&amp;pattern={{urlquery $page.Selection.Pattern}}&amp;level={{urlquery $page.Selection.Level}}&amp;view={{urlquery .ID}}" data-authoring-view-link data-view-target="authoring-view-{{.ID}}" aria-controls="authoring-view-{{.ID}}" aria-selected="{{if eq .ID $page.Selection.View}}true{{else}}false{{end}}">{{.Title}}</a>{{end}}
+  <nav class="authoring-view-nav" aria-label="Inspection view">
+    {{range $page.Catalog.Views}}<a id="authoring-view-link-{{.ID}}" href="/authoring?section={{urlquery $page.Selection.Section}}&amp;step={{urlquery $page.Selection.Step}}&amp;pattern={{urlquery $page.Selection.Pattern}}&amp;level={{urlquery $page.Selection.Level}}&amp;view={{urlquery .ID}}" data-authoring-view-link data-view-target="authoring-view-{{.ID}}" aria-controls="authoring-view-{{.ID}}"{{if eq .ID $page.Selection.View}} aria-current="page"{{end}}>{{.Title}}</a>{{end}}
   </nav>
 
-  <section class="authoring-view-panel" id="authoring-view-yaml" data-authoring-view-panel role="tabpanel" aria-labelledby="authoring-view-tab-yaml" tabindex="-1"{{if ne $page.Selection.View "yaml"}} hidden{{end}}>
+  <section class="authoring-view-panel" id="authoring-view-yaml" data-authoring-view-panel aria-labelledby="authoring-view-link-yaml"{{if ne $page.Selection.View "yaml"}} hidden{{end}}>
     <header><div><p class="eyebrow">Canonical source</p><h3>Assembled YAML</h3></div><span class="status-pill">server rendered</span></header>
     <pre id="authoring-yaml"><code>{{$page.Inspection.Source}}</code></pre>
   </section>
 
-  <section class="authoring-view-panel" id="authoring-view-contract" data-authoring-view-panel role="tabpanel" aria-labelledby="authoring-view-tab-contract" tabindex="-1"{{if ne $page.Selection.View "contract"}} hidden{{end}}>
+  <section class="authoring-view-panel" id="authoring-view-contract" data-authoring-view-panel aria-labelledby="authoring-view-link-contract"{{if ne $page.Selection.View "contract"}} hidden{{end}}>
     <header><div><p class="eyebrow">Compiler output</p><h3>Compiled contract</h3></div><span class="status-pill">{{len $page.Inspection.Plan.Cases}} cases</span></header>
     <dl class="authoring-contract-summary">
       <div><dt>Scenario</dt><dd><code>{{$page.Inspection.Plan.Scenario}}</code></dd></div>
@@ -49,7 +49,7 @@
     </div>
   </section>
 
-  <section class="authoring-view-panel" id="authoring-view-api" data-authoring-view-panel role="tabpanel" aria-labelledby="authoring-view-tab-api" tabindex="-1"{{if ne $page.Selection.View "api"}} hidden{{end}}>
+  <section class="authoring-view-panel" id="authoring-view-api" data-authoring-view-panel aria-labelledby="authoring-view-link-api"{{if ne $page.Selection.View "api"}} hidden{{end}}>
     <header><div><p class="eyebrow">Credential-free exact requests</p><h3>OSCAR API</h3></div><span class="status-pill">server rendered</span></header>
     <p class="authoring-runtime-legend"><span class="runtime-badge">Runtime-dependent</span> Values in braces are supplied only by OSCAR responses or authoritative history. The request envelope’s deterministic <code>fingerPrint</code> is Alertmanager-compatible transport data, never oracle identity; authoritative OSCAR history supplies <code>{server-fingerprint}</code>. No returned IDs, credentials, target URL, or response bodies are fabricated.</p>
     <ol class="authoring-operation-list">
@@ -66,11 +66,11 @@
     </ol>
   </section>
 
-  <section class="authoring-view-panel" id="authoring-view-lifecycle" data-authoring-view-panel role="tabpanel" aria-labelledby="authoring-view-tab-lifecycle" tabindex="-1"{{if ne $page.Selection.View "lifecycle"}} hidden{{end}}>
+  <section class="authoring-view-panel" id="authoring-view-lifecycle" data-authoring-view-panel aria-labelledby="authoring-view-link-lifecycle"{{if ne $page.Selection.View "lifecycle"}} hidden{{end}}>
     <header><div><p class="eyebrow">Ordered execution</p><h3>Lifecycle</h3></div><span class="status-pill">read only</span></header>
     <p class="authoring-lifecycle-clarification">CorrTest creates two temporary correlation rules (P01 and N01), injects source alerts directly through the public alert API, observes OSCAR evidence, deletes only the returned rule IDs, and resolves its injected alerts. It does not create ordinary OSCAR alert rules.</p>
     <div class="authoring-lifecycle-legend" aria-label="Lifecycle groups">
-      <span>Compatibility preflight</span><span>Run mutation</span><span>Observation</span><span>Verdict persistence</span><span>Cleanup</span>
+      <span>Compatibility preflight</span><span>Run mutation</span><span>Observation</span><span>Assertion evaluation</span><span>Evidence persistence</span><span>Cleanup</span>
     </div>
     <p class="authoring-runtime-legend"><span class="runtime-badge">Runtime-dependent</span> <code>{returned-rule-id}</code> comes from rule creation; <code>{server-fingerprint}</code> comes from authoritative OSCAR history.</p>
     <ol class="authoring-lifecycle-list">
