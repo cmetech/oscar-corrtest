@@ -24,9 +24,9 @@
     <form class="authoring-controls" method="get" action="/authoring#{{$page.Selection.Section}}" aria-label="Authoring example selection">
       <input type="hidden" name="section" value="{{$page.Selection.Section}}">
       <input type="hidden" name="step" value="{{$page.Selection.Step}}">
-      <label>Pattern<select name="pattern">{{range $page.Contract.Patterns}}<option value="{{.ID}}"{{if eq .ID $page.Selection.Pattern}} selected{{end}}>{{.Title}}</option>{{end}}</select></label>
-      <label>Depth<select name="level"><option value="basic"{{if eq $page.Selection.Level "basic"}} selected{{end}}>basic</option><option value="advanced"{{if eq $page.Selection.Level "advanced"}} selected{{end}}>advanced</option></select></label>
-      <label>Instrument view<select name="view">{{range $page.Catalog.Views}}<option value="{{.ID}}"{{if eq .ID $page.Selection.View}} selected{{end}}>{{.Title}}</option>{{end}}</select></label>
+      <label>Pattern<select name="pattern" data-authoring-example-select>{{range $page.Contract.Patterns}}<option value="{{.ID}}"{{if eq .ID $page.Selection.Pattern}} selected{{end}}>{{.Title}}</option>{{end}}</select></label>
+      <label>Depth<select name="level" data-authoring-example-select><option value="basic"{{if eq $page.Selection.Level "basic"}} selected{{end}}>basic</option><option value="advanced"{{if eq $page.Selection.Level "advanced"}} selected{{end}}>advanced</option></select></label>
+      <label>Instrument view<select name="view" data-authoring-example-select>{{range $page.Catalog.Views}}<option value="{{.ID}}"{{if eq .ID $page.Selection.View}} selected{{end}}>{{.Title}}</option>{{end}}</select></label>
       <button class="secondary-button" type="submit">Load example</button>
     </form>
 

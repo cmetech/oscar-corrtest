@@ -117,6 +117,44 @@ func TestAuthoringWorkspaceKeepsCoreControlsServerRendered(t *testing.T) {
 	}
 }
 
+func TestAuthoringExampleSelectorsSubmitTheServerRenderedFormOnChange(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/authoring", nil)
+	res := httptest.NewRecorder()
+	NewHandler(version.Info{}).ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body.String())
+	}
+	if count := strings.Count(res.Body.String(), `data-authoring-example-select`); count != 3 {
+		t.Fatalf("authoring page has %d auto-loading example selectors, want 3", count)
+	}
+	js := readAsset(t, "static/js/authoring.js")
+	for _, fragment := range []string{"[data-authoring-example-select]", "select.form", "requestSubmit()"} {
+		if !strings.Contains(js, fragment) {
+			t.Errorf("authoring selector enhancement missing %q", fragment)
+		}
+	}
+}
+
+func TestAuthoringWorkspaceContainsWideSchemaInsideTheCenterColumn(t *testing.T) {
+	pages := readAsset(t, "static/css/pages.css")
+	content := cssBlock(t, pages, `.authoring-content`)
+	for _, fragment := range []string{"grid-template-columns: minmax(0, 1fr)", "min-width: 0"} {
+		if !strings.Contains(content, fragment) {
+			t.Errorf("authoring content does not constrain its implicit grid track with %q", fragment)
+		}
+	}
+	directChildren := cssBlock(t, pages, `.authoring-content > *`)
+	if !strings.Contains(directChildren, "min-width: 0") {
+		t.Error("authoring content children can expand the center track beyond its assigned column")
+	}
+	schemaWrapper := cssBlock(t, pages, `.authoring-schema .data-table-wrapper`)
+	for _, fragment := range []string{"width: 100%", "max-width: 100%"} {
+		if !strings.Contains(schemaWrapper, fragment) {
+			t.Errorf("authoring schema wrapper does not own horizontal overflow with %q", fragment)
+		}
+	}
+}
+
 func readAsset(t *testing.T, path string) string {
 	t.Helper()
 	data, err := assets.ReadFile(path)
