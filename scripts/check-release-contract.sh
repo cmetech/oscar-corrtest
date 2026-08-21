@@ -94,7 +94,11 @@ grep -q '^CMD \["help"\]$' Containerfile || {
   exit 1
 }
 
-timer_output=$(go test -count=1 ./internal/scenario ./internal/compiler ./internal/runner -run 'TestDistributedJSONSchemaIsValidAndCoversEveryPattern|TestCompiledObservationWindowsCoverDecisionAndEvidenceLag|TestTimerStimulusScheduleIsDurableBeforeWaiting|TestRunnerExecutesEveryBuiltinPatternThroughOneCoordinator|TestPlanMaxDurationStopsInjectionAndRunsDetachedCleanup' 2>&1)
+timer_output=$(
+  go test -count=1 ./internal/scenario -run 'TestCommittedJSONSchemaMatchesGenerator'
+  go test -count=1 ./internal/compiler -run 'TestCompiledObservationWindowsCoverDecisionAndEvidenceLag'
+  go test -count=1 ./internal/runner -run 'TestTimerStimulusScheduleIsDurableBeforeWaiting|TestRunnerExecutesEveryBuiltinPatternThroughOneCoordinator|TestPlanMaxDurationStopsInjectionAndRunsDetachedCleanup'
+)
 printf '%s\n' "$timer_output"
 if printf '%s\n' "$timer_output" | grep -q '\[no tests to run\]'; then
   printf '%s\n' 'timer gate selected no tests in at least one package' >&2
