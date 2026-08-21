@@ -303,18 +303,22 @@ func validateAbsenceSemantics(testCase Case, events []semanticEvent) error {
 }
 
 func validateParentChildSemantics(testCase Case, events []semanticEvent) error {
-	activeParents := map[string]time.Duration{}
+	activeParents := map[string]map[string]time.Duration{}
 	childCount, matchedChild := 0, false
 	for _, event := range chronological(events) {
 		switch {
 		case event.Role == "parent" && event.Status == "firing":
-			activeParents[event.GroupKey] = event.At
+			if activeParents[event.GroupKey] == nil {
+				activeParents[event.GroupKey] = map[string]time.Duration{}
+			}
+			activeParents[event.GroupKey][event.Identity] = event.At
 		case event.Role == "parent" && event.Status == "resolved":
-			delete(activeParents, event.GroupKey)
+			delete(activeParents[event.GroupKey], event.Identity)
 		case event.Role == "child" && event.Status == "firing":
 			childCount++
-			parentAt, active := activeParents[event.GroupKey]
-			matchedChild = matchedChild || (active && event.At > parentAt && event.At-parentAt <= testCase.Window)
+			for _, parentAt := range activeParents[event.GroupKey] {
+				matchedChild = matchedChild || (event.At > parentAt && event.At-parentAt <= testCase.Window)
+			}
 		}
 	}
 	if testCase.Code == "P01" && !matchedChild {

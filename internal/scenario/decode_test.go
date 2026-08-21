@@ -116,3 +116,66 @@ func TestDecodeRejectsExplicitRepeatOrRoleWithEventStimuli(t *testing.T) {
 		})
 	}
 }
+
+func TestEncodeAndDecodeRejectInvalidResolutionIdentity(t *testing.T) {
+	tests := []struct {
+		name      string
+		want      string
+		mutate    func(*scenario.Scenario)
+		mutateRaw func(string) string
+	}{
+		{
+			name: "resolved event labels",
+			want: "resolved event must not supply labels",
+			mutate: func(document *scenario.Scenario) {
+				document.Cases[1].Events[1].Labels = map[string]string{"service": "changed"}
+			},
+			mutateRaw: func(raw string) string {
+				return strings.Replace(raw, "status: resolved\n        delay: 10s", "status: resolved\n        labels:\n          service: changed\n        delay: 10s", 1)
+			},
+		},
+		{
+			name: "resolution without active firing",
+			want: "without an active preceding firing",
+			mutate: func(document *scenario.Scenario) {
+				document.Cases[1].Events = document.Cases[1].Events[1:]
+			},
+			mutateRaw: func(raw string) string {
+				negative := strings.LastIndex(raw, "      - role: service_down\n        status: firing\n")
+				if negative < 0 {
+					return raw
+				}
+				return raw[:negative] + raw[negative+len("      - role: service_down\n        status: firing\n"):]
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			document := scenario.Builtin("persistence")
+			test.mutate(&document)
+			if _, err := scenario.Encode(document); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Encode error=%v, want %q", err, test.want)
+			}
+			source, err := scenario.BuiltinSource("persistence")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := scenario.Decode(strings.NewReader(test.mutateRaw(string(source)))); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Decode error=%v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestEncodeRejectsSecondResolutionAfterLatestPointerClears(t *testing.T) {
+	document := scenario.Builtin("persistence")
+	document.Cases[1].Events = []scenario.Event{
+		{Role: "service_down", Status: "firing"},
+		{Role: "service_down", Status: "firing", Delay: time.Second},
+		{Role: "service_down", Status: "resolved", Delay: 2 * time.Second},
+		{Role: "service_down", Status: "resolved", Delay: 3 * time.Second},
+	}
+	if _, err := scenario.Encode(document); err == nil || !strings.Contains(err.Error(), "without an active preceding firing") {
+		t.Fatalf("Encode error=%v, want cleared latest-pointer failure", err)
+	}
+}

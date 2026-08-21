@@ -253,13 +253,30 @@ func validate(document Scenario) error {
 		if item.Repeat != 0 || item.Role != "" || len(events) > MaxEvents {
 			return fmt.Errorf("case %q mixes or exceeds event stimulus forms", item.Name)
 		}
-		for _, event := range events {
+		latestFiringByRole := map[string]bool{}
+		var previousDelay time.Duration
+		for index, event := range events {
 			if event.Role == "" || len(event.Role) > MaxRoleLength || (event.Status != "firing" && event.Status != "resolved") || event.Delay < 0 || event.Delay > document.MaxDuration {
 				return fmt.Errorf("case %q event is invalid", item.Name)
 			}
+			if index > 0 && event.Delay < previousDelay {
+				return fmt.Errorf("case %q event delays must be non-decreasing absolute offsets", item.Name)
+			}
+			previousDelay = event.Delay
 			if err := validateLabels(event.Labels); err != nil {
 				return fmt.Errorf("case %q event: %w", item.Name, err)
 			}
+			if event.Status == "resolved" {
+				if len(event.Labels) != 0 {
+					return fmt.Errorf("case %q resolved event must not supply labels", item.Name)
+				}
+				if !latestFiringByRole[event.Role] {
+					return fmt.Errorf("case %q resolves role %q without an active preceding firing", item.Name, event.Role)
+				}
+				delete(latestFiringByRole, event.Role)
+				continue
+			}
+			latestFiringByRole[event.Role] = true
 		}
 	}
 	if !codes["P01"] || !codes["N01"] {

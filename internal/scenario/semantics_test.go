@@ -75,6 +75,92 @@ func TestPatternSemanticValidationRejectsConditionsOutsideCaseWindow(t *testing.
 	}
 }
 
+func TestPatternSemanticValidationRejectsDecreasingAbsoluteDelays(t *testing.T) {
+	tests := []struct {
+		pattern string
+		events  []Event
+	}{
+		{"co_occurrence", []Event{{Role: "disk_full", Status: "firing", Delay: 10 * time.Second}, {Role: "disk_full", Status: "firing", Delay: 5 * time.Second}}},
+		{"sequence", []Event{{Role: "privileged_command", Status: "firing", Delay: 10 * time.Second}, {Role: "login_failure", Status: "firing", Delay: 5 * time.Second}}},
+	}
+	for _, test := range tests {
+		t.Run(test.pattern, func(t *testing.T) {
+			document := Builtin(test.pattern)
+			caseByCode(&document, "N01").Events = test.events
+			raw := encodeWireWithoutValidation(t, document)
+			if _, err := Decode(bytes.NewReader(raw)); err == nil || !strings.Contains(err.Error(), "event delays must be non-decreasing") {
+				t.Fatalf("error=%v, want non-decreasing delay failure", err)
+			}
+		})
+	}
+}
+
+func TestPatternSemanticValidationKeepsEqualAndIncreasingDelayOrder(t *testing.T) {
+	tests := []struct {
+		name   string
+		events []Event
+	}{
+		{"equal", []Event{{Role: "privileged_command", Status: "firing", Delay: 5 * time.Second}, {Role: "login_failure", Status: "firing", Delay: 5 * time.Second}}},
+		{"increasing", []Event{{Role: "privileged_command", Status: "firing", Delay: 5 * time.Second}, {Role: "login_failure", Status: "firing", Delay: 10 * time.Second}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			document := Builtin("sequence")
+			caseByCode(&document, "N01").Events = test.events
+			raw := encodeWireWithoutValidation(t, document)
+			decoded, err := Decode(bytes.NewReader(raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := caseByCode(&decoded, "N01").Events
+			if got[0].Role != "privileged_command" || got[1].Role != "login_failure" || got[0].Delay != test.events[0].Delay || got[1].Delay != test.events[1].Delay {
+				t.Fatalf("declared event order changed: %+v", got)
+			}
+		})
+	}
+}
+
+func TestParentChildOverlappingParentIdentityRemainsActive(t *testing.T) {
+	document := Builtin("parent_child")
+	caseByCode(&document, "N01").Events = []Event{
+		{Role: "parent", Status: "firing"},
+		{Role: "parent", Status: "firing", Delay: time.Second},
+		{Role: "parent", Status: "resolved", Delay: 2 * time.Second},
+		{Role: "child", Status: "firing", Delay: 3 * time.Second},
+	}
+	raw := encodeWireWithoutValidation(t, document)
+	if _, err := Decode(bytes.NewReader(raw)); err == nil || !strings.Contains(err.Error(), "N01 parent_child") {
+		t.Fatalf("error=%v, want trigger-capable overlapping parent failure", err)
+	}
+}
+
+func TestParentChildSingleResolvedParentLeavesChildUnmatched(t *testing.T) {
+	document := Builtin("parent_child")
+	caseByCode(&document, "N01").Events = []Event{
+		{Role: "parent", Status: "firing"},
+		{Role: "parent", Status: "resolved", Delay: time.Second},
+		{Role: "child", Status: "firing", Delay: 2 * time.Second},
+	}
+	raw := encodeWireWithoutValidation(t, document)
+	if _, err := Decode(bytes.NewReader(raw)); err != nil {
+		t.Fatalf("single resolved parent should leave child unmatched: %v", err)
+	}
+}
+
+func TestDecodeRejectsSecondResolutionAfterLatestPointerClears(t *testing.T) {
+	document := Builtin("persistence")
+	caseByCode(&document, "N01").Events = []Event{
+		{Role: "service_down", Status: "firing"},
+		{Role: "service_down", Status: "firing", Delay: time.Second},
+		{Role: "service_down", Status: "resolved", Delay: 2 * time.Second},
+		{Role: "service_down", Status: "resolved", Delay: 3 * time.Second},
+	}
+	raw := encodeWireWithoutValidation(t, document)
+	if _, err := Decode(bytes.NewReader(raw)); err == nil || !strings.Contains(err.Error(), "without an active preceding firing") {
+		t.Fatalf("Decode error=%v, want cleared latest-pointer failure", err)
+	}
+}
+
 func requireSemanticDecodeError(t *testing.T, pattern, contains string, mutate func(*Scenario)) {
 	t.Helper()
 	document := Builtin(pattern)
