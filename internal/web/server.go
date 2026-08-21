@@ -838,6 +838,7 @@ func scenarioWorkbench(ctx context.Context, info version.Info, data DataSource, 
 		view.ScenarioCatalog = append(view.ScenarioCatalog, scenarioCatalogItem{Ref: ref, Name: item.Name, Pattern: document.Pattern, Kind: "Custom", Selected: ref == selected})
 	}
 	var source []byte
+	serverKnownExample := false
 	if pattern, ok := strings.CutPrefix(selected, "builtin:"); ok {
 		var err error
 		source, err = scenario.BuiltinSource(pattern)
@@ -878,6 +879,19 @@ func scenarioWorkbench(ctx context.Context, info version.Info, data DataSource, 
 		}
 		view.SelectedDraft = true
 		view.ScenarioCatalog = append(view.ScenarioCatalog, scenarioCatalogItem{Ref: selected, Name: document.Name, Pattern: pattern, Kind: "Unsaved draft", Selected: true})
+	} else if parts := strings.Split(selected, ":"); len(parts) == 3 && parts[0] == "example" {
+		example, found := scenario.LookupExample(parts[1], parts[2])
+		if !found {
+			return pageData{}, fmt.Errorf("selected example is unavailable")
+		}
+		var err error
+		source, err = scenario.Encode(example.Scenario)
+		if err != nil {
+			return pageData{}, err
+		}
+		serverKnownExample = true
+		view.SelectedDraft = true
+		view.ScenarioCatalog = append(view.ScenarioCatalog, scenarioCatalogItem{Ref: selected, Name: example.Scenario.Name, Pattern: example.Pattern, Kind: "Unsaved draft", Selected: true})
 	} else {
 		return pageData{}, fmt.Errorf("selected scenario reference is invalid")
 	}
@@ -886,12 +900,14 @@ func scenarioWorkbench(ctx context.Context, info version.Info, data DataSource, 
 		return pageData{}, err
 	}
 	view.SelectedName, view.SelectedPattern, view.ScenarioSource = document.Name, document.Pattern, string(source)
-	if inspector, ok := data.(scenarioInspector); ok {
-		inspection, inspectErr := inspector.InspectScenario(ctx, source, "phase_b_dispatch")
-		if inspectErr != nil {
-			view.Error = inspectErr.Error()
-		} else {
-			view.ScenarioPlan = &inspection.Plan
+	if !serverKnownExample {
+		if inspector, ok := data.(scenarioInspector); ok {
+			inspection, inspectErr := inspector.InspectScenario(ctx, source, "phase_b_dispatch")
+			if inspectErr != nil {
+				view.Error = inspectErr.Error()
+			} else {
+				view.ScenarioPlan = &inspection.Plan
+			}
 		}
 	}
 	return view, nil

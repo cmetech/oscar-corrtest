@@ -521,6 +521,43 @@ func TestScenarioWorkbenchPreviewsBuiltinSourceAndOpensUnsavedDraft(t *testing.T
 	}
 }
 
+func TestScenarioWorkbenchOpensServerKnownExamplesAsEditableReadOnlyDrafts(t *testing.T) {
+	data := &authoringExampleSpy{records: []domain.ScenarioRecord{{ID: "scn_existing", Name: "existing", SourceDocument: webScenarioSource}}}
+	handler := NewHandlerWithData(version.Info{Version: "test"}, data)
+	examples := scenario.AllExamples()
+	for _, example := range examples {
+		t.Run(example.ID, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, "http://example.com/scenarios?selected="+url.QueryEscape("example:"+example.ID), nil)
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			body := response.Body.String()
+			for _, required := range []string{`name="source"`, "Unsaved draft", example.Scenario.Name} {
+				if !strings.Contains(body, required) {
+					t.Errorf("example page missing %q", required)
+				}
+			}
+			if strings.Contains(body, `data-scenario-source readonly`) {
+				t.Fatal("server-known example source is not editable")
+			}
+		})
+	}
+	for _, selected := range []string{"example", "example:flood", "example:flood:basic:extra", "example:unknown:basic", "example:flood:expert"} {
+		t.Run("reject-"+selected, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://example.com/scenarios?selected="+url.QueryEscape(selected), nil))
+			if response.Code != http.StatusNotFound {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+	if data.listCalls != len(examples)+5 || data.importCalls != 0 || data.previewCalls != 0 || data.targetMutations != 0 || len(data.records) != 1 {
+		t.Fatalf("example GETs must be read-only: list=%d import=%d preview=%d target=%d records=%d", data.listCalls, data.importCalls, data.previewCalls, data.targetMutations, len(data.records))
+	}
+}
+
 func TestSavingScenarioDraftTransitionsToSingleSavedVersion(t *testing.T) {
 	runtime, err := appruntime.Open(context.Background(), config.Settings{DataDir: t.TempDir(), ListenAddress: "127.0.0.1:8787"}, version.Info{Version: "test"})
 	if err != nil {
@@ -1024,6 +1061,33 @@ type scenarioUIData struct {
 	runUIData
 	previewed bool
 	imported  bool
+}
+
+type authoringExampleSpy struct {
+	diagnosticData
+	records         []domain.ScenarioRecord
+	listCalls       int
+	importCalls     int
+	previewCalls    int
+	targetMutations int
+}
+
+func (d *authoringExampleSpy) ReadyStatus() (bool, string) { return true, "" }
+func (d *authoringExampleSpy) CreateTarget(context.Context, domain.TargetInput) (domain.Target, error) {
+	d.targetMutations++
+	return domain.Target{}, errors.New("target mutation is not allowed")
+}
+func (d *authoringExampleSpy) ListScenarios(context.Context) ([]domain.ScenarioRecord, error) {
+	d.listCalls++
+	return append([]domain.ScenarioRecord(nil), d.records...), nil
+}
+func (d *authoringExampleSpy) PreviewScenario(context.Context, string, scenario.Scenario, string) (compiler.Plan, error) {
+	d.previewCalls++
+	return compiler.Plan{}, errors.New("preview is not allowed")
+}
+func (d *authoringExampleSpy) ImportScenario(context.Context, []byte, scenario.Scenario) (domain.ScenarioRecord, error) {
+	d.importCalls++
+	return domain.ScenarioRecord{}, errors.New("import is not allowed")
 }
 
 func (d *scenarioUIData) ListScenarios(context.Context) ([]domain.ScenarioRecord, error) {
