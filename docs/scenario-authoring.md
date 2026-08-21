@@ -93,20 +93,20 @@ machine-readable form of this same contract.
 | `cases[].code` | required string | `P01` or `N01`, exactly once each. |
 | `cases[].polarity` | required string | `positive` for P01; `negative` for N01. |
 | `cases[].window` | required Go duration | Positive and at most 2 minutes. |
-| `cases[].groupBy` | optional label-name array | Up to 16 unique safe labels used for correlation grouping. |
-| `cases[].labels` | optional string map | Up to 64 safe, non-reserved source labels. |
+| `cases[].groupBy` | optional label-name array | Up to 16 unique safe label names, each 1–100 characters. |
+| `cases[].labels` | optional string map | Up to 64 safe, non-reserved source labels; keys are 1–100 characters and values are at most 500 characters. |
 | `cases[].role` | conditional string | Use with `repeat`; do not combine with `events`. |
 | `cases[].repeat` | conditional integer | 1–100; use with `role`; do not combine with `events`. |
 | `cases[].events` | conditional event array | 1–100 explicit events; do not combine with `role` or `repeat`. |
-| `cases[].suppressForNotifiers` | conditional string array | Up to 16 names; `parent_child` only; cannot overlap `tagForNotifiers`. |
-| `cases[].tagForNotifiers` | conditional string array | Up to 16 names; `parent_child` only; cannot overlap `suppressForNotifiers`. |
+| `cases[].suppressForNotifiers` | conditional string array | Up to 16 unique, nonblank names; each is at most 100 characters; `parent_child` only; disjoint from `tagForNotifiers`. |
+| `cases[].tagForNotifiers` | conditional string array | Up to 16 unique, nonblank names; each is at most 100 characters; `parent_child` only; disjoint from `suppressForNotifiers`. |
 | `cases[].assertions` | required assertion array | 1–32 exact-count assertions. |
 | `events[].role` | required string | Logical source role, 1–100 characters. |
 | `events[].status` | required string | `firing` or `resolved`. |
-| `events[].labels` | optional string map | Firing-only overrides; a resolution cannot change identity labels. |
+| `events[].labels` | optional string map | Firing-only overrides; a resolution cannot change identity labels. Label keys are 1–100 characters and values are at most 500 characters. |
 | `events[].delay` | optional Go duration | Non-negative absolute offset, non-decreasing, and within the budgets. |
 | `assertions[].kind` | required string | `synthetic-alert-count`, `audit-count`, or `parent-link-count`. |
-| `assertions[].outcome` | conditional string | Required for audit/parent-link counts; forbidden for synthetic-alert counts. |
+| `assertions[].outcome` | conditional string | Required, nonblank, and at most 100 characters for `audit-count` and `parent-link-count`; forbidden for `synthetic-alert-count`. |
 | `assertions[].equals` | required integer | Exact expected count from 0 through 100. |
 
 CorrTest supplies reserved labels such as `alertname`, `category`, and

@@ -36,3 +36,44 @@ func TestOperatorDocsContainPlatformAndLifecycleContracts(t *testing.T) {
 		}
 	}
 }
+
+func TestScenarioAuthoringGuideDocumentsValidationBudgets(t *testing.T) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	data, err := os.ReadFile(filepath.Join(root, "docs/scenario-authoring.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	guide := string(data)
+	for _, required := range []string{
+		"Up to 16 unique safe label names, each 1–100 characters.",
+		"Up to 64 safe, non-reserved source labels; keys are 1–100 characters and values are at most 500 characters.",
+		"Label keys are 1–100 characters and values are at most 500 characters.",
+		"Up to 16 unique, nonblank names; each is at most 100 characters; `parent_child` only; disjoint from `tagForNotifiers`.",
+		"Up to 16 unique, nonblank names; each is at most 100 characters; `parent_child` only; disjoint from `suppressForNotifiers`.",
+		"Required, nonblank, and at most 100 characters for `audit-count` and `parent-link-count`; forbidden for `synthetic-alert-count`.",
+	} {
+		if !strings.Contains(guide, required) {
+			t.Errorf("scenario authoring guide missing validation budget %q", required)
+		}
+	}
+}
+
+func TestBuiltinCatalogLinksEveryPatternToAuthoringTutorial(t *testing.T) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	data, err := os.ReadFile(filepath.Join(root, "docs/builtins.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := string(data)
+	for _, pattern := range []string{
+		"flood", "co_occurrence", "sequence", "persistence",
+		"absence", "parent_child", "cross_source", "threshold",
+	} {
+		if !strings.Contains(catalog, "| `"+pattern+"` ") {
+			t.Errorf("built-in catalog missing pattern %q", pattern)
+		}
+		if !strings.Contains(catalog, "](/authoring?section=patterns&pattern="+pattern+")") {
+			t.Errorf("built-in catalog missing Authoring tutorial link for %q", pattern)
+		}
+	}
+}
