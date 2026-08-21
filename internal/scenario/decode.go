@@ -51,6 +51,12 @@ type wireAssertion struct {
 	Equals  int     `yaml:"equals"`
 }
 
+type caseFieldPresence struct {
+	role   bool
+	repeat bool
+	events bool
+}
+
 func (assertion *wireAssertion) UnmarshalYAML(value *yaml.Node) error {
 	if value.Kind != yaml.MappingNode {
 		return fmt.Errorf("assertion must be a mapping")
@@ -104,6 +110,7 @@ func Decode(reader io.Reader) (Scenario, error) {
 	if containsAlias(&node) {
 		return Scenario{}, fmt.Errorf("YAML aliases are not permitted")
 	}
+	caseFields := findCaseFieldPresence(&node)
 	var extra yaml.Node
 	if err := decoder.Decode(&extra); err != io.EOF {
 		if err == nil && len(extra.Content) > 0 {
@@ -122,13 +129,23 @@ func Decode(reader io.Reader) (Scenario, error) {
 		return Scenario{}, fmt.Errorf("maxDuration: %w", err)
 	}
 	result := Scenario{APIVersion: wire.APIVersion, Kind: wire.Kind, Name: wire.Name, Suite: wire.Suite, Pattern: wire.Pattern, MaxDuration: maxDuration}
-	for _, item := range wire.Cases {
+	for index, item := range wire.Cases {
 		window, parseErr := time.ParseDuration(item.Window)
 		if parseErr != nil {
 			return Scenario{}, fmt.Errorf("case %q window: %w", item.Name, parseErr)
 		}
-		if len(item.Events) > 0 && (item.Role != nil || item.Repeat != nil) {
+		fields := caseFieldPresence{}
+		if index < len(caseFields) {
+			fields = caseFields[index]
+		}
+		if fields.events && (fields.role || fields.repeat) {
 			return Scenario{}, fmt.Errorf("case %q mixes event stimuli with role or repeat", item.Name)
+		}
+		if fields.events && len(item.Events) == 0 {
+			return Scenario{}, fmt.Errorf("case %q event stimuli must contain at least one event", item.Name)
+		}
+		if !fields.events && (!fields.role || !fields.repeat || item.Role == nil || item.Repeat == nil) {
+			return Scenario{}, fmt.Errorf("case %q repeat stimuli require non-null role and repeat fields", item.Name)
 		}
 		role, repeat := "", 0
 		if item.Role != nil {
@@ -281,6 +298,43 @@ func isSupportedPattern(pattern string) bool {
 		}
 	}
 	return false
+}
+
+func findCaseFieldPresence(document *yaml.Node) []caseFieldPresence {
+	if document == nil || len(document.Content) == 0 {
+		return nil
+	}
+	root := document.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return nil
+	}
+	for index := 0; index+1 < len(root.Content); index += 2 {
+		if root.Content[index].Value != "cases" {
+			continue
+		}
+		cases := root.Content[index+1]
+		if cases.Kind != yaml.SequenceNode {
+			return nil
+		}
+		result := make([]caseFieldPresence, len(cases.Content))
+		for caseIndex, item := range cases.Content {
+			if item.Kind != yaml.MappingNode {
+				continue
+			}
+			for fieldIndex := 0; fieldIndex+1 < len(item.Content); fieldIndex += 2 {
+				switch item.Content[fieldIndex].Value {
+				case "role":
+					result[caseIndex].role = true
+				case "repeat":
+					result[caseIndex].repeat = true
+				case "events":
+					result[caseIndex].events = true
+				}
+			}
+		}
+		return result
+	}
+	return nil
 }
 
 func containsAlias(node *yaml.Node) bool {

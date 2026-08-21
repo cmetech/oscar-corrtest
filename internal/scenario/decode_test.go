@@ -85,16 +85,32 @@ func TestDecodeEnforcesConditionalAssertionOutcomes(t *testing.T) {
 
 func TestDecodeRejectsExplicitRepeatOrRoleWithEventStimuli(t *testing.T) {
 	eventForm := strings.Replace(validCustom, "role: interface_down\n    repeat: 5", "events:\n      - {role: interface_down, status: firing}", 1)
-	if _, err := scenario.Decode(strings.NewReader(eventForm)); err != nil {
-		t.Fatalf("event form without repeat or role rejected: %v", err)
-	}
 	for name, input := range map[string]string{
-		"explicit zero repeat": strings.Replace(eventForm, "events:\n", "repeat: 0\n    events:\n", 1),
-		"explicit empty role":  strings.Replace(eventForm, "events:\n", "role: \"\"\n    events:\n", 1),
+		"valid omitted event fields": eventForm,
+		"events empty":               strings.Replace(eventForm, "events:\n      - {role: interface_down, status: firing}", "events: []", 1),
+		"events null":                strings.Replace(eventForm, "events:\n      - {role: interface_down, status: firing}", "events: null", 1),
+		"event role null":            strings.Replace(eventForm, "events:\n", "role: null\n    events:\n", 1),
+		"event role empty":           strings.Replace(eventForm, "events:\n", "role: \"\"\n    events:\n", 1),
+		"event repeat null":          strings.Replace(eventForm, "events:\n", "repeat: null\n    events:\n", 1),
+		"event repeat zero":          strings.Replace(eventForm, "events:\n", "repeat: 0\n    events:\n", 1),
+		"repeat role absent":         strings.Replace(validCustom, "role: interface_down\n    ", "", 1),
+		"repeat role null":           strings.Replace(validCustom, "role: interface_down", "role: null", 1),
+		"repeat role empty":          strings.Replace(validCustom, "role: interface_down", "role: \"\"", 1),
+		"repeat absent":              strings.Replace(validCustom, "repeat: 5\n    ", "", 1),
+		"repeat null":                strings.Replace(validCustom, "repeat: 5", "repeat: null", 1),
+		"repeat zero":                strings.Replace(validCustom, "repeat: 5", "repeat: 0", 1),
+		"case unknown field":         strings.Replace(validCustom, "code: P01", "code: P01\n    unknown: true", 1),
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := scenario.Decode(strings.NewReader(input)); err == nil {
-				t.Fatal("event form accepted an explicit repeat or role field")
+			_, err := scenario.Decode(strings.NewReader(input))
+			if name == "valid omitted event fields" {
+				if err != nil {
+					t.Fatalf("valid event form rejected: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("invalid stimulus field presence accepted")
 			}
 		})
 	}
