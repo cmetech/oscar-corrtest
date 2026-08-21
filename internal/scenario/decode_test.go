@@ -84,11 +84,12 @@ func TestDecodeEnforcesConditionalAssertionOutcomes(t *testing.T) {
 }
 
 func TestDecodeRejectsExplicitRepeatOrRoleWithEventStimuli(t *testing.T) {
-	eventForm := strings.Replace(validCustom, "role: interface_down\n    repeat: 5", "events:\n      - {role: interface_down, status: firing}", 1)
+	eventBlock := "events:\n      - {role: interface_down, status: firing}\n      - {role: interface_down, status: firing}\n      - {role: interface_down, status: firing}\n      - {role: interface_down, status: firing}\n      - {role: interface_down, status: firing}"
+	eventForm := strings.Replace(validCustom, "role: interface_down\n    repeat: 5", eventBlock, 1)
 	for name, input := range map[string]string{
 		"valid omitted event fields": eventForm,
-		"events empty":               strings.Replace(eventForm, "events:\n      - {role: interface_down, status: firing}", "events: []", 1),
-		"events null":                strings.Replace(eventForm, "events:\n      - {role: interface_down, status: firing}", "events: null", 1),
+		"events empty":               strings.Replace(eventForm, eventBlock, "events: []", 1),
+		"events null":                strings.Replace(eventForm, eventBlock, "events: null", 1),
 		"event role null":            strings.Replace(eventForm, "events:\n", "role: null\n    events:\n", 1),
 		"event role empty":           strings.Replace(eventForm, "events:\n", "role: \"\"\n    events:\n", 1),
 		"event repeat null":          strings.Replace(eventForm, "events:\n", "repeat: null\n    events:\n", 1),

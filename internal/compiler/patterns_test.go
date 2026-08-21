@@ -192,3 +192,39 @@ func TestParentChildNotifierNamesComeFromScenarioInput(t *testing.T) {
 		t.Fatalf("tag notifiers=%#v", plan.Cases[0].Rule.MatchCriteria["tag_children_for_notifiers"])
 	}
 }
+
+func TestCoOccurrenceUsesScenarioWideRequiredRoleVocabulary(t *testing.T) {
+	run := domain.Run{ID: "crt_0123456789ABCDEFGHJKMNPQRS", ShortToken: "7Q9K2M4A"}
+	input := scenario.Builtin("co_occurrence")
+	input.Cases[0].Events = append(input.Cases[0].Events, scenario.Event{Role: "network_unreachable", Status: "firing", Delay: 2 * time.Second})
+
+	plan, err := compiler.Compile(run, input, compiler.Capabilities{PipelineMode: "phase_b_dispatch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range plan.Cases {
+		matches, ok := item.Rule.MatchCriteria["required_matches"].([]any)
+		if !ok || len(matches) != 3 || item.Rule.MatchCriteria["min_matches"] != 3 {
+			t.Fatalf("%s required matches=%#v", item.Code, item.Rule.MatchCriteria)
+		}
+		wantExtraName := "CORRTEST_COOCCURRENCE_" + item.Code + "_NETWORKUNREACHABLE_7Q9K2M4A"
+		foundExtra := false
+		for _, match := range matches {
+			selector, _ := match.(map[string]string)
+			foundExtra = foundExtra || selector["alertname"] == wantExtraName
+		}
+		if !foundExtra {
+			t.Fatalf("%s rule omitted additional required role %q: %#v", item.Code, wantExtraName, matches)
+		}
+	}
+	positiveHasExtra, negativeHasExtra := false, false
+	for _, alert := range plan.Cases[0].Alerts {
+		positiveHasExtra = positiveHasExtra || alert.Labels["oscar_test_alert_role"] == "network_unreachable"
+	}
+	for _, alert := range plan.Cases[1].Alerts {
+		negativeHasExtra = negativeHasExtra || alert.Labels["oscar_test_alert_role"] == "network_unreachable"
+	}
+	if !positiveHasExtra || negativeHasExtra {
+		t.Fatalf("extra role injection P01=%v N01=%v", positiveHasExtra, negativeHasExtra)
+	}
+}

@@ -265,7 +265,7 @@ func validate(document Scenario) error {
 	if !codes["P01"] || !codes["N01"] {
 		return fmt.Errorf("scenario requires P01 and N01 cases")
 	}
-	return nil
+	return validatePatternSemantics(document)
 }
 
 func validateNames(values []string, maximum int, field string) error {

@@ -85,6 +85,7 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 		return Plan{}, fmt.Errorf("scenario maximum duration is outside the safe budget")
 	}
 	plan := Plan{APIVersion: input.APIVersion, Scenario: input.Name, Suite: input.Suite, Pattern: input.Pattern, RunID: run.ID, ShortToken: strings.ToUpper(run.ShortToken), MaxDuration: input.MaxDuration}
+	coOccurrenceRoles := requiredCoOccurrenceRoles(input)
 	for _, source := range input.Cases {
 		events := source.Events
 		if len(events) == 0 {
@@ -116,11 +117,7 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 				names[event.Role] = physicalName(patternCode, caseCode, event.Role, short)
 			}
 		}
-		requiredRoles := map[string][]string{
-			"co_occurrence": {"disk_full", "cpu_high"},
-			"sequence":      {"login_failure", "privileged_command"},
-			"parent_child":  {"parent", "child"},
-		}
+		requiredRoles := map[string][]string{"co_occurrence": coOccurrenceRoles, "sequence": {"login_failure", "privileged_command"}, "parent_child": {"parent", "child"}}
 		if roles := requiredRoles[input.Pattern]; len(roles) > 0 {
 			for _, role := range roles {
 				if names[role] == "" {
@@ -193,6 +190,29 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 	digest := sha256.Sum256(canonical)
 	plan.Digest = hex.EncodeToString(digest[:])
 	return plan, nil
+}
+
+func requiredCoOccurrenceRoles(input scenario.Scenario) []string {
+	if input.Pattern != "co_occurrence" {
+		return nil
+	}
+	seen := map[string]bool{"disk_full": true, "cpu_high": true}
+	for _, item := range input.Cases {
+		if item.Role != "" {
+			seen[item.Role] = true
+		}
+		for _, event := range item.Events {
+			if event.Status == "firing" {
+				seen[event.Role] = true
+			}
+		}
+	}
+	roles := make([]string, 0, len(seen))
+	for role := range seen {
+		roles = append(roles, role)
+	}
+	sort.Strings(roles)
+	return roles
 }
 
 func physicalName(patternCode, caseCode, role, short string) string {
