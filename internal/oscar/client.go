@@ -3,10 +3,8 @@ package oscar
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -124,7 +122,7 @@ func (c *Client) ValidateRule(ctx context.Context, rule compiler.RulePlan) error
 			Message string `json:"message"`
 		} `json:"errors"`
 	}
-	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/correlation_rules/validate", nil, rulePayload(rule, c.harnessVersion), &response); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, validateRulePath, nil, BuildRuleRequest(rule, c.harnessVersion), &response); err != nil {
 		return err
 	}
 	if !response.Valid {
@@ -135,7 +133,7 @@ func (c *Client) ValidateRule(ctx context.Context, rule compiler.RulePlan) error
 
 func (c *Client) CreateRule(ctx context.Context, rule compiler.RulePlan) (Rule, error) {
 	var wire ruleResponse
-	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/correlation_rules", nil, rulePayload(rule, c.harnessVersion), &wire); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, createRulePath, nil, BuildRuleRequest(rule, c.harnessVersion), &wire); err != nil {
 		return Rule{}, err
 	}
 	return wire.normalized(), nil
@@ -143,7 +141,7 @@ func (c *Client) CreateRule(ctx context.Context, rule compiler.RulePlan) (Rule, 
 
 func (c *Client) GetRule(ctx context.Context, id int) (Rule, error) {
 	var wire ruleResponse
-	if err := c.doJSON(ctx, http.MethodGet, "/api/v1/correlation_rules/"+strconv.Itoa(id), nil, nil, &wire); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, createRulePath+"/"+strconv.Itoa(id), nil, nil, &wire); err != nil {
 		return Rule{}, err
 	}
 	return wire.normalized(), nil
@@ -162,7 +160,7 @@ func (c *Client) FindRules(ctx context.Context, name string) ([]Rule, error) {
 			Page    int            `json:"page"`
 			PerPage int            `json:"perPage"`
 		}
-		if err := c.doJSON(ctx, http.MethodGet, "/api/v1/correlation_rules", values, nil, &response); err != nil {
+		if err := c.doJSON(ctx, http.MethodGet, createRulePath, values, nil, &response); err != nil {
 			return nil, err
 		}
 		seen += len(response.Rows)
@@ -179,7 +177,7 @@ func (c *Client) FindRules(ctx context.Context, name string) ([]Rule, error) {
 }
 
 func (c *Client) DeleteRule(ctx context.Context, id int) error {
-	err := c.doJSON(ctx, http.MethodDelete, "/api/v1/correlation_rules/"+strconv.Itoa(id), nil, nil, nil)
+	err := c.doJSON(ctx, http.MethodDelete, createRulePath+"/"+strconv.Itoa(id), nil, nil, nil)
 	var machine *MachineError
 	if errors.As(err, &machine) && machine.StatusCode == http.StatusNotFound {
 		return nil
@@ -188,14 +186,9 @@ func (c *Client) DeleteRule(ctx context.Context, id int) error {
 }
 
 func (c *Client) Inject(ctx context.Context, alert compiler.AlertPlan) (InjectionResult, error) {
-	transportFingerprint, err := alertmanagerTransportFingerprint(alert.Labels)
+	payload, err := BuildAlertRequest(alert)
 	if err != nil {
 		return InjectionResult{}, err
-	}
-	payload := map[string]any{
-		"receiver": "oscar-corrtest", "status": alert.Status, "groupKey": alert.Labels["oscar_test_run_id"] + ":" + alert.Name,
-		"groupLabels": map[string]string{"alertname": alert.Name}, "commonLabels": alert.Labels,
-		"commonAnnotations": alert.Annotations, "alerts": []any{map[string]any{"fingerPrint": transportFingerprint, "status": alert.Status, "labels": alert.Labels, "annotations": alert.Annotations}},
 	}
 	return c.sendAlert(ctx, payload)
 }
@@ -203,33 +196,15 @@ func (c *Client) Inject(ctx context.Context, alert compiler.AlertPlan) (Injectio
 // ResolveHistory emits one cleanup-only resolved alert using the authoritative
 // OSCAR history fingerprint. User-authored plans cannot access this override.
 func (c *Client) ResolveHistory(ctx context.Context, record HistoryRecord) (InjectionResult, error) {
-	runID := strings.TrimSpace(record.Labels["oscar_test_run_id"])
-	if record.AlertName == "" || runID == "" || strings.TrimSpace(record.Fingerprint) == "" {
-		return InjectionResult{}, fmt.Errorf("history record lacks exact corrtest ownership or server fingerprint")
-	}
-	labels := make(map[string]string, len(record.Labels)+1)
-	for key, value := range record.Labels {
-		labels[key] = value
-	}
-	labels["alertname"] = record.AlertName
-	labels["oscar_fingerprint"] = record.Fingerprint
-	annotations := make(map[string]string, len(record.Annotations)+1)
-	for key, value := range record.Annotations {
-		annotations[key] = value
-	}
-	annotations["oscar_test_cleanup"] = "resolved by oscar-corrtest after exact history read-back"
-	hash := sha256.Sum256([]byte("corrtest-resolve\x00" + record.Fingerprint))
-	transportFingerprint := hex.EncodeToString(hash[:])[:16]
-	payload := map[string]any{
-		"receiver": "oscar-corrtest", "status": "resolved", "groupKey": runID + ":cleanup:" + record.AlertName,
-		"groupLabels": map[string]string{"alertname": record.AlertName}, "commonLabels": labels,
-		"commonAnnotations": annotations, "alerts": []any{map[string]any{"fingerPrint": transportFingerprint, "status": "resolved", "labels": labels, "annotations": annotations}},
+	payload, err := BuildResolutionRequest(record)
+	if err != nil {
+		return InjectionResult{}, err
 	}
 	return c.sendAlert(ctx, payload)
 }
 
-func (c *Client) sendAlert(ctx context.Context, payload map[string]any) (InjectionResult, error) {
-	status, raw, err := c.do(ctx, http.MethodPost, "/api/v1/alerts", nil, payload)
+func (c *Client) sendAlert(ctx context.Context, payload AlertGroupRequest) (InjectionResult, error) {
+	status, raw, err := c.do(ctx, http.MethodPost, alertsPath, nil, payload)
 	if err != nil {
 		return InjectionResult{}, err
 	}
@@ -279,40 +254,14 @@ func (c *Client) sendAlert(ctx context.Context, payload map[string]any) (Injecti
 	return result, nil
 }
 
-// alertmanagerTransportFingerprint satisfies OSCAR's current webhook envelope.
-// It is deliberately not the OSCAR fingerprint and is never used as an assertion key.
-func alertmanagerTransportFingerprint(labels map[string]string) (string, error) {
-	if len(labels) == 0 {
-		return "", fmt.Errorf("alert labels are required")
-	}
-	keys := make([]string, 0, len(labels))
-	for key := range labels {
-		if key == "oscar_fingerprint" || key == "am_fingerprint" {
-			return "", fmt.Errorf("pre-stamped fingerprint labels are forbidden")
-		}
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	hash := sha256.New()
-	for _, key := range keys {
-		_, _ = io.WriteString(hash, key)
-		_, _ = hash.Write([]byte{0})
-		_, _ = io.WriteString(hash, labels[key])
-		_, _ = hash.Write([]byte{0})
-	}
-	return hex.EncodeToString(hash.Sum(nil))[:16], nil
-}
-
 func (c *Client) FindHistory(ctx context.Context, query HistoryQuery) ([]HistoryRecord, error) {
-	filter, _ := json.Marshal(map[string]any{"items": []any{map[string]any{"field": "alertname", "operator": "equals", "value": query.AlertName}}})
-	values := url.Values{"perPage": {"100"}, "order": {"asc"}, "column": {"createdAt"},
-		"start_datetime": {query.Start.UTC().Format(time.RFC3339Nano)}, "end_datetime": {query.End.UTC().Format(time.RFC3339Nano)}, "filter": {string(filter)}}
+	values := historyQueryValues(query.AlertName, formattedTime(query.Start), formattedTime(query.End))
 	var result []HistoryRecord
 	seen := 0
 	for page := 1; page <= maxListPages; page++ {
 		values.Set("page", strconv.Itoa(page))
 		var response historyListResponse
-		if err := c.doJSON(ctx, http.MethodGet, "/api/v1/alerts/history", values, nil, &response); err != nil {
+		if err := c.doJSON(ctx, http.MethodGet, historyPath, values, nil, &response); err != nil {
 			return nil, err
 		}
 		seen += len(response.Records)
@@ -330,13 +279,13 @@ func (c *Client) FindHistory(ctx context.Context, query HistoryQuery) ([]History
 }
 
 func (c *Client) CorrelationAudit(ctx context.Context, fingerprint string) ([]AuditRecord, error) {
-	values := url.Values{"fingerprint": {fingerprint}, "perPage": {"100"}}
+	values := correlationAuditQueryValues(fingerprint)
 	var result []AuditRecord
 	seen := 0
 	for page := 1; page <= maxListPages; page++ {
 		values.Set("page", strconv.Itoa(page))
 		var response auditListResponse
-		if err := c.doJSON(ctx, http.MethodGet, "/api/v1/correlation_rules/audit", values, nil, &response); err != nil {
+		if err := c.doJSON(ctx, http.MethodGet, correlationAuditPath, values, nil, &response); err != nil {
 			return nil, err
 		}
 		seen += len(response.Rows)
@@ -351,8 +300,7 @@ func (c *Client) CorrelationAudit(ctx context.Context, fingerprint string) ([]Au
 }
 
 func (c *Client) NotificationAudit(ctx context.Context, fingerprint string, start, end time.Time) ([]NotificationRecord, error) {
-	values := url.Values{"alert_fingerprint": {fingerprint}, "per_page": {"100"},
-		"date_from": {start.UTC().Format(time.RFC3339Nano)}, "date_to": {end.UTC().Format(time.RFC3339Nano)}}
+	values := notificationAuditQueryValues(fingerprint, formattedTime(start), formattedTime(end))
 	var result []NotificationRecord
 	seen := 0
 	for page := 1; page <= maxListPages; page++ {
@@ -364,7 +312,7 @@ func (c *Client) NotificationAudit(ctx context.Context, fingerprint string, star
 			Total   int                `json:"total"`
 			PerPage int                `json:"per_page"`
 		}
-		if err := c.doJSON(ctx, http.MethodGet, "/api/v1/notification-audit/", values, nil, &response); err != nil {
+		if err := c.doJSON(ctx, http.MethodGet, notificationAuditPath, values, nil, &response); err != nil {
 			return nil, err
 		}
 		wires := response.Items
@@ -405,15 +353,12 @@ func paginationLimitError(operation string) error {
 // ProbeLabelSurvival injects one diagnostic alert and reads its server identity
 // back from history. It creates no rule and never trusts the transport fingerprint.
 func (c *Client) ProbeLabelSurvival(ctx context.Context, runID, shortToken string) (LabelProbeResult, error) {
-	name := "CORRTEST_PROBE_P00_SOURCE_" + strings.ToUpper(shortToken)
-	labels := map[string]string{
-		"alertname": name, "category": "corrtest_probe", "oscar_test": "true", "oscar_test_harness": "corrtest",
-		"oscar_test_schema_version": "v1", "oscar_test_run_id": runID, "oscar_test_run_short": strings.ToUpper(shortToken),
-		"oscar_test_suite": "diagnostic", "oscar_test_scenario": "label-survival", "oscar_test_pattern": "probe",
-		"oscar_test_case": "label-survival", "oscar_test_case_code": "P00", "oscar_test_polarity": "diagnostic",
-		"oscar_test_alert_class": "source", "oscar_test_alert_role": "probe", "oscar_test_rule_name": "none", "severity": "warning",
+	alert, err := BuildLabelProbeAlert(runID, shortToken)
+	if err != nil {
+		return LabelProbeResult{}, err
 	}
-	result, err := c.Inject(ctx, compiler.AlertPlan{Name: name, Status: "firing", Labels: labels, Annotations: map[string]string{"summary": "[CORRTEST][PROBE] reserved label survival"}})
+	name, labels := alert.Name, alert.Labels
+	result, err := c.Inject(ctx, alert)
 	if err != nil {
 		return LabelProbeResult{}, err
 	}
@@ -520,16 +465,6 @@ func safeDetail(raw []byte) string {
 		return value.Detail
 	}
 	return http.StatusText(http.StatusBadGateway)
-}
-
-func rulePayload(rule compiler.RulePlan, harnessVersion string) map[string]any {
-	payload := map[string]any{"name": rule.Name, "pattern": rule.Pattern, "window_seconds": rule.WindowSeconds,
-		"group_by_labels": rule.GroupBy, "match_criteria": rule.MatchCriteria, "priority": 100,
-		"max_synthetic_per_minute": 10, "enabled": true, "description": rule.Description, "created_by": "oscar-corrtest/" + harnessVersion}
-	if rule.EmitAlertName != "" {
-		payload["emit_spec"] = map[string]any{"alertname": rule.EmitAlertName, "labels": rule.EmitLabels}
-	}
-	return payload
 }
 
 type ruleResponse struct {
