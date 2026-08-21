@@ -22,6 +22,7 @@
     <dl class="authoring-contract-summary">
       <div><dt>Scenario</dt><dd><code>{{$page.Inspection.Plan.Scenario}}</code></dd></div>
       <div><dt>Pattern</dt><dd><code>{{$page.Inspection.Plan.Pattern}}</code></dd></div>
+	  <div><dt>Pipeline mode</dt><dd><code>{{$page.Inspection.PipelineMode}}</code></dd></div>
       <div><dt>Maximum duration</dt><dd>{{duration $page.Inspection.Plan.MaxDuration}}</dd></div>
       <div><dt>Mutation budget</dt><dd>{{$page.Inspection.Plan.MutationBudget.Rules}} rules · {{$page.Inspection.Plan.MutationBudget.Alerts}} alerts</dd></div>
     </dl>
@@ -63,6 +64,7 @@
 
 {{define "inspection-api"}}
 <header><div><p class="eyebrow">Credential-free exact requests</p><h3>OSCAR API JSON</h3></div><span class="status-pill">server rendered</span></header>
+{{if .PipelineMode.IsAuditOnly}}<div class="notice notice--warning" role="note"><strong>Phase A audit-only limitation.</strong> This mode cannot prove dispatched synthetic-parent or notifier evidence. These unchanged request shapes document the compiled structural contract; they do not claim Phase A dispatches them.</div>{{end}}
 <p class="authoring-runtime-legend"><span class="runtime-badge">Runtime-dependent</span> Values in braces are supplied only by OSCAR responses or authoritative history. The request envelope’s deterministic <code>fingerPrint</code> is Alertmanager-compatible transport data, never oracle identity; authoritative OSCAR history supplies <code>{server-fingerprint}</code>. No returned IDs, credentials, target URL, or response bodies are fabricated.</p>
 <ol class="authoring-operation-list">
   {{range $index, $operation := .Operations}}
@@ -80,7 +82,11 @@
 
 {{define "inspection-lifecycle"}}
 <header><div><p class="eyebrow">Ordered execution</p><h3>Lifecycle</h3></div><span class="status-pill">read only</span></header>
+{{if .PipelineMode.IsAuditOnly}}
+<div class="notice notice--warning" role="note"><strong>Phase A audit-only limitation.</strong> This mode cannot prove dispatched synthetic-parent or notifier evidence. The ordered operations below are the unchanged compiled structural contract, not a claim that a Phase A live run executes the dispatch lifecycle.</div>
+{{else}}
 <p class="authoring-lifecycle-clarification">CorrTest creates two temporary correlation rules (P01 and N01), injects source alerts directly through the public alert API, observes OSCAR evidence, deletes only the returned rule IDs, and resolves its injected alerts. It does not create ordinary OSCAR alert rules.</p>
+{{end}}
 <div class="authoring-lifecycle-legend" aria-label="Lifecycle groups">
   <span>Compatibility preflight</span><span>Run mutation</span><span>Observation</span><span>Assertion evaluation</span><span>Evidence persistence</span><span>Cleanup</span>
 </div>

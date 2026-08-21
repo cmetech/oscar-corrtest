@@ -890,6 +890,65 @@ func TestScenarioPOSTPreviewKeepsChangedSourceAcrossFragmentViews(t *testing.T) 
 	}
 }
 
+func TestScenarioInspectionPreservesPipelineModeAcrossGETPOSTAndValidationFailure(t *testing.T) {
+	runtime, err := appruntime.Open(context.Background(), config.Settings{DataDir: t.TempDir(), ListenAddress: "127.0.0.1:8787"}, version.Info{Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	handler := NewHandlerWithData(version.Info{Version: "test"}, runtime)
+
+	getResponse := httptest.NewRecorder()
+	handler.ServeHTTP(getResponse, httptest.NewRequest(http.MethodGet, "http://example.com/scenarios?selected=draft:flood", nil))
+	if getResponse.Code != http.StatusOK {
+		t.Fatalf("GET status=%d body=%s", getResponse.Code, getResponse.Body.String())
+	}
+	if !strings.Contains(getResponse.Body.String(), `<option value="phase_b_dispatch" selected>`) || !strings.Contains(getResponse.Body.String(), `<code>phase_b_dispatch</code>`) {
+		t.Fatalf("GET did not render the default Phase B selection and inspection: %s", getResponse.Body.String())
+	}
+	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(getResponse.Body.String())
+	if len(match) != 2 {
+		t.Fatal("scenario CSRF token missing")
+	}
+
+	changedSource := strings.Replace(webScenarioSource, "name: sample", "name: phase-a-preview", 1)
+	values := url.Values{
+		"csrf_token": {match[1]}, "action": {"preview"}, "source": {changedSource},
+		"pipeline_mode": {"phase_a_audit_only"},
+	}
+	post := httptest.NewRequest(http.MethodPost, "http://example.com/scenarios?selected=draft:flood", strings.NewReader(values.Encode()))
+	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	post.Header.Set("Origin", "http://example.com")
+	post.AddCookie(getResponse.Result().Cookies()[0])
+	postResponse := httptest.NewRecorder()
+	handler.ServeHTTP(postResponse, post)
+	postBody := postResponse.Body.String()
+	if postResponse.Code != http.StatusOK {
+		t.Fatalf("POST status=%d body=%s", postResponse.Code, postBody)
+	}
+	for _, want := range []string{`<option value="phase_a_audit_only" selected>`, `<code>phase_a_audit_only</code>`, "phase-a-preview", "Phase A audit-only limitation", "cannot prove dispatched synthetic-parent or notifier evidence", "stimulus.inject_alert"} {
+		if !strings.Contains(postBody, want) {
+			t.Errorf("Phase A POST missing %q", want)
+		}
+	}
+
+	invalidSource := "name: phase-a-invalid\n"
+	values.Set("source", invalidSource)
+	failure := httptest.NewRequest(http.MethodPost, "http://example.com/scenarios?selected=draft:flood", strings.NewReader(values.Encode()))
+	failure.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	failure.Header.Set("Origin", "http://example.com")
+	failure.AddCookie(getResponse.Result().Cookies()[0])
+	failureResponse := httptest.NewRecorder()
+	handler.ServeHTTP(failureResponse, failure)
+	failureBody := failureResponse.Body.String()
+	if failureResponse.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("failure status=%d body=%s", failureResponse.Code, failureBody)
+	}
+	if !strings.Contains(failureBody, `<option value="phase_a_audit_only" selected>`) || !strings.Contains(failureBody, invalidSource) {
+		t.Fatalf("validation failure lost submitted mode or source: %s", failureBody)
+	}
+}
+
 func TestScenarioInspectionEnhancementNeverReplacesPOSTURLWithGET(t *testing.T) {
 	response := httptest.NewRecorder()
 	NewHandler(version.Info{}).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/static/js/scenarios.js", nil))

@@ -106,3 +106,17 @@ func TestServiceInspectIsStrictAndDeterministic(t *testing.T) {
 		t.Fatal("invalid pipeline mode accepted")
 	}
 }
+
+func TestServiceInspectRetainsValidatedPipelineMode(t *testing.T) {
+	source, err := scenario.BuiltinSource("flood")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inspection, err := New("test-version").Inspect(context.Background(), source, "phase_a_audit_only")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspection.PipelineMode != PipelineModePhaseAAuditOnly {
+		t.Fatalf("pipeline mode=%q", inspection.PipelineMode)
+	}
+}

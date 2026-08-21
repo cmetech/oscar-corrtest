@@ -43,7 +43,7 @@
         <textarea class="scenario-editor" data-scenario-source name="source" required spellcheck="false" aria-label="Editable scenario YAML">{{.ScenarioSource}}</textarea>
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <div class="scenario-editor-toolbar">
-          <label>Pipeline mode<select name="pipeline_mode"><option value="phase_b_dispatch">Phase B — audit and dispatch</option><option value="phase_a_audit_only">Phase A — audit only</option></select></label>
+          <label>Pipeline mode<select name="pipeline_mode"><option value="phase_b_dispatch"{{if eq .ScenarioPipelineMode "phase_b_dispatch"}} selected{{end}}>Phase B — audit and dispatch</option><option value="phase_a_audit_only"{{if eq .ScenarioPipelineMode "phase_a_audit_only"}} selected{{end}}>Phase A — audit only</option></select></label>
           <div class="button-row"><button class="secondary-button" type="submit" name="action" value="preview">Validate &amp; compile</button><button class="primary-button" type="submit" name="action" value="import">{{if .SelectedDraft}}Save custom scenario{{else}}Save as new version{{end}}</button></div>
         </div>
       </form>
@@ -57,6 +57,7 @@
 	  {{if .ScenarioInspection}}<span class="status-pill status-pill--pass">Structurally valid</span>{{end}}
     </header>
 	{{if .ScenarioInspection}}
+	  {{if .ScenarioInspection.PipelineMode.IsAuditOnly}}<div class="notice notice--warning" role="note"><strong>Phase A audit-only limitation.</strong> The selected mode cannot prove dispatched synthetic-parent or notifier evidence. The request JSON remains the same target-free structural contract and does not claim that Phase A dispatches it.</div>{{end}}
 	  <nav class="scenario-inspection-tabs" role="tablist" aria-label="Scenario inspection views">
 	    <a id="scenario-inspection-tab-contract" href="#scenario-inspection-contract" role="tab" data-inspection-tab="contract" aria-controls="scenario-inspection-contract" aria-selected="true" tabindex="0">Compiled contract</a>
 	    <a id="scenario-inspection-tab-api" href="#scenario-inspection-api" role="tab" data-inspection-tab="api" aria-controls="scenario-inspection-api" aria-selected="false" tabindex="-1">OSCAR API JSON</a>
@@ -67,7 +68,7 @@
 	    <h3 class="scenario-inspection-heading">Compiled contract</h3>
 	    <dl class="contract-summary">
 	      <div><dt>Pattern</dt><dd><code>{{.ScenarioInspection.Plan.Pattern}}</code></dd></div>
-	      <div><dt>Mode</dt><dd><code>phase_b_dispatch</code></dd></div>
+	      <div><dt>Mode</dt><dd><code>{{.ScenarioInspection.PipelineMode}}</code></dd></div>
 	      <div><dt>Budget</dt><dd>{{.ScenarioInspection.Plan.MutationBudget.Rules}} rules · {{.ScenarioInspection.Plan.MutationBudget.Alerts}} alerts</dd></div>
 	    </dl>
 	    <div class="case-tabs" role="tablist" aria-label="Compiled cases">

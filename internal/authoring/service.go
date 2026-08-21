@@ -18,6 +18,25 @@ const (
 	PreviewShortToken = "PREV1EW1"
 )
 
+// PipelineMode is the closed pipeline declaration used by target-free inspection.
+type PipelineMode string
+
+const (
+	PipelineModePhaseAAuditOnly PipelineMode = "phase_a_audit_only"
+	PipelineModePhaseBDispatch  PipelineMode = "phase_b_dispatch"
+)
+
+// IsAuditOnly reports whether the selected mode cannot prove dispatch evidence.
+func (mode PipelineMode) IsAuditOnly() bool { return mode == PipelineModePhaseAAuditOnly }
+
+func parsePipelineMode(value string) (PipelineMode, error) {
+	mode := PipelineMode(value)
+	if mode != PipelineModePhaseAAuditOnly && mode != PipelineModePhaseBDispatch {
+		return "", fmt.Errorf("pipeline mode %q cannot support correlation inspection", value)
+	}
+	return mode, nil
+}
+
 // Selection is the closed set of linkable authoring workspace choices.
 type Selection struct {
 	Section, Step, Pattern, Level, View string
@@ -31,10 +50,11 @@ func DefaultSelection() Selection {
 // Inspection is a strictly decoded document, deterministic compiler plan, and
 // credential-free OSCAR operation preview.
 type Inspection struct {
-	Document   scenario.Scenario        `json:"document"`
-	Source     string                   `json:"source"`
-	Plan       compiler.Plan            `json:"plan"`
-	Operations []oscar.OperationPreview `json:"operations"`
+	Document     scenario.Scenario        `json:"document"`
+	Source       string                   `json:"source"`
+	PipelineMode PipelineMode             `json:"pipelineMode"`
+	Plan         compiler.Plan            `json:"plan"`
+	Operations   []oscar.OperationPreview `json:"operations"`
 }
 
 // Page is every server-renderable value for a selected known authoring example.
@@ -83,11 +103,15 @@ func (s Service) Inspect(ctx context.Context, source []byte, pipelineMode string
 	if err := ctx.Err(); err != nil {
 		return Inspection{}, err
 	}
+	mode, err := parsePipelineMode(pipelineMode)
+	if err != nil {
+		return Inspection{}, err
+	}
 	document, err := scenario.Decode(bytes.NewReader(source))
 	if err != nil {
 		return Inspection{}, err
 	}
-	plan, err := compiler.Compile(domain.Run{ID: PreviewRunID, ShortToken: PreviewShortToken}, document, compiler.Capabilities{PipelineMode: pipelineMode})
+	plan, err := compiler.Compile(domain.Run{ID: PreviewRunID, ShortToken: PreviewShortToken}, document, compiler.Capabilities{PipelineMode: string(mode)})
 	if err != nil {
 		return Inspection{}, err
 	}
@@ -95,7 +119,7 @@ func (s Service) Inspect(ctx context.Context, source []byte, pipelineMode string
 	if err != nil {
 		return Inspection{}, err
 	}
-	return Inspection{Document: document, Source: string(source), Plan: plan, Operations: operations}, nil
+	return Inspection{Document: document, Source: string(source), PipelineMode: mode, Plan: plan, Operations: operations}, nil
 }
 
 func normalizeSelection(selection Selection) (Selection, error) {

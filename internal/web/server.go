@@ -60,44 +60,45 @@ type Options struct {
 }
 
 type pageData struct {
-	Nonce              string
-	Version            version.Info
-	Page               string
-	Targets            []domain.Target
-	Runs               []domain.Run
-	Run                *domain.Run
-	Events             []domain.RunEvent
-	Artifacts          []domain.ArtifactEvidence
-	Readiness          readinessView
-	CSRFToken          string
-	Error              string
-	Status             string
-	Verdict            string
-	Cleanup            string
-	Pattern            string
-	Scenarios          []scenario.Scenario
-	CanCancel          bool
-	CanDelete          bool
-	ImportedScenarios  []domain.ScenarioRecord
-	ScenarioSource     string
-	ScenarioInspection *appruntime.ScenarioInspection
-	Help               HelpTopic
-	ReferenceTopics    []HelpTopic
-	ScenarioCatalog    []scenarioCatalogItem
-	SelectedScenario   string
-	SelectedScenarioID string
-	SelectedName       string
-	SelectedPattern    string
-	SelectedBuiltIn    bool
-	SelectedDraft      bool
-	SelectedExample    bool
-	SelectedLevel      string
-	Operations         operations.Snapshot
-	OperationLogs      []applog.Record
-	OperationMessage   string
-	Authoring          *authoring.Page
-	AuthoringFilter    string
-	AuthoringFields    []scenario.FieldDefinition
+	Nonce                string
+	Version              version.Info
+	Page                 string
+	Targets              []domain.Target
+	Runs                 []domain.Run
+	Run                  *domain.Run
+	Events               []domain.RunEvent
+	Artifacts            []domain.ArtifactEvidence
+	Readiness            readinessView
+	CSRFToken            string
+	Error                string
+	Status               string
+	Verdict              string
+	Cleanup              string
+	Pattern              string
+	Scenarios            []scenario.Scenario
+	CanCancel            bool
+	CanDelete            bool
+	ImportedScenarios    []domain.ScenarioRecord
+	ScenarioSource       string
+	ScenarioPipelineMode string
+	ScenarioInspection   *appruntime.ScenarioInspection
+	Help                 HelpTopic
+	ReferenceTopics      []HelpTopic
+	ScenarioCatalog      []scenarioCatalogItem
+	SelectedScenario     string
+	SelectedScenarioID   string
+	SelectedName         string
+	SelectedPattern      string
+	SelectedBuiltIn      bool
+	SelectedDraft        bool
+	SelectedExample      bool
+	SelectedLevel        string
+	Operations           operations.Snapshot
+	OperationLogs        []applog.Record
+	OperationMessage     string
+	Authoring            *authoring.Page
+	AuthoringFilter      string
+	AuthoringFields      []scenario.FieldDefinition
 }
 
 type readinessView struct {
@@ -372,6 +373,7 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 			view = pageData{Version: info, Page: "scenarios", Readiness: readiness(data)}
 		}
 		view.ScenarioSource = source
+		view.ScenarioPipelineMode = r.FormValue("pipeline_mode")
 		view.ScenarioInspection = nil
 		view.SelectedBuiltIn = false
 		view.CSRFToken = csrfToken(w, r, csrfSecret)
@@ -383,14 +385,14 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 		}
 		view.SelectedName = document.Name
 		view.SelectedPattern = document.Pattern
+		mode := r.FormValue("pipeline_mode")
+		if mode != "phase_a_audit_only" && mode != "phase_b_dispatch" {
+			view.Error = "pipeline mode is invalid"
+			renderStatus(w, tmpl, nonce, http.StatusUnprocessableEntity, view)
+			return
+		}
 		switch r.FormValue("action") {
 		case "preview":
-			mode := r.FormValue("pipeline_mode")
-			if mode != "phase_a_audit_only" && mode != "phase_b_dispatch" {
-				view.Error = "pipeline mode is invalid"
-				renderStatus(w, tmpl, nonce, http.StatusUnprocessableEntity, view)
-				return
-			}
 			inspection, err := inspector.InspectScenario(r.Context(), []byte(source), mode)
 			if err != nil {
 				view.Error = err.Error()
@@ -425,10 +427,6 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 			view.ScenarioCatalog = catalog
 			if !found {
 				view.ScenarioCatalog = append(view.ScenarioCatalog, scenarioCatalogItem{Ref: selectedRef, Name: record.Name, Pattern: document.Pattern, Kind: "Custom", Selected: true})
-			}
-			mode := r.FormValue("pipeline_mode")
-			if mode != "phase_a_audit_only" && mode != "phase_b_dispatch" {
-				mode = "phase_b_dispatch"
 			}
 			inspection, inspectErr := inspector.InspectScenario(r.Context(), []byte(source), mode)
 			if inspectErr != nil {
@@ -907,6 +905,7 @@ func scenarioWorkbench(ctx context.Context, info version.Info, data DataSource, 
 		return pageData{}, fmt.Errorf("%w: %v", errScenarioInspection, inspectErr)
 	}
 	view.ScenarioInspection = &inspection
+	view.ScenarioPipelineMode = string(inspection.PipelineMode)
 	return view, nil
 }
 
