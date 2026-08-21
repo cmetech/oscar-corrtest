@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"html/template"
 	"net"
 	"net/http"
@@ -282,6 +283,54 @@ func TestAuthoringLifecycleRendersOrderedRuntimeHonestStages(t *testing.T) {
 				strings.Index(body, "cleanup.resolve_alert") > strings.Index(body, "evidence.persist_final_transaction") {
 				t.Errorf("%s rendered lifecycle out of order", path)
 			}
+		}
+	}
+}
+
+func TestAuthoringQueryLinksLandOnUniqueServerRenderedFragmentTargets(t *testing.T) {
+	handler := NewHandlerWithData(version.Info{Version: "test"}, &scenarioUIData{})
+	linkPattern := regexp.MustCompile(`href="(/authoring\?[^\"]+)"`)
+	seenLinks := map[string]bool{}
+	for _, sourcePath := range []string{"/authoring", "/reference", "/scenarios?selected=draft:flood"} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, sourcePath, nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("GET %s status=%d body=%s", sourcePath, response.Code, response.Body.String())
+		}
+		for _, match := range linkPattern.FindAllStringSubmatch(response.Body.String(), -1) {
+			seenLinks[html.UnescapeString(match[1])] = true
+		}
+	}
+	if len(seenLinks) == 0 {
+		t.Fatal("no Authoring query links found")
+	}
+	for href := range seenLinks {
+		destination, err := url.Parse(href)
+		if err != nil {
+			t.Fatalf("parse %q: %v", href, err)
+		}
+		if destination.Fragment == "" {
+			t.Errorf("Authoring content link has no fragment target: %s", href)
+			continue
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, destination.RequestURI(), nil))
+		if response.Code != http.StatusOK {
+			t.Errorf("GET %s status=%d", destination.RequestURI(), response.Code)
+			continue
+		}
+		body := response.Body.String()
+		target := `id="` + destination.Fragment + `"`
+		if strings.Count(body, target) != 1 {
+			t.Errorf("%s renders target %q %d times", href, target, strings.Count(body, target))
+		}
+		ids := regexp.MustCompile(`\sid="([^\"]+)"`).FindAllStringSubmatch(body, -1)
+		seenIDs := map[string]bool{}
+		for _, match := range ids {
+			if seenIDs[match[1]] {
+				t.Errorf("%s renders duplicate id %q", href, match[1])
+			}
+			seenIDs[match[1]] = true
 		}
 	}
 }

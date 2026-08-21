@@ -2,7 +2,7 @@
 {{$page := .Authoring}}
 <section class="authoring-schema" id="schema" aria-labelledby="schema-title">
   <header><p class="eyebrow">Schema reference</p><h2 id="schema-title">Closed public contract</h2><p>All fields are decoded strictly. Filter works as a native GET request and is refined live when JavaScript is available.</p></header>
-  <form class="authoring-schema-filter" method="get" action="/authoring">
+  <form class="authoring-schema-filter" method="get" action="/authoring#schema">
     <input type="hidden" name="section" value="{{$page.Selection.Section}}"><input type="hidden" name="step" value="{{$page.Selection.Step}}"><input type="hidden" name="pattern" value="{{$page.Selection.Pattern}}"><input type="hidden" name="level" value="{{$page.Selection.Level}}"><input type="hidden" name="view" value="{{$page.Selection.View}}">
     <label>Filter schema fields<input type="search" name="filter" value="{{$.AuthoringFilter}}" data-schema-filter placeholder="e.g. assertion, duration, labels"></label><button class="secondary-button" type="submit">Filter</button>
   </form>

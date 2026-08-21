@@ -108,19 +108,19 @@ func defaultHelpCatalog() HelpCatalog {
 		switch page.id {
 		case "scenarios":
 			topic.Links = []HelpLink{
-				{Label: "Open the Scenario Authoring Guide", Href: "/authoring?section=quickstart"},
-				{Label: "Browse the public YAML schema", Href: "/authoring?section=schema"},
+				{Label: "Open the Scenario Authoring Guide", Href: "/authoring?section=quickstart#quickstart"},
+				{Label: "Browse the public YAML schema", Href: "/authoring?section=schema#schema"},
 			}
 		case "authoring":
 			topic.Links = []HelpLink{
 				{Label: "Open Scenarios", Href: "/scenarios"},
-				{Label: "Quickstart", Href: "/authoring?section=quickstart"},
-				{Label: "Schema", Href: "/authoring?section=schema"},
-				{Label: "Assertions", Href: "/authoring?section=assertions"},
-				{Label: "Validation", Href: "/authoring?section=validation"},
+				{Label: "Quickstart", Href: "/authoring?section=quickstart#quickstart"},
+				{Label: "Schema", Href: "/authoring?section=schema#schema"},
+				{Label: "Assertions", Href: "/authoring?section=assertions#assertions"},
+				{Label: "Validation", Href: "/authoring?section=validation#validation"},
 			}
 			for _, pattern := range scenario.SupportedPatterns() {
-				topic.Links = append(topic.Links, HelpLink{Label: pattern + " pattern", Href: "/authoring?section=patterns&pattern=" + pattern})
+				topic.Links = append(topic.Links, HelpLink{Label: pattern + " pattern", Href: "/authoring?section=patterns&pattern=" + pattern + "#pattern-" + pattern})
 			}
 		}
 		topics = append(topics, topic)

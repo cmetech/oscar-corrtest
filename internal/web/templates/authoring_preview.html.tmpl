@@ -9,7 +9,7 @@
   <div class="button-row authoring-instrument__actions"><button class="secondary-button" type="button" data-copy-target="authoring-yaml">Copy YAML</button><a class="primary-button" href="/scenarios?selected=example:{{urlquery $page.Selection.Pattern}}:{{urlquery $page.Selection.Level}}">Open in Scenarios editor</a></div>
 
   <nav class="authoring-view-nav" aria-label="Inspection view">
-    {{range $page.Catalog.Views}}<a id="authoring-view-link-{{.ID}}" href="/authoring?section={{urlquery $page.Selection.Section}}&amp;step={{urlquery $page.Selection.Step}}&amp;pattern={{urlquery $page.Selection.Pattern}}&amp;level={{urlquery $page.Selection.Level}}&amp;view={{urlquery .ID}}" data-authoring-view-link data-view-target="authoring-view-{{.ID}}" aria-controls="authoring-view-{{.ID}}"{{if eq .ID $page.Selection.View}} aria-current="page"{{end}}>{{.Title}}</a>{{end}}
+    {{range $page.Catalog.Views}}<a id="authoring-view-link-{{.ID}}" href="/authoring?section={{urlquery $page.Selection.Section}}&amp;step={{urlquery $page.Selection.Step}}&amp;pattern={{urlquery $page.Selection.Pattern}}&amp;level={{urlquery $page.Selection.Level}}&amp;view={{urlquery .ID}}#authoring-view-{{.ID}}" data-authoring-view-link data-view-target="authoring-view-{{.ID}}" aria-controls="authoring-view-{{.ID}}"{{if eq .ID $page.Selection.View}} aria-current="page"{{end}}>{{.Title}}</a>{{end}}
   </nav>
 
   <section class="authoring-view-panel" id="authoring-view-yaml" data-authoring-view-panel aria-labelledby="authoring-view-link-yaml"{{if ne $page.Selection.View "yaml"}} hidden{{end}}>

@@ -7,16 +7,16 @@
   </header>
 
   <nav class="authoring-pattern-nav" aria-label="Cookbook patterns">
-    {{range $page.Catalog.Patterns}}<a href="/authoring?section=patterns&amp;step={{urlquery $page.Selection.Step}}&amp;pattern={{urlquery .ID}}&amp;level={{urlquery $page.Selection.Level}}&amp;view={{urlquery $page.Selection.View}}"{{if eq .ID $page.Selection.Pattern}} aria-current="page"{{end}}><strong>{{.Title}}</strong><code>{{.ID}}</code></a>{{end}}
+    {{range $page.Catalog.Patterns}}<a href="/authoring?section=patterns&amp;step={{urlquery $page.Selection.Step}}&amp;pattern={{urlquery .ID}}&amp;level={{urlquery $page.Selection.Level}}&amp;view={{urlquery $page.Selection.View}}#pattern-{{.ID}}"{{if eq .ID $page.Selection.Pattern}} aria-current="page"{{end}}><strong>{{.Title}}</strong><code>{{.ID}}</code></a>{{end}}
   </nav>
   <nav class="authoring-level-nav" aria-label="Example depth">
     <span>Example depth</span>
-    <a href="/authoring?section=patterns&amp;step={{urlquery $page.Selection.Step}}&amp;pattern={{urlquery $page.Selection.Pattern}}&amp;level=basic&amp;view={{urlquery $page.Selection.View}}"{{if eq $page.Selection.Level "basic"}} aria-current="page"{{end}}>Basic</a>
-    <a href="/authoring?section=patterns&amp;step={{urlquery $page.Selection.Step}}&amp;pattern={{urlquery $page.Selection.Pattern}}&amp;level=advanced&amp;view={{urlquery $page.Selection.View}}"{{if eq $page.Selection.Level "advanced"}} aria-current="page"{{end}}>Advanced</a>
+    <a href="/authoring?section=patterns&amp;step={{urlquery $page.Selection.Step}}&amp;pattern={{urlquery $page.Selection.Pattern}}&amp;level=basic&amp;view={{urlquery $page.Selection.View}}#pattern-{{$page.Selection.Pattern}}"{{if eq $page.Selection.Level "basic"}} aria-current="page"{{end}}>Basic</a>
+    <a href="/authoring?section=patterns&amp;step={{urlquery $page.Selection.Step}}&amp;pattern={{urlquery $page.Selection.Pattern}}&amp;level=advanced&amp;view={{urlquery $page.Selection.View}}#pattern-{{$page.Selection.Pattern}}"{{if eq $page.Selection.Level "advanced"}} aria-current="page"{{end}}>Advanced</a>
   </nav>
 
   {{range $page.Catalog.Patterns}}{{if eq .ID $page.Selection.Pattern}}
-  <article class="authoring-pattern-guide">
+  <article class="authoring-pattern-guide" id="pattern-{{.ID}}">
     <header><div><p class="eyebrow"><code>{{.ID}}</code> · {{$page.Selection.Level}}</p><h3>{{.Title}}</h3></div><p>{{.Behavior}}</p></header>
     <div class="authoring-pattern-guide__grid">
       <section><h4>Fixed compiler semantics</h4><ul>{{range .FixedSemantics}}<li><code>{{.}}</code></li>{{end}}</ul></section>

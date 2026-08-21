@@ -72,7 +72,7 @@ func TestBuiltinCatalogLinksEveryPatternToAuthoringTutorial(t *testing.T) {
 		if !strings.Contains(catalog, "| `"+pattern+"` ") {
 			t.Errorf("built-in catalog missing pattern %q", pattern)
 		}
-		if !strings.Contains(catalog, "](/authoring?section=patterns&pattern="+pattern+")") {
+		if !strings.Contains(catalog, "](/authoring?section=patterns&pattern="+pattern+"#pattern-"+pattern+")") {
 			t.Errorf("built-in catalog missing Authoring tutorial link for %q", pattern)
 		}
 	}
