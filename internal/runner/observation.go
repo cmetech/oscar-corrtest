@@ -21,7 +21,7 @@ type observationSnapshot struct {
 	AuditReady    bool                       `json:"auditReady"`
 }
 
-func (r *Runner) observeCase(ctx context.Context, run domain.Run, item compiler.CasePlan, started, injectedAt time.Time) (caseResult, error) {
+func (r *Runner) observeCase(ctx context.Context, run domain.Run, item compiler.CasePlan, started, injectedAt time.Time, pipelineMode string) (caseResult, error) {
 	window := item.ObservationWindow
 	if r.opts.ObservationWindow > 0 {
 		window = r.opts.ObservationWindow
@@ -33,6 +33,7 @@ func (r *Runner) observeCase(ctx context.Context, run domain.Run, item compiler.
 	if injectedAt.IsZero() {
 		deadline = r.opts.Now().Add(window)
 	}
+	shadow := pipelineMode != "phase_b_dispatch"
 	fullWindow := requiresFullWindow(item.Assertions)
 	var last observationSnapshot
 	for {
@@ -41,7 +42,7 @@ func (r *Runner) observeCase(ctx context.Context, run domain.Run, item compiler.
 			return caseResult{Name: item.Name, Code: item.Code}, err
 		}
 		last = snapshot
-		assertions, err := evaluateAssertions(item.Assertions, snapshot)
+		assertions, err := evaluateAssertions(item.Assertions, snapshot, shadow)
 		if err != nil {
 			return caseResult{Name: item.Name, Code: item.Code}, err
 		}
@@ -56,7 +57,7 @@ func (r *Runner) observeCase(ctx context.Context, run domain.Run, item compiler.
 				if err != nil {
 					return caseResult{Name: item.Name, Code: item.Code}, err
 				}
-				stableAssertions, evalErr := evaluateAssertions(item.Assertions, stable)
+				stableAssertions, evalErr := evaluateAssertions(item.Assertions, stable, shadow)
 				if evalErr != nil {
 					return caseResult{Name: item.Name, Code: item.Code}, evalErr
 				}
@@ -78,7 +79,7 @@ func (r *Runner) observeCase(ctx context.Context, run domain.Run, item compiler.
 			return caseResult{Name: item.Name, Code: item.Code}, err
 		}
 	}
-	assertions, err := evaluateAssertions(item.Assertions, last)
+	assertions, err := evaluateAssertions(item.Assertions, last, shadow)
 	if err != nil {
 		return caseResult{Name: item.Name, Code: item.Code}, err
 	}
@@ -122,12 +123,13 @@ func (r *Runner) readSnapshot(ctx context.Context, run domain.Run, item compiler
 	auditByID := map[int]oscar.AuditRecord{}
 	auditedFingerprints := map[string]bool{}
 	for _, source := range snapshot.Sources {
-		audits, err := r.api.CorrelationAudit(ctx, source.Fingerprint)
+		auditKey := auditFingerprint(source)
+		audits, err := r.api.CorrelationAudit(ctx, auditKey)
 		if err != nil {
 			return observationSnapshot{}, err
 		}
 		for _, audit := range audits {
-			if audit.AlertFingerprint != "" && audit.AlertFingerprint != source.Fingerprint {
+			if audit.AlertFingerprint != "" && audit.AlertFingerprint != auditKey {
 				continue
 			}
 			if audit.RuleName != item.Rule.Name {
@@ -137,12 +139,12 @@ func (r *Runner) readSnapshot(ctx context.Context, run domain.Run, item compiler
 			auditByID[audit.ID] = audit
 		}
 		if item.Rule.Pattern == "parent_child" {
-			notifications, err := r.api.NotificationAudit(ctx, source.Fingerprint, started.Add(-time.Second), deadline.Add(time.Minute))
+			notifications, err := r.api.NotificationAudit(ctx, auditKey, started.Add(-time.Second), deadline.Add(time.Minute))
 			if err != nil {
 				return observationSnapshot{}, err
 			}
 			for _, notification := range notifications {
-				if notification.AlertFingerprint == source.Fingerprint {
+				if notification.AlertFingerprint == auditKey {
 					snapshot.Notifications = append(snapshot.Notifications, notification)
 				}
 			}
@@ -164,6 +166,18 @@ func (r *Runner) readSnapshot(ctx context.Context, run domain.Run, item compiler
 		snapshot.Parents = historyValues(parentsByFingerprint)
 	}
 	return snapshot, nil
+}
+
+// auditFingerprint returns the identity CorrelationAudit is keyed by. OSCAR's
+// AlertHistory `fingerprint` (12 hex, also label oscar_fingerprint) is a DIFFERENT
+// domain from CorrelationAudit.alert_fingerprint (16 hex), which the alert carries
+// as the `am_fingerprint` label. Polling audit with the history fingerprint can
+// never match a row.
+func auditFingerprint(record oscar.HistoryRecord) string {
+	if value := record.Labels["am_fingerprint"]; value != "" {
+		return value
+	}
+	return record.Fingerprint
 }
 
 func expectedSourceEvents(item compiler.CasePlan) map[string]map[string]bool {

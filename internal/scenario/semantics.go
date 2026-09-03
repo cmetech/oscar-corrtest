@@ -67,6 +67,12 @@ func expandSemanticEvents(testCase Case) []semanticEvent {
 	active := map[string]semanticEvent{}
 	for index, event := range source {
 		labels := cloneStringMap(testCase.Labels)
+		if labels == nil {
+			// cloneStringMap returns nil for an absent case-level labels map;
+			// writing event labels into it panics ("assignment to entry in nil map")
+			// for any case that has event-level labels but no case-level labels.
+			labels = map[string]string{}
+		}
 		for key, value := range event.Labels {
 			labels[key] = value
 		}

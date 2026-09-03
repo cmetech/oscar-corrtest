@@ -16,10 +16,21 @@ type assertionResult struct {
 	Explanation string         `json:"explanation"`
 }
 
-func evaluateAssertions(assertions []scenario.Assertion, snapshot observationSnapshot) ([]assertionResult, error) {
+// evaluateAssertions counts evidence per assertion. In shadow (phase_a_audit_only)
+// the correlator writes audit rows but CORRELATOR_DISPATCH_ENABLED=false gates the
+// synthetic emit, so synthetic-alert-count can never be satisfied and is SKIPPED
+// rather than scored.
+func evaluateAssertions(assertions []scenario.Assertion, snapshot observationSnapshot, shadow bool) ([]assertionResult, error) {
 	results := make([]assertionResult, 0, len(assertions))
 	for _, assertion := range assertions {
 		observed := 0
+		if shadow && assertion.Kind == "synthetic-alert-count" {
+			results = append(results, assertionResult{
+				Kind: assertion.Kind, Expected: assertion.Equals, Observed: len(snapshot.Parents), Verdict: domain.VerdictSkipped,
+				Explanation: "synthetic emit is gated off in shadow (phase_a_audit_only); assert on audit outcomes instead",
+			})
+			continue
+		}
 		switch assertion.Kind {
 		case "synthetic-alert-count":
 			observed = len(snapshot.Parents)
@@ -48,10 +59,18 @@ func assertionsPass(results []assertionResult) bool {
 	if len(results) == 0 {
 		return false
 	}
+	scored := 0
 	for _, result := range results {
+		if result.Verdict == domain.VerdictSkipped {
+			continue
+		}
+		scored++
 		if result.Verdict != domain.VerdictPass {
 			return false
 		}
+	}
+	if scored == 0 {
+		return false
 	}
 	return true
 }

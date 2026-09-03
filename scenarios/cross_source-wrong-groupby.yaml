@@ -1,0 +1,30 @@
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: cross-source-wrong-groupby
+suite: corrtest-negdepth
+pattern: cross_source
+maxDuration: 90s
+cases:
+  - name: snmp-and-api-in-one-site-emit
+    code: P01
+    polarity: positive
+    window: 30s
+    groupBy: [site]
+    labels: {site: cswg-p01}
+    events:
+      - {role: interface_down, status: firing, labels: {oscar_source: snmp}}
+      - {role: interface_down, status: firing, delay: 2s, labels: {oscar_source: api}}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 1}
+      - {kind: synthetic-alert-count, equals: 1}
+  - name: snmp-and-api-split-across-two-sites-must-not-emit
+    code: N01
+    polarity: negative
+    window: 30s
+    groupBy: [site]
+    events:
+      - {role: interface_down, status: firing, labels: {site: cswg-n01-a, oscar_source: snmp}}
+      - {role: interface_down, status: firing, delay: 2s, labels: {site: cswg-n01-b, oscar_source: api}}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 0}
+      - {kind: synthetic-alert-count, equals: 0}

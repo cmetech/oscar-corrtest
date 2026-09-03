@@ -1,0 +1,32 @@
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: parent-child-outside-window
+suite: corrtest-negdepth
+pattern: parent_child
+maxDuration: 120s
+cases:
+  - name: child-inside-the-window-is-suppressed
+    code: P01
+    polarity: positive
+    window: 20s
+    groupBy: [site]
+    labels: {site: pcow-p01}
+    suppressForNotifiers: [email]
+    events:
+      - {role: parent, status: firing}
+      - {role: child, status: firing, delay: 4s, labels: {child_id: c1}}
+    assertions:
+      - {kind: parent-link-count, outcome: suppressed_per_notifier, equals: 1}
+  - name: child-arriving-past-the-window-must-be-released
+    code: N01
+    polarity: negative
+    window: 20s
+    groupBy: [site]
+    labels: {site: pcow-n01}
+    suppressForNotifiers: [email]
+    events:
+      - {role: parent, status: firing}
+      - {role: child, status: firing, delay: 28s, labels: {child_id: c1}}
+    assertions:
+      - {kind: parent-link-count, outcome: suppressed_per_notifier, equals: 0}
+      - {kind: audit-count, outcome: released_no_trigger, equals: 1}

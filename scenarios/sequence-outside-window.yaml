@@ -1,0 +1,31 @@
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: sequence-outside-window
+suite: corrtest-negdepth
+pattern: sequence
+maxDuration: 120s
+cases:
+  - name: ordered-pair-inside-the-window-emits
+    code: P01
+    polarity: positive
+    window: 20s
+    groupBy: [site]
+    labels: {site: seqow-p01}
+    events:
+      - {role: login_failure, status: firing}
+      - {role: privileged_command, status: firing, delay: 2s}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 1}
+      - {kind: synthetic-alert-count, equals: 1}
+  - name: correct-order-but-second-leg-past-the-window-must-not-emit
+    code: N01
+    polarity: negative
+    window: 20s
+    groupBy: [site]
+    labels: {site: seqow-n01}
+    events:
+      - {role: login_failure, status: firing}
+      - {role: privileged_command, status: firing, delay: 28s}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 0}
+      - {kind: synthetic-alert-count, equals: 0}

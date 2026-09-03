@@ -1,0 +1,32 @@
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: parent-child-tag-only
+suite: corrtest-sweep
+pattern: parent_child
+maxDuration: 90s
+cases:
+  - name: tag-only-child-is-enriched-not-suppressed
+    code: P01
+    polarity: positive
+    window: 30s
+    groupBy: [site]
+    labels: {site: pc-tag-p01}
+    tagForNotifiers: [email]
+    events:
+      - {role: parent, status: firing}
+      - {role: child, status: firing, delay: 6s, labels: {child_id: c1}}
+    assertions:
+      - {kind: audit-count, outcome: enriched, equals: 2}
+      - {kind: parent-link-count, outcome: suppressed_per_notifier, equals: 0}
+  - name: tag-only-orphan-child-is-still-released
+    code: N01
+    polarity: negative
+    window: 30s
+    groupBy: [site]
+    labels: {site: pc-tag-n01}
+    tagForNotifiers: [email]
+    events:
+      - {role: child, status: firing, labels: {child_id: c1}}
+    assertions:
+      - {kind: audit-count, outcome: released_no_trigger, equals: 1}
+      - {kind: parent-link-count, outcome: suppressed_per_notifier, equals: 0}

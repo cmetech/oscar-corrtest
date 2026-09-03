@@ -1,0 +1,33 @@
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: parent-child-child-before-parent
+suite: corrtest-sweep
+pattern: parent_child
+maxDuration: 90s
+cases:
+  - name: only-the-child-arriving-after-the-parent-is-suppressed
+    code: P01
+    polarity: positive
+    window: 30s
+    groupBy: [site]
+    labels: {site: pc-order-p01}
+    suppressForNotifiers: [email]
+    events:
+      - {role: child, status: firing, labels: {child_id: early}}
+      - {role: parent, status: firing, delay: 3s}
+      - {role: child, status: firing, delay: 6s, labels: {child_id: late}}
+    assertions:
+      - {kind: parent-link-count, outcome: suppressed_per_notifier, equals: 1}
+      - {kind: audit-count, outcome: released_no_trigger, equals: 1}
+  - name: a-child-that-never-sees-a-parent-is-released
+    code: N01
+    polarity: negative
+    window: 30s
+    groupBy: [site]
+    labels: {site: pc-order-n01}
+    suppressForNotifiers: [email]
+    events:
+      - {role: child, status: firing, labels: {child_id: early}}
+    assertions:
+      - {kind: parent-link-count, outcome: suppressed_per_notifier, equals: 0}
+      - {kind: audit-count, outcome: released_no_trigger, equals: 1}

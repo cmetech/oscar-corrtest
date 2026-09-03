@@ -325,7 +325,7 @@ func (c *Client) NotificationAudit(ctx context.Context, fingerprint string, star
 		seen += len(wires)
 		for _, wire := range wires {
 			if wire.AlertFingerprint == fingerprint {
-				result = append(result, NotificationRecord{ID: wire.ID, AlertFingerprint: wire.AlertFingerprint, NotifierType: wire.NotifierType, Status: wire.Status, CreatedAt: wire.CreatedAt, Labels: wire.Labels})
+				result = append(result, NotificationRecord{ID: wire.ID, AlertFingerprint: wire.AlertFingerprint, NotifierType: wire.NotifierType, Status: wire.Status, CreatedAt: wire.CreatedAt.Time, Labels: wire.Labels})
 			}
 		}
 		if listComplete(seen, response.Total, len(wires), response.PerPage) {
@@ -493,18 +493,25 @@ type historyWire struct {
 	AlertName   string           `json:"alertname"`
 	Fingerprint string           `json:"fingerprint"`
 	Status      string           `json:"status"`
-	CreatedAt   time.Time        `json:"createdAt"`
+	CreatedAt   flexTime         `json:"createdAt"`
 	Labels      []labelWire      `json:"labels"`
 	Annotations []annotationWire `json:"annotations"`
 }
 
 func (r historyWire) normalized() HistoryRecord {
-	result := HistoryRecord{ID: fmt.Sprint(r.ID), AlertName: r.AlertName, Fingerprint: r.Fingerprint, Status: r.Status, CreatedAt: r.CreatedAt, Labels: map[string]string{}, Annotations: map[string]string{}}
+	result := HistoryRecord{ID: fmt.Sprint(r.ID), AlertName: r.AlertName, Fingerprint: r.Fingerprint, Status: r.Status, CreatedAt: r.CreatedAt.Time, Labels: map[string]string{}, Annotations: map[string]string{}}
 	for _, item := range r.Labels {
 		result.Labels[item.Label] = item.Value
 	}
 	for _, item := range r.Annotations {
 		result.Annotations[item.Annotation] = item.Value
+	}
+	// OSCAR returns alertname as a top-level field rather than inside the label
+	// array; fold it back so the identity contract sees a complete label set.
+	if r.AlertName != "" {
+		if _, ok := result.Labels["alertname"]; !ok {
+			result.Labels["alertname"] = r.AlertName
+		}
 	}
 	return result
 }
@@ -519,7 +526,7 @@ type historyListResponse struct {
 
 type auditWire struct {
 	ID                  int               `json:"id"`
-	CreatedAt           time.Time         `json:"created_at"`
+	CreatedAt           flexTime          `json:"created_at"`
 	AlertFingerprint    string            `json:"alert_fingerprint"`
 	RuleID              int               `json:"rule_id"`
 	RuleName            string            `json:"rule_name"`
@@ -532,7 +539,7 @@ type auditWire struct {
 }
 
 func (r auditWire) normalized() AuditRecord {
-	return AuditRecord{ID: r.ID, CreatedAt: r.CreatedAt, AlertFingerprint: r.AlertFingerprint, RuleID: r.RuleID, RuleName: r.RuleName,
+	return AuditRecord{ID: r.ID, CreatedAt: r.CreatedAt.Time, AlertFingerprint: r.AlertFingerprint, RuleID: r.RuleID, RuleName: r.RuleName,
 		Pattern: r.Pattern, Outcome: r.Outcome, SuppressedNotifiers: r.SuppressedNotifiers, ParentFingerprint: r.ParentFingerprint, AddedLabels: r.AddedLabels, Reason: r.Reason}
 }
 
@@ -548,6 +555,6 @@ type notificationWire struct {
 	AlertFingerprint string            `json:"alert_fingerprint"`
 	NotifierType     string            `json:"notifier_type"`
 	Status           string            `json:"status"`
-	CreatedAt        time.Time         `json:"created_at"`
+	CreatedAt        flexTime          `json:"created_at"`
 	Labels           map[string]string `json:"labels"`
 }

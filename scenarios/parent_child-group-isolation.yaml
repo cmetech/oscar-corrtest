@@ -1,0 +1,30 @@
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: parent-child-group-isolation
+suite: corrtest-sweep
+pattern: parent_child
+maxDuration: 90s
+cases:
+  - name: parent-and-child-in-the-same-group-link
+    code: P01
+    polarity: positive
+    window: 30s
+    groupBy: [site]
+    labels: {site: pc-iso-p01}
+    suppressForNotifiers: [email]
+    events:
+      - {role: parent, status: firing}
+      - {role: child, status: firing, delay: 6s, labels: {child_id: c1}}
+    assertions:
+      - {kind: parent-link-count, outcome: suppressed_per_notifier, equals: 1}
+  - name: a-child-in-a-different-site-group-must-not-link
+    code: N01
+    polarity: negative
+    window: 30s
+    groupBy: [site]
+    events:
+      - {role: parent, status: firing, labels: {site: pc-iso-n01-a}}
+      - {role: child, status: firing, delay: 6s, labels: {site: pc-iso-n01-b, child_id: c1}}
+    assertions:
+      - {kind: parent-link-count, outcome: suppressed_per_notifier, equals: 0}
+      - {kind: audit-count, outcome: released_no_trigger, equals: 1}

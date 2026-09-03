@@ -1,0 +1,33 @@
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: threshold-outside-window
+suite: corrtest-negdepth
+pattern: threshold
+maxDuration: 120s
+cases:
+  - name: three-distinct-devices-inside-a-twenty-second-window-emit
+    code: P01
+    polarity: positive
+    window: 20s
+    groupBy: [site]
+    labels: {site: throw-p01}
+    events:
+      - {role: cpu_high, status: firing, labels: {device: tow-d1}}
+      - {role: cpu_high, status: firing, delay: 1s, labels: {device: tow-d2}}
+      - {role: cpu_high, status: firing, delay: 2s, labels: {device: tow-d3}}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 1}
+      - {kind: synthetic-alert-count, equals: 1}
+  - name: three-distinct-devices-spread-past-the-window-never-coexist
+    code: N01
+    polarity: negative
+    window: 20s
+    groupBy: [site]
+    labels: {site: throw-n01}
+    events:
+      - {role: cpu_high, status: firing, labels: {device: tow-e1}}
+      - {role: cpu_high, status: firing, delay: 14s, labels: {device: tow-e2}}
+      - {role: cpu_high, status: firing, delay: 28s, labels: {device: tow-e3}}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 0}
+      - {kind: synthetic-alert-count, equals: 0}

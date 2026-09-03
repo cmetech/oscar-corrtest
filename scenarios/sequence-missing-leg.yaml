@@ -1,0 +1,32 @@
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: sequence-missing-leg
+suite: corrtest-negdepth
+pattern: sequence
+maxDuration: 90s
+cases:
+  - name: complete-ordered-pair-emits
+    code: P01
+    polarity: positive
+    window: 30s
+    groupBy: [site]
+    labels: {site: seqml-p01}
+    events:
+      - {role: login_failure, status: firing}
+      - {role: privileged_command, status: firing, delay: 2s}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 1}
+      - {kind: synthetic-alert-count, equals: 1}
+  - name: first-leg-alone-repeated-must-never-emit
+    code: N01
+    polarity: negative
+    window: 30s
+    groupBy: [site]
+    labels: {site: seqml-n01}
+    events:
+      - {role: login_failure, status: firing}
+      - {role: login_failure, status: firing, delay: 2s}
+      - {role: login_failure, status: firing, delay: 4s}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 0}
+      - {kind: synthetic-alert-count, equals: 0}
