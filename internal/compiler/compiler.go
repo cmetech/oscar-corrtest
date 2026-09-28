@@ -256,7 +256,7 @@ func matchCriteria(pattern string, names map[string]string, source scenario.Case
 	case "absence":
 		return map[string]any{"expected_match": map[string]string{"alertname": first()}, "expected_every_seconds": 10, "absent_for_seconds": 30}
 	case "parent_child":
-		return map[string]any{"parent_match": map[string]string{"alertname": names["parent"]}, "child_matches": []any{map[string]string{"alertname": names["child"]}}, "suppress_children_for_notifiers": append([]string(nil), source.SuppressForNotifiers...), "tag_children_for_notifiers": append([]string(nil), source.TagForNotifiers...)}
+		return map[string]any{"parent_match": map[string]string{"alertname": names["parent"]}, "child_matches": []any{map[string]string{"alertname": names["child"]}}, "suppress_children_for_notifiers": append(make([]string, 0, len(source.SuppressForNotifiers)), source.SuppressForNotifiers...), "tag_children_for_notifiers": append(make([]string, 0, len(source.TagForNotifiers)), source.TagForNotifiers...)}
 	default:
 		return nil
 	}

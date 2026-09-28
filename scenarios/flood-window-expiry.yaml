@@ -1,0 +1,37 @@
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: flood-window-expiry
+suite: corrtest-sweep
+pattern: flood
+maxDuration: 120s
+cases:
+  - name: five-inside-a-twenty-second-window-emits
+    code: P01
+    polarity: positive
+    window: 20s
+    groupBy: [site]
+    labels: {site: flood-expiry-p01}
+    events:
+      - {role: interface_down, status: firing}
+      - {role: interface_down, status: firing, delay: 1s}
+      - {role: interface_down, status: firing, delay: 2s}
+      - {role: interface_down, status: firing, delay: 3s}
+      - {role: interface_down, status: firing, delay: 4s}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 1}
+      - {kind: synthetic-alert-count, equals: 1}
+  - name: five-spread-past-the-window-never-reaches-threshold
+    code: N01
+    polarity: negative
+    window: 20s
+    groupBy: [site]
+    labels: {site: flood-expiry-n01}
+    events:
+      - {role: interface_down, status: firing}
+      - {role: interface_down, status: firing, delay: 7s}
+      - {role: interface_down, status: firing, delay: 14s}
+      - {role: interface_down, status: firing, delay: 21s}
+      - {role: interface_down, status: firing, delay: 28s}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 0}
+      - {kind: synthetic-alert-count, equals: 0}

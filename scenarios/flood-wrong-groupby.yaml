@@ -1,0 +1,33 @@
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: flood-wrong-groupby
+suite: corrtest-sweep
+pattern: flood
+maxDuration: 90s
+cases:
+  - name: same-device-group-reaches-threshold
+    code: P01
+    polarity: positive
+    window: 30s
+    groupBy: [device]
+    labels: {device: flood-dev-1, site: flood-wrong-p01}
+    role: interface_down
+    repeat: 5
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 1}
+      - {kind: synthetic-alert-count, equals: 1}
+  - name: grouping-on-a-label-that-is-unique-per-alert-never-correlates
+    code: N01
+    polarity: negative
+    window: 30s
+    groupBy: [device]
+    labels: {site: flood-wrong-n01}
+    events:
+      - {role: interface_down, status: firing, labels: {device: flood-dev-a}}
+      - {role: interface_down, status: firing, delay: 1s, labels: {device: flood-dev-b}}
+      - {role: interface_down, status: firing, delay: 2s, labels: {device: flood-dev-c}}
+      - {role: interface_down, status: firing, delay: 3s, labels: {device: flood-dev-d}}
+      - {role: interface_down, status: firing, delay: 4s, labels: {device: flood-dev-e}}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 0}
+      - {kind: synthetic-alert-count, equals: 0}

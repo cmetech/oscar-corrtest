@@ -1,0 +1,33 @@
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: parent-child-multi-child
+suite: corrtest-sweep
+pattern: parent_child
+maxDuration: 90s
+cases:
+  - name: three-children-under-one-parent-are-each-suppressed
+    code: P01
+    polarity: positive
+    window: 30s
+    groupBy: [site]
+    labels: {site: pc-multi-p01}
+    suppressForNotifiers: [email]
+    events:
+      - {role: parent, status: firing}
+      - {role: child, status: firing, delay: 2s, labels: {child_id: c1}}
+      - {role: child, status: firing, delay: 4s, labels: {child_id: c2}}
+      - {role: child, status: firing, delay: 6s, labels: {child_id: c3}}
+    assertions:
+      - {kind: parent-link-count, outcome: suppressed_per_notifier, equals: 3}
+  - name: two-orphan-children-are-both-released
+    code: N01
+    polarity: negative
+    window: 30s
+    groupBy: [site]
+    labels: {site: pc-multi-n01}
+    suppressForNotifiers: [email]
+    events:
+      - {role: child, status: firing, labels: {child_id: c1}}
+      - {role: child, status: firing, delay: 2s, labels: {child_id: c2}}
+    assertions:
+      - {kind: audit-count, outcome: released_no_trigger, equals: 2}

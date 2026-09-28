@@ -1,0 +1,34 @@
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: threshold-distinct-boundary
+suite: corrtest-sweep
+pattern: threshold
+maxDuration: 90s
+cases:
+  - name: four-distinct-devices-clear-the-three-device-threshold
+    code: P01
+    polarity: positive
+    window: 30s
+    groupBy: [site]
+    labels: {site: thr-bound-p01}
+    events:
+      - {role: cpu_high, status: firing, labels: {device: thr-d1}}
+      - {role: cpu_high, status: firing, delay: 1s, labels: {device: thr-d2}}
+      - {role: cpu_high, status: firing, delay: 2s, labels: {device: thr-d3}}
+      - {role: cpu_high, status: firing, delay: 3s, labels: {device: thr-d4}}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 1}
+      - {kind: synthetic-alert-count, equals: 1}
+  - name: two-distinct-devices-stay-one-below-the-threshold
+    code: N01
+    polarity: negative
+    window: 30s
+    groupBy: [site]
+    labels: {site: thr-bound-n01}
+    events:
+      - {role: cpu_high, status: firing, labels: {device: thr-e1}}
+      - {role: cpu_high, status: firing, delay: 1s, labels: {device: thr-e2}}
+      - {role: cpu_high, status: firing, delay: 2s, labels: {device: thr-e1}}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 0}
+      - {kind: synthetic-alert-count, equals: 0}

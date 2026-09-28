@@ -75,7 +75,7 @@ func TestRunnerExecutesFloodCasesAndCleansOwnedRules(t *testing.T) {
 	}
 }
 
-func TestRunnerCannotPassWhenPipelineModeIsPhaseA(t *testing.T) {
+func TestRunnerPhaseAScoresAuditAndSkipsSyntheticAssertions(t *testing.T) {
 	database := openDatabase(t)
 	run := newRun()
 	if err := database.CreateRun(context.Background(), run); err != nil {
@@ -94,11 +94,41 @@ func TestRunnerCannotPassWhenPipelineModeIsPhaseA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Verdict != domain.VerdictInconclusive || stored.CleanupStatus != domain.CleanupNotRequired {
+	if stored.Verdict != domain.VerdictPass || stored.CleanupStatus != domain.CleanupClean {
 		t.Fatalf("phase A run=%+v", stored)
 	}
-	if api.created != 0 || len(api.injected) != 0 {
-		t.Fatalf("phase A mutated OSCAR: %+v", api)
+	if api.created == 0 || len(api.injected) == 0 {
+		t.Fatalf("phase A did not exercise the audit pipeline: %+v", api)
+	}
+	var report struct {
+		Cases []struct {
+			Assertions []struct {
+				Kind    string
+				Verdict domain.Verdict
+			}
+		}
+	}
+	if err := json.Unmarshal(stored.CanonicalReportJSON, &report); err != nil {
+		t.Fatal(err)
+	}
+	skipped, scored := 0, 0
+	for _, item := range report.Cases {
+		for _, assertion := range item.Assertions {
+			if assertion.Kind == "synthetic-alert-count" {
+				if assertion.Verdict != domain.VerdictSkipped {
+					t.Fatalf("shadow synthetic assertion was scored: %+v", assertion)
+				}
+				skipped++
+			} else {
+				if assertion.Verdict != domain.VerdictPass {
+					t.Fatalf("shadow audit assertion did not pass: %+v", assertion)
+				}
+				scored++
+			}
+		}
+	}
+	if skipped == 0 || scored == 0 {
+		t.Fatalf("shadow report omitted assertion evidence: skipped=%d scored=%d", skipped, scored)
 	}
 }
 

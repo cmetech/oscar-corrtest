@@ -165,8 +165,8 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 	if plan.MaxDuration <= 0 {
 		return r.finishWithoutMutation(ctx, run, plan, capabilities, domain.VerdictError, "compiled plan maximum duration is invalid")
 	}
-	if !capabilities.Ready || !capabilities.LabelsSurvived || capabilities.PipelineMode != "phase_b_dispatch" {
-		explanation := "required Phase-B readiness and reserved-label survival were not proven"
+	if !capabilities.Ready || !capabilities.LabelsSurvived || (capabilities.PipelineMode != "phase_b_dispatch" && capabilities.PipelineMode != "phase_a_audit_only") {
+		explanation := "required Phase-A/Phase-B readiness and reserved-label survival were not proven"
 		return r.finishWithoutMutation(ctx, run, plan, capabilities, domain.VerdictInconclusive, explanation)
 	}
 
@@ -252,7 +252,7 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 	}
 	results := make([]caseResult, 0, len(plan.Cases))
 	for _, item := range plan.Cases {
-		result, err := r.observeCase(ctx, run, item, started, caseStarted[item.Code])
+		result, err := r.observeCase(ctx, run, item, started, caseStarted[item.Code], capabilities.PipelineMode)
 		if err != nil {
 			return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, err)
 		}

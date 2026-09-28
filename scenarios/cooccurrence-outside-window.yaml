@@ -1,0 +1,31 @@
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: cooccurrence-outside-window
+suite: corrtest-negdepth
+pattern: co_occurrence
+maxDuration: 120s
+cases:
+  - name: both-roles-inside-a-twenty-second-window-emit
+    code: P01
+    polarity: positive
+    window: 20s
+    groupBy: [site]
+    labels: {site: coow-p01}
+    events:
+      - {role: disk_full, status: firing}
+      - {role: cpu_high, status: firing, delay: 2s}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 1}
+      - {kind: synthetic-alert-count, equals: 1}
+  - name: second-role-arrives-past-the-window-so-no-pair-coexists
+    code: N01
+    polarity: negative
+    window: 20s
+    groupBy: [site]
+    labels: {site: coow-n01}
+    events:
+      - {role: disk_full, status: firing}
+      - {role: cpu_high, status: firing, delay: 28s}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 0}
+      - {kind: synthetic-alert-count, equals: 0}

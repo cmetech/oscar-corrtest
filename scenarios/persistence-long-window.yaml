@@ -1,0 +1,30 @@
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: persistence-long-window
+suite: corrtest-sweep
+pattern: persistence
+maxDuration: 150s
+cases:
+  - name: unresolved-for-thirty-seconds-emits-with-headroom
+    code: P01
+    polarity: positive
+    window: 60s
+    groupBy: [site]
+    labels: {site: pers-long-p01}
+    events:
+      - {role: service_down, status: firing}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 1}
+      - {kind: synthetic-alert-count, equals: 1}
+  - name: an-early-resolution-must-cancel-the-persistence-timer
+    code: N01
+    polarity: negative
+    window: 60s
+    groupBy: [site]
+    labels: {site: pers-long-n01}
+    events:
+      - {role: service_down, status: firing}
+      - {role: service_down, status: resolved, delay: 5s}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 0}
+      - {kind: synthetic-alert-count, equals: 0}

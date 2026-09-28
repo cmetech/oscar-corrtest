@@ -1,0 +1,31 @@
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: cross-source-outside-window
+suite: corrtest-negdepth
+pattern: cross_source
+maxDuration: 120s
+cases:
+  - name: snmp-and-api-inside-the-window-emit
+    code: P01
+    polarity: positive
+    window: 20s
+    groupBy: [site]
+    labels: {site: csow-p01}
+    events:
+      - {role: interface_down, status: firing, labels: {oscar_source: snmp}}
+      - {role: interface_down, status: firing, delay: 2s, labels: {oscar_source: api}}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 1}
+      - {kind: synthetic-alert-count, equals: 1}
+  - name: api-leg-arrives-past-the-window-so-sources-never-coexist
+    code: N01
+    polarity: negative
+    window: 20s
+    groupBy: [site]
+    labels: {site: csow-n01}
+    events:
+      - {role: interface_down, status: firing, labels: {oscar_source: snmp}}
+      - {role: interface_down, status: firing, delay: 28s, labels: {oscar_source: api}}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 0}
+      - {kind: synthetic-alert-count, equals: 0}

@@ -1,0 +1,30 @@
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: sequence-wrong-groupby
+suite: corrtest-negdepth
+pattern: sequence
+maxDuration: 90s
+cases:
+  - name: ordered-pair-in-one-site-emits
+    code: P01
+    polarity: positive
+    window: 30s
+    groupBy: [site]
+    labels: {site: seqwg-p01}
+    events:
+      - {role: login_failure, status: firing}
+      - {role: privileged_command, status: firing, delay: 2s}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 1}
+      - {kind: synthetic-alert-count, equals: 1}
+  - name: ordered-pair-split-across-two-sites-must-not-emit
+    code: N01
+    polarity: negative
+    window: 30s
+    groupBy: [site]
+    events:
+      - {role: login_failure, status: firing, labels: {site: seqwg-n01-a}}
+      - {role: privileged_command, status: firing, delay: 2s, labels: {site: seqwg-n01-b}}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 0}
+      - {kind: synthetic-alert-count, equals: 0}

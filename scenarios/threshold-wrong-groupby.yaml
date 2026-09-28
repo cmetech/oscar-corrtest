@@ -1,0 +1,33 @@
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: threshold-wrong-groupby
+suite: corrtest-negdepth
+pattern: threshold
+maxDuration: 120s
+cases:
+  - name: three-distinct-devices-in-one-site-reach-the-threshold
+    code: P01
+    polarity: positive
+    window: 30s
+    groupBy: [site]
+    labels: {site: thrwg-p01}
+    events:
+      - {role: cpu_high, status: firing, labels: {device: twg-d1}}
+      - {role: cpu_high, status: firing, delay: 1s, labels: {device: twg-d2}}
+      - {role: cpu_high, status: firing, delay: 2s, labels: {device: twg-d3}}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 1}
+      - {kind: synthetic-alert-count, equals: 1}
+  - name: four-distinct-devices-split-across-two-sites-never-reach-three-per-group
+    code: N01
+    polarity: negative
+    window: 30s
+    groupBy: [site]
+    events:
+      - {role: cpu_high, status: firing, labels: {site: thrwg-n01-a, device: twg-e1}}
+      - {role: cpu_high, status: firing, delay: 1s, labels: {site: thrwg-n01-a, device: twg-e2}}
+      - {role: cpu_high, status: firing, delay: 2s, labels: {site: thrwg-n01-b, device: twg-e3}}
+      - {role: cpu_high, status: firing, delay: 3s, labels: {site: thrwg-n01-b, device: twg-e4}}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 0}
+      - {kind: synthetic-alert-count, equals: 0}

@@ -1,0 +1,29 @@
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: flood-boundary-above
+suite: corrtest-sweep
+pattern: flood
+maxDuration: 90s
+cases:
+  - name: eight-occurrences-still-emit-exactly-one-parent
+    code: P01
+    polarity: positive
+    window: 30s
+    groupBy: [site]
+    labels: {site: flood-above-p01}
+    role: interface_down
+    repeat: 8
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 1}
+      - {kind: synthetic-alert-count, equals: 1}
+  - name: one-below-threshold-does-not-emit
+    code: N01
+    polarity: negative
+    window: 30s
+    groupBy: [site]
+    labels: {site: flood-above-n01}
+    role: interface_down
+    repeat: 4
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 0}
+      - {kind: synthetic-alert-count, equals: 0}

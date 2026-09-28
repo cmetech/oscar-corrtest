@@ -7,3 +7,11 @@
 *.db-shm
 *.db-wal
 coverage.out
+__pycache__/
+
+# raw test evidence stays local (regenerable via /test-correlation)
+flake/
+sweep*/
+scen2/
+scen3/
+neg1/

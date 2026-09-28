@@ -1,0 +1,33 @@
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: flood-group-partition
+suite: corrtest-sweep
+pattern: flood
+maxDuration: 90s
+cases:
+  - name: five-in-one-site-group-emits
+    code: P01
+    polarity: positive
+    window: 30s
+    groupBy: [site]
+    labels: {site: flood-part-p01}
+    role: interface_down
+    repeat: 5
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 1}
+      - {kind: synthetic-alert-count, equals: 1}
+  - name: six-split-across-two-sites-emits-nothing
+    code: N01
+    polarity: negative
+    window: 30s
+    groupBy: [site]
+    events:
+      - {role: interface_down, status: firing, labels: {site: flood-part-n01-a}}
+      - {role: interface_down, status: firing, delay: 1s, labels: {site: flood-part-n01-a}}
+      - {role: interface_down, status: firing, delay: 2s, labels: {site: flood-part-n01-a}}
+      - {role: interface_down, status: firing, delay: 3s, labels: {site: flood-part-n01-b}}
+      - {role: interface_down, status: firing, delay: 4s, labels: {site: flood-part-n01-b}}
+      - {role: interface_down, status: firing, delay: 5s, labels: {site: flood-part-n01-b}}
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 0}
+      - {kind: synthetic-alert-count, equals: 0}
