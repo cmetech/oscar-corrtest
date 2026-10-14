@@ -30,3 +30,5 @@ Production Splunk/middleware senders remain unchanged. The fixed CorrTest profil
 ## Next bounded cut
 
 The [joined CLI implementation plan](superpowers/plans/2026-10-14-ordinary-cli-managed-cohort.md) records the proposed backend-only fixture wiring, explicit disposable grant delta, evidence and cleanup checks. Reuse the in-progress W16 ordinary-window proof before adding scaffolding. No additional CorrTest feature is required by the current assessment. This document grants no permission to change production roles or activate selected admission.
+
+Subsequent status: the linked plan now records completed fixed-profile CLI qualification. The [receiver qualification handoff](reliability-handoff-20261013.md#repeating-ordinary-receiver-qualification) identifies the separate backend-owned runner for shipped Splunk/common middleware profiles, whose finite qualification passed on MySQL 8 and 5.7. That runner reuses this managed infrastructure; it is not a CorrTest feed adapter. The handoff records the normalization identity, retained request and scoped cleanup contracts needed before such an adapter can replace the fixture.

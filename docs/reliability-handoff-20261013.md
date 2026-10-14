@@ -54,3 +54,22 @@ Ordinary route qualification: **859 tests/subtests, 27 passing packages, zero fa
 The follow-up [History severity wire correction](qualification/20261014/history-severity/README.md) retains promoted severity separately for strict ordinary probe/cleanup and source episode checks. Full suite: 875 tests/subtests, 27 passing packages, zero failures, two no-test-file package skips; fresh review clean. [Managed-cohort feasibility](ordinary-webhook-managed-cohort-assessment-20261014.md) records remaining real-CLI integration seams without changing grants or services.
 
 The subsequent [resolved History severity correction](qualification/20261014/resolved-severity/README.md) binds resolved/cleared observations to the existing matching original_severity, without relaxing native cleanup. Actual-wire staged recovery/refire tests and full suite pass: 889 tests/subtests, 27 packages, zero failures, two no-test-file package skips; fresh review clean.
+
+## Repeating ordinary receiver qualification
+
+The [managed CLI plan](superpowers/plans/2026-10-14-ordinary-cli-managed-cohort.md) records the completed real CorrTest CLI qualification of `corrtest_ordinary_v1`. CorrTest's `ordinary-webhook` route still supports only that fixed lab profile. Changing its receiver URL or scenario YAML does not add a Splunk or middleware adapter.
+
+The backend [existing-feed qualification](../../oscar/docs/qualification/20261014/existing-webhook-window/README.md) uses the same owned managed-cohort infrastructure to exercise the shipped `splunk` and `middleware_custom_alert` profiles with their existing payload shapes. It runs the backend test harness, not the CorrTest CLI. **Finite qualification passed on MySQL 8 and 5.7**; consult that evidence record for exact fixture boundaries, retained failures and cleanup results.
+
+From the sibling `oscar` feature worktree, repeat its runner after reviewing the documented fixture/image prerequisites:
+
+```sh
+python3 docs/qualification/20261014/existing-webhook-window/run-cohort.py 8.0 <unused-attempt-number>
+python3 docs/qualification/20261014/existing-webhook-window/run-cohort.py 5.7 <unused-attempt-number>
+```
+
+Replace each attempt placeholder with an unused integer; the runner refuses to overwrite its evidence directory. It checks five matching inputs and a no-match control per feed through actual Native callbacks, History, broker and ordinary window/audit state. Profile definitions are shipped configuration, while nested Mapping contents and authentication are explicit fixtures. The top-level profile acknowledgment does not pin the nested Mapping bundle. Enhanced admission and parent dispatch stay disabled.
+
+Production sender payloads cannot be assumed controllable. Neither profile supplies a canonical source-clear contract. The cohort's exact-identity clear directly to its owned Native instance is lab cleanup, not source recovery or physical-clear authority. Teardown does not qualify an interrupted production input as recovered.
+
+A future CorrTest feed adapter must first bind saved requests to proved normalized identities without assuming reserved test labels survive; retain immutable request bytes and ambiguous-attempt responsibility without automatic retries; and define scoped cleanup/disposal authority. Missing identity or completion evidence must refuse clear and retain DIRTY/UNKNOWN state. Reuse current target credentials, request recording, History/audit APIs and reporting once those contracts exist; no new flags or source capabilities are introduced here. Neither qualification accepts capacity, provider delivery or any of the 39 UAT cases.
