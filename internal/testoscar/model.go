@@ -239,16 +239,7 @@ func (m *Model) triggerIndex(rule compiler.RulePlan) int {
 			}
 		}
 	case "sequence":
-		sequence := matchList(rule.MatchCriteria["sequence"])
-		position := 0
-		for _, index := range events {
-			if position < len(sequence) && m.matches(m.alerts[index], sequence[position]) {
-				position++
-				if position == len(sequence) {
-					return index
-				}
-			}
-		}
+		return m.sequenceTriggerIndex(rule, events)
 	case "cross_source":
 		required, _ := rule.MatchCriteria["required_sources"].([]any)
 		seen := map[string]bool{}
@@ -302,6 +293,70 @@ func (m *Model) triggerIndex(rule compiler.RulePlan) int {
 		}
 		if lastIndex >= 0 && !m.now.Before(last.Add(time.Duration(seconds)*time.Second)) {
 			return lastIndex
+		}
+	}
+	return -1
+}
+
+// sequenceTriggerIndex models the first trigger only. It follows the backend's
+// bounded per-group list, fingerprint replacement, event-time tail and arrival
+// tie order; timer expiry, cooldown rearming and distributed concurrency are not
+// qualified by this test model.
+func (m *Model) sequenceTriggerIndex(rule compiler.RulePlan, events []int) int {
+	sequence := matchList(rule.MatchCriteria["sequence"])
+	if len(sequence) < 2 {
+		return -1
+	}
+	groups := map[string][]int{}
+	timestamp := func(index int) int64 {
+		value := m.alerts[index].plan.StartsAt
+		if value.IsZero() {
+			value = m.alerts[index].at
+		}
+		return value.UnixMilli()
+	}
+	for _, index := range events {
+		alert := m.alerts[index]
+		if alert.plan.Status == "resolved" || !m.matchesAny(alert, sequence) {
+			continue
+		}
+		group := map[string]string{}
+		for _, label := range rule.GroupBy {
+			group[label] = alert.plan.Labels[label]
+		}
+		key := labelFingerprint(group)
+		kept := []int{}
+		for _, prior := range groups[key] {
+			if m.alerts[prior].fingerprint != alert.fingerprint {
+				kept = append(kept, prior)
+			}
+		}
+		kept = append(kept, index)
+		limit := max(2*len(sequence)+10, 20)
+		if len(kept) > limit {
+			kept = kept[len(kept)-limit:]
+		}
+		groups[key] = kept
+		chronological := []int{}
+		for _, prior := range kept {
+			if timestamp(prior) >= timestamp(index)-int64(rule.WindowSeconds)*1000 {
+				chronological = append(chronological, prior)
+			}
+		}
+		sort.SliceStable(chronological, func(a, b int) bool { return timestamp(chronological[a]) < timestamp(chronological[b]) })
+		if len(chronological) < len(sequence) {
+			continue
+		}
+		tail := chronological[len(chronological)-len(sequence):]
+		matched := true
+		for step, prior := range tail {
+			if !m.matches(m.alerts[prior], sequence[step]) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return index
 		}
 	}
 	return -1

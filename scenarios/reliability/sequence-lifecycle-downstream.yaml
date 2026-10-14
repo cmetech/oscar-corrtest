@@ -1,0 +1,63 @@
+# Downstream audit + source History only; no parent recovery or receiver proof.
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: staged-sequence-lifecycle
+suite: reliability
+pattern: sequence
+inputPath: alert-engine
+maxDuration: 90s
+cases:
+- name: required-event-time-order
+  code: P01
+  polarity: positive
+  window: 30s
+  groupBy: [site]
+  labels: {site: lab}
+  events:
+  - {role: login_failure, source: login_A, status: firing}
+  - {role: privileged_command, source: command_A, status: firing, delay: 3s}
+  - {role: login_failure, source: login_A, status: resolved, delay: 6s}
+  - {role: privileged_command, source: command_A, status: resolved, delay: 9s}
+  checkpoints:
+  - name: first-step-advances-without-trigger
+    afterEvent: 1
+    window: 2s
+    assertions:
+    - {kind: audit-count, outcome: enriched, equals: 1}
+    - {kind: audit-count, outcome: parent_emitted, equals: 0}
+  - name: ordered-tail-triggers-audit
+    afterEvent: 2
+    window: 2s
+    assertions:
+    - {kind: audit-count, outcome: enriched, equals: 1}
+    - {kind: audit-count, outcome: parent_emitted, equals: 1}
+  - name: one-source-visible-as-resolved
+    afterEvent: 3
+    window: 2s
+    assertions:
+    - {kind: source-episode-state-count, outcome: resolved, equals: 1}
+    - {kind: source-episode-state-count, outcome: firing, equals: 1}
+  - name: both-sources-visible-as-resolved
+    afterEvent: 4
+    window: 2s
+    assertions: [{kind: source-episode-state-count, outcome: resolved, equals: 2}]
+  assertions: [{kind: source-episode-state-count, outcome: resolved, equals: 2}]
+- name: reversed-event-time-order
+  code: N01
+  polarity: negative
+  window: 30s
+  groupBy: [site]
+  labels: {site: lab}
+  events:
+  - {role: privileged_command, source: command_A, status: firing}
+  - {role: login_failure, source: login_A, status: firing, delay: 3s}
+  checkpoints:
+  - name: reversed-tail-does-not-trigger
+    afterEvent: 2
+    window: 2s
+    assertions:
+    - {kind: audit-count, outcome: enriched, equals: 2}
+    - {kind: audit-count, outcome: parent_emitted, equals: 0}
+  assertions:
+  - {kind: audit-count, outcome: enriched, equals: 2}
+  - {kind: audit-count, outcome: parent_emitted, equals: 0}

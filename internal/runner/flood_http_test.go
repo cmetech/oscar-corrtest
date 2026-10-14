@@ -23,10 +23,10 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/testoscar"
 )
 
-// Test-only Flood wire responder. The existing independent Model determines
+// Test-only Flood/sequence wire responder. The existing independent Model determines
 // matched trigger decisions. Captured JSON supplies episode History state;
 // neither branch reads assertions, expected verdicts or case polarity.
-type floodWireFixture struct {
+type correlationWireFixture struct {
 	mu             sync.Mutex
 	model          *testoscar.Model
 	mode           string
@@ -40,8 +40,8 @@ type floodWireFixture struct {
 	deleted        map[int]bool
 }
 
-func newFloodWireFixture(mode string) *floodWireFixture {
-	return &floodWireFixture{model: testoscar.NewModel(time.Date(2026, 10, 13, 12, 0, 0, 123456789, time.UTC)), mode: mode, rules: map[int]compiler.RulePlan{}, history: map[string]oscar.HistoryRecord{}, auditToHistory: map[string]string{}, auditToName: map[string]string{}, auditIDs: map[string]int{}, deleted: map[int]bool{}}
+func newCorrelationWireFixture(mode string) *correlationWireFixture {
+	return &correlationWireFixture{model: testoscar.NewModel(time.Date(2026, 10, 13, 12, 0, 0, 123456789, time.UTC)), mode: mode, rules: map[int]compiler.RulePlan{}, history: map[string]oscar.HistoryRecord{}, auditToHistory: map[string]string{}, auditToName: map[string]string{}, auditIDs: map[string]int{}, deleted: map[int]bool{}}
 }
 func wireJSON(value any) testoscar.Response {
 	raw, err := json.Marshal(value)
@@ -50,7 +50,7 @@ func wireJSON(value any) testoscar.Response {
 	}
 	return testoscar.Response{Body: string(raw)}
 }
-func (f *floodWireFixture) respond(request testoscar.Request) testoscar.Response {
+func (f *correlationWireFixture) respond(request testoscar.Request) testoscar.Response {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	bad := func(err error) testoscar.Response {
@@ -70,8 +70,8 @@ func (f *floodWireFixture) respond(request testoscar.Request) testoscar.Response
 			rule.EmitAlertName = body.EmitSpec.AlertName
 			rule.EmitLabels = body.EmitSpec.Labels
 		}
-		if rule.Pattern != "flood" {
-			return bad(fmt.Errorf("fixture supports Flood only"))
+		if rule.Pattern != "flood" && rule.Pattern != "sequence" {
+			return bad(fmt.Errorf("fixture supports Flood and sequence only"))
 		}
 		if request.Path == "/api/v1/correlation_rules/validate" {
 			if err := f.model.ValidateRule(ctx, rule); err != nil {
@@ -173,6 +173,9 @@ func (f *floodWireFixture) respond(request testoscar.Request) testoscar.Response
 				}
 			}
 			record := map[string]any{"id": row.ID, "alertname": row.AlertName, "fingerprint": row.Fingerprint, "status": row.Status, "startsAt": row.StartsAt.Format(time.RFC3339Nano), "createdAt": row.CreatedAt.Format(time.RFC3339Nano), "labels": labels, "annotations": []any{}}
+			if f.mode == "sequence ignored recovery" {
+				record["status"] = "firing"
+			}
 			if f.mode == "missing startsAt" {
 				delete(record, "startsAt")
 			}
@@ -202,10 +205,21 @@ func (f *floodWireFixture) respond(request testoscar.Request) testoscar.Response
 			return bad(fmt.Errorf("audit query did not use am_fingerprint"))
 		}
 		matched := false
+		var matchedRule compiler.RulePlan
 		for _, rule := range f.rules {
 			clause, _ := rule.MatchCriteria["match"].(map[string]any)
 			if clause["alertname"] == f.auditToName[key] {
 				matched = true
+			}
+			if rule.Pattern == "sequence" {
+				clauses, _ := rule.MatchCriteria["sequence"].([]any)
+				for _, raw := range clauses {
+					clause, _ := raw.(map[string]any)
+					if clause["alertname"] == f.auditToName[key] {
+						matched = true
+						matchedRule = rule
+					}
+				}
 			}
 		}
 		if !matched {
@@ -232,6 +246,23 @@ func (f *floodWireFixture) respond(request testoscar.Request) testoscar.Response
 		}
 		wire := make([]map[string]any, 0, len(audits))
 		for _, row := range audits {
+			if row.Pattern == "sequence" && row.Outcome == "no_trigger" {
+				row.Outcome = "enriched"
+			}
+			if f.mode == "sequence reversed trigger" && matchedRule.Pattern == "sequence" {
+				clauses := matchedRule.MatchCriteria["sequence"].([]any)
+				first := clauses[0].(map[string]any)["alertname"]
+				second := clauses[1].(map[string]any)["alertname"]
+				var ordered []oscar.AlertRequest
+				for _, input := range f.stimuli {
+					if input.Status == "firing" && input.Labels["oscar_test_rule_name"] == matchedRule.Name {
+						ordered = append(ordered, input)
+					}
+				}
+				if len(ordered) == 2 && ordered[0].Labels["alertname"] == second && ordered[1].Labels["alertname"] == first && f.auditToName[key] == first {
+					row.Outcome = "parent_emitted"
+				}
+			}
 			wire = append(wire, map[string]any{"id": row.ID, "created_at": row.CreatedAt.Format(time.RFC3339Nano), "alert_fingerprint": key, "rule_id": row.RuleID, "rule_name": row.RuleName, "pattern": row.Pattern, "outcome": row.Outcome, "reason": row.Reason})
 		}
 		return wireJSON(map[string]any{"rows": wire, "total": len(wire), "perPage": 100})
@@ -295,7 +326,7 @@ func TestFloodFixturesThroughRealHTTPClient(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			fixture := newFloodWireFixture(test.mode)
+			fixture := newCorrelationWireFixture(test.mode)
 			server := testoscar.NewWithResponder(t, fixture.respond)
 			options := oscar.Options{Getenv: func(string) string { return "local-test-key" }}
 			if test.mode == "stored first transport" {
