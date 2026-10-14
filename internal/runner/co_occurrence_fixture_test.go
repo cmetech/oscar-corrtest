@@ -129,3 +129,69 @@ func TestStagedCoOccurrenceFixturePreservesRolesAndRecoveryEvidence(t *testing.T
 		})
 	}
 }
+
+func TestStagedCoOccurrenceThroughRealHTTPClient(t *testing.T) {
+	for _, test := range []struct {
+		mode           string
+		verdict        domain.Verdict
+		inputs, points int
+	}{
+		{"valid", domain.VerdictPass, 5, 4},
+		{"coocc premature trigger", domain.VerdictFail, 1, 1},
+		{"missing startsAt", domain.VerdictInconclusive, 3, 3},
+		{"coocc ignored recovery", domain.VerdictFail, 3, 3},
+	} {
+		t.Run(test.mode, func(t *testing.T) {
+			ctx := context.Background()
+			db := openDatabase(t)
+			run := newRun()
+			if err := db.CreateRun(ctx, run); err != nil {
+				t.Fatal(err)
+			}
+			plan, err := compiler.Compile(run, coOccurrenceFixture(t), compiler.Capabilities{PipelineMode: "phase_a_audit_only"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixture := newCorrelationWireFixture(test.mode)
+			server := testoscar.NewWithResponder(t, fixture.respond)
+			client, err := oscar.New(domain.Target{BaseURL: server.URL(), APIProfile: "public-v1"}, oscar.Options{Getenv: func(string) string { return "local-test-key" }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := runner.New(db, client, runner.Options{Now: fixture.model.Now, Sleep: fixture.model.Sleep, PollInterval: time.Second, Stabilization: time.Millisecond}).Execute(ctx, run, plan, runner.CapabilitySnapshot{Ready: true, LabelsSurvived: true, PipelineMode: "phase_a_audit_only"}); err != nil {
+				t.Fatal(err)
+			}
+			saved, err := db.GetRun(ctx, run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var report struct {
+				Checkpoints []struct {
+					Verdict    string
+					Assertions []struct {
+						Outcome  string
+						Observed int
+					}
+				}
+				Coverage map[string]string
+			}
+			if err := json.Unmarshal(saved.CanonicalReportJSON, &report); err != nil {
+				t.Fatal(err)
+			}
+			fixture.mu.Lock()
+			defer fixture.mu.Unlock()
+			if saved.Verdict != test.verdict || len(fixture.stimuli) != test.inputs || len(report.Checkpoints) != test.points {
+				t.Fatalf("verdict=%s inputs=%d points=%d report=%s", saved.Verdict, len(fixture.stimuli), len(report.Checkpoints), saved.CanonicalReportJSON)
+			}
+			if test.mode == "valid" && (report.Checkpoints[0].Assertions[1].Observed != 0 || report.Checkpoints[1].Assertions[1].Observed != 1) {
+				t.Fatal("staged co-occurrence audit lost")
+			}
+			if saved.CleanupStatus != domain.CleanupClean || len(fixture.deleted) != 2 || len(fixture.cleanup) == 0 {
+				t.Fatal("owned cleanup did not run")
+			}
+			if report.Coverage["receiverAdmission"] != "NOT_TESTED" || report.Coverage["physicalClear"] != "NOT_PROVEN" {
+				t.Fatal("local wire proof overclaims scope")
+			}
+		})
+	}
+}

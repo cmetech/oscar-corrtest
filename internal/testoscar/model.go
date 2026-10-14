@@ -226,18 +226,7 @@ func (m *Model) triggerIndex(rule compiler.RulePlan) int {
 			}
 		}
 	case "co_occurrence":
-		required := matchList(rule.MatchCriteria["required_matches"])
-		seen := map[int]bool{}
-		for _, index := range events {
-			for requiredIndex, match := range required {
-				if m.matches(m.alerts[index], match) {
-					seen[requiredIndex] = true
-				}
-			}
-			if len(seen) >= asInt(rule.MatchCriteria["min_matches"]) {
-				return index
-			}
-		}
+		return m.coOccurrenceTriggerIndex(rule, events)
 	case "sequence":
 		return m.sequenceTriggerIndex(rule, events)
 	case "cross_source":
@@ -293,6 +282,45 @@ func (m *Model) triggerIndex(rule compiler.RulePlan) int {
 		}
 		if lastIndex >= 0 && !m.now.Before(last.Add(time.Duration(seconds)*time.Second)) {
 			return lastIndex
+		}
+	}
+	return -1
+}
+
+// coOccurrenceTriggerIndex models the first trigger only. Distinct alertnames
+// are per-group fields whose event timestamp is overwritten by each arrival,
+// matching the ordinary Lua contract; cooldown/rearming and TTL are excluded.
+func (m *Model) coOccurrenceTriggerIndex(rule compiler.RulePlan, events []int) int {
+	required := matchList(rule.MatchCriteria["required_matches"])
+	groups := map[string]map[string]int64{}
+	for _, index := range events {
+		alert := m.alerts[index]
+		if alert.plan.Status == "resolved" || !m.matchesAny(alert, required) {
+			continue
+		}
+		timestamp := alert.plan.StartsAt
+		if timestamp.IsZero() {
+			timestamp = alert.at
+		}
+		millis := timestamp.UnixMilli()
+		group := map[string]string{}
+		for _, label := range rule.GroupBy {
+			group[label] = alert.plan.Labels[label]
+		}
+		key := labelFingerprint(group)
+		names := groups[key]
+		if names == nil {
+			names = map[string]int64{}
+			groups[key] = names
+		}
+		for name, stored := range names {
+			if stored < millis-int64(rule.WindowSeconds)*1000 {
+				delete(names, name)
+			}
+		}
+		names[alert.plan.Labels["alertname"]] = millis
+		if len(names) >= asInt(rule.MatchCriteria["min_matches"]) {
+			return index
 		}
 	}
 	return -1

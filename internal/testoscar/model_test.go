@@ -91,3 +91,58 @@ func TestSemanticModelSequenceUsesChronologicalTail(t *testing.T) {
 		})
 	}
 }
+
+func TestSemanticModelCoOccurrenceCountsWindowedDistinctNames(t *testing.T) {
+	type input struct {
+		name, status, source, site string
+		second                     int
+	}
+	for _, test := range []struct {
+		name     string
+		required []string
+		inputs   []input
+		want     bool
+	}{
+		{"distinct roles", []string{"A", "B"}, []input{{"A", "firing", "a", "x", 0}, {"B", "firing", "b", "x", 3}}, true},
+		{"same role twice", []string{"A", "B"}, []input{{"A", "firing", "a1", "x", 0}, {"A", "firing", "a2", "x", 3}}, false},
+		{"duplicate clauses not distinct names", []string{"A", "A"}, []input{{"A", "firing", "a", "x", 0}}, false},
+		{"different groups", []string{"A", "B"}, []input{{"A", "firing", "a", "x", 0}, {"B", "firing", "b", "y", 3}}, false},
+		{"expired first", []string{"A", "B"}, []input{{"A", "firing", "a", "x", 0}, {"B", "firing", "b", "x", 31}}, false},
+		{"resolution cannot advance", []string{"A", "B"}, []input{{"A", "resolved", "a", "x", 0}, {"B", "firing", "b", "x", 3}}, false},
+		{"repeat refreshes name", []string{"A", "B"}, []input{{"A", "firing", "a1", "x", 0}, {"A", "firing", "a2", "x", 20}, {"B", "firing", "b", "x", 40}}, true},
+		{"last arrival timestamp wins", []string{"A", "B"}, []input{{"A", "firing", "a1", "x", 20}, {"A", "firing", "a2", "x", 0}, {"B", "firing", "b", "x", 40}}, false},
+		{"unmatched name not counted", []string{"A", "B"}, []input{{"A", "firing", "a", "x", 0}, {"X", "firing", "noise", "x", 3}}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			base := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+			m := NewModel(base)
+			required := []any{}
+			for _, name := range test.required {
+				required = append(required, map[string]string{"alertname": name})
+			}
+			rule := compiler.RulePlan{Name: "rule", Pattern: "co_occurrence", WindowSeconds: 30, GroupBy: []string{"site"}, MatchCriteria: map[string]any{"required_matches": required, "min_matches": 2}, EmitAlertName: "PARENT", EmitLabels: map[string]string{"alertname": "PARENT", "oscar_test_run_id": "test"}}
+			if _, err := m.CreateRule(context.Background(), rule); err != nil {
+				t.Fatal(err)
+			}
+			for _, event := range test.inputs {
+				eventTime := base.Add(time.Duration(event.second) * time.Second)
+				if eventTime.After(m.Now()) {
+					if err := m.Sleep(context.Background(), eventTime.Sub(m.Now())); err != nil {
+						t.Fatal(err)
+					}
+				}
+				_, err := m.Inject(context.Background(), compiler.AlertPlan{Name: event.name, Status: event.status, StartsAt: eventTime, Labels: map[string]string{"alertname": event.name, "source": event.source, "site": event.site, "oscar_test_rule_name": "rule", "oscar_test_run_id": "test"}})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			rows, err := m.FindHistory(context.Background(), oscar.HistoryQuery{AlertName: "PARENT"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := len(rows) == 1; got != test.want {
+				t.Fatalf("trigger=%v want=%v", got, test.want)
+			}
+		})
+	}
+}

@@ -23,7 +23,7 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/testoscar"
 )
 
-// Test-only Flood/sequence wire responder. The existing independent Model determines
+// Test-only Flood/sequence/co-occurrence wire responder. The existing independent Model determines
 // matched trigger decisions. Captured JSON supplies episode History state;
 // neither branch reads assertions, expected verdicts or case polarity.
 type correlationWireFixture struct {
@@ -70,8 +70,8 @@ func (f *correlationWireFixture) respond(request testoscar.Request) testoscar.Re
 			rule.EmitAlertName = body.EmitSpec.AlertName
 			rule.EmitLabels = body.EmitSpec.Labels
 		}
-		if rule.Pattern != "flood" && rule.Pattern != "sequence" {
-			return bad(fmt.Errorf("fixture supports Flood and sequence only"))
+		if rule.Pattern != "flood" && rule.Pattern != "sequence" && rule.Pattern != "co_occurrence" {
+			return bad(fmt.Errorf("fixture supports Flood, sequence and co-occurrence only"))
 		}
 		if request.Path == "/api/v1/correlation_rules/validate" {
 			if err := f.model.ValidateRule(ctx, rule); err != nil {
@@ -173,7 +173,7 @@ func (f *correlationWireFixture) respond(request testoscar.Request) testoscar.Re
 				}
 			}
 			record := map[string]any{"id": row.ID, "alertname": row.AlertName, "fingerprint": row.Fingerprint, "status": row.Status, "startsAt": row.StartsAt.Format(time.RFC3339Nano), "createdAt": row.CreatedAt.Format(time.RFC3339Nano), "labels": labels, "annotations": []any{}}
-			if f.mode == "sequence ignored recovery" {
+			if f.mode == "sequence ignored recovery" || f.mode == "coocc ignored recovery" {
 				record["status"] = "firing"
 			}
 			if f.mode == "missing startsAt" {
@@ -211,8 +211,12 @@ func (f *correlationWireFixture) respond(request testoscar.Request) testoscar.Re
 			if clause["alertname"] == f.auditToName[key] {
 				matched = true
 			}
-			if rule.Pattern == "sequence" {
-				clauses, _ := rule.MatchCriteria["sequence"].([]any)
+			if rule.Pattern == "sequence" || rule.Pattern == "co_occurrence" {
+				criteriaKey := "sequence"
+				if rule.Pattern == "co_occurrence" {
+					criteriaKey = "required_matches"
+				}
+				clauses, _ := rule.MatchCriteria[criteriaKey].([]any)
 				for _, raw := range clauses {
 					clause, _ := raw.(map[string]any)
 					if clause["alertname"] == f.auditToName[key] {
@@ -246,8 +250,11 @@ func (f *correlationWireFixture) respond(request testoscar.Request) testoscar.Re
 		}
 		wire := make([]map[string]any, 0, len(audits))
 		for _, row := range audits {
-			if row.Pattern == "sequence" && row.Outcome == "no_trigger" {
+			if (row.Pattern == "sequence" || row.Pattern == "co_occurrence") && row.Outcome == "no_trigger" {
 				row.Outcome = "enriched"
+			}
+			if f.mode == "coocc premature trigger" && row.Pattern == "co_occurrence" {
+				row.Outcome = "parent_emitted"
 			}
 			if f.mode == "sequence reversed trigger" && matchedRule.Pattern == "sequence" {
 				clauses := matchedRule.MatchCriteria["sequence"].([]any)
