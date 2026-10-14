@@ -232,16 +232,7 @@ func (m *Model) triggerIndex(rule compiler.RulePlan) int {
 	case "cross_source":
 		return m.crossSourceTriggerIndex(rule, events)
 	case "threshold":
-		match, distinct := stringMap(rule.MatchCriteria["match"]), fmt.Sprint(rule.MatchCriteria["distinct_label"])
-		seen := map[string]bool{}
-		for _, index := range events {
-			if m.matches(m.alerts[index], match) {
-				seen[m.alerts[index].plan.Labels[distinct]] = true
-				if len(seen) >= asInt(rule.MatchCriteria["min_distinct_count"]) {
-					return index
-				}
-			}
-		}
+		return m.thresholdExactSetTriggerIndex(rule, events)
 	case "persistence":
 		match, seconds := stringMap(rule.MatchCriteria["match"]), asInt(rule.MatchCriteria["unresolved_for_seconds"])
 		for _, index := range events {
@@ -269,6 +260,49 @@ func (m *Model) triggerIndex(rule compiler.RulePlan) int {
 		}
 		if lastIndex >= 0 && !m.now.Before(last.Add(time.Duration(seconds)*time.Second)) {
 			return lastIndex
+		}
+	}
+	return -1
+}
+
+// thresholdExactSetTriggerIndex is an idealized exact-set approximation, NOT
+// Redis PFCOUNT. It preserves value eligibility, grouping and fixed event-time
+// bucket partitioning. Multi-value trigger results are legacy test convenience,
+// not HLL accuracy/threshold qualification. The staged HTTP control only uses
+// the safe singleton-value no-trigger case. TTL/cooldown/rearming are excluded.
+func (m *Model) thresholdExactSetTriggerIndex(rule compiler.RulePlan, events []int) int {
+	match := stringMap(rule.MatchCriteria["match"])
+	distinct, _ := rule.MatchCriteria["distinct_label"].(string)
+	windowMs := int64(rule.WindowSeconds) * 1000
+	if distinct == "" || windowMs <= 0 {
+		return -1
+	}
+	type bucketKey struct {
+		group string
+		epoch int64
+	}
+	buckets := map[bucketKey]map[string]bool{}
+	for _, index := range events {
+		alert := m.alerts[index]
+		value, present := alert.plan.Labels[distinct]
+		if alert.plan.Status == "resolved" || !m.matches(alert, match) || !present || value == "" {
+			continue
+		}
+		at := alert.plan.StartsAt
+		if at.IsZero() {
+			at = alert.at
+		}
+		group := map[string]string{}
+		for _, label := range rule.GroupBy {
+			group[label] = alert.plan.Labels[label]
+		}
+		key := bucketKey{labelFingerprint(group), at.UnixMilli() / windowMs}
+		if buckets[key] == nil {
+			buckets[key] = map[string]bool{}
+		}
+		buckets[key][value] = true
+		if len(buckets[key]) >= asInt(rule.MatchCriteria["min_distinct_count"]) {
+			return index
 		}
 	}
 	return -1

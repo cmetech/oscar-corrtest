@@ -198,3 +198,56 @@ func TestSemanticModelCrossSourceUsesRequiredSourcePairs(t *testing.T) {
 		})
 	}
 }
+
+// These are exact-set model scope checks, not Redis HyperLogLog accuracy tests.
+func TestThresholdExactSetApproximationPartitionsEligibleValues(t *testing.T) {
+	type input struct {
+		device, site, status string
+		second               int
+	}
+	for _, test := range []struct {
+		name   string
+		inputs []input
+		want   bool
+	}{
+		{"same value repeated", []input{{"a", "x", "firing", 0}, {"a", "x", "firing", 1}, {"a", "x", "firing", 2}}, false},
+		{"different groups", []input{{"a", "x", "firing", 0}, {"b", "x", "firing", 1}, {"c", "y", "firing", 2}}, false},
+		{"fixed epoch splits close events", []input{{"a", "x", "firing", 29}, {"b", "x", "firing", 30}, {"c", "x", "firing", 31}}, false},
+		{"resolved value ignored", []input{{"a", "x", "firing", 0}, {"b", "x", "firing", 1}, {"c", "x", "resolved", 2}}, false},
+		{"empty value skipped by Lua", []input{{"a", "x", "firing", 0}, {"b", "x", "firing", 1}, {"", "x", "firing", 2}}, false},
+		{"missing value ignored", []input{{"a", "x", "firing", 0}, {"b", "x", "firing", 1}, {"<missing>", "x", "firing", 2}}, false},
+		{"three values idealized only", []input{{"a", "x", "firing", 0}, {"b", "x", "firing", 1}, {"c", "x", "firing", 2}}, true},
+		{"zero string is present", []input{{"a", "x", "firing", 0}, {"b", "x", "firing", 1}, {"0", "x", "firing", 2}}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			base := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+			m := NewModel(base)
+			rule := compiler.RulePlan{Name: "rule", Pattern: "threshold", WindowSeconds: 30, GroupBy: []string{"site"}, MatchCriteria: map[string]any{"match": map[string]string{"alertname": "A"}, "distinct_label": "device", "min_distinct_count": 3}, EmitAlertName: "PARENT", EmitLabels: map[string]string{"alertname": "PARENT"}}
+			if _, err := m.CreateRule(context.Background(), rule); err != nil {
+				t.Fatal(err)
+			}
+			for i, event := range test.inputs {
+				at := base.Add(time.Duration(event.second) * time.Second)
+				if at.After(m.Now()) {
+					if err := m.Sleep(context.Background(), at.Sub(m.Now())); err != nil {
+						t.Fatal(err)
+					}
+				}
+				labels := map[string]string{"alertname": "A", "event": fmt.Sprint(i), "site": event.site, "oscar_test_rule_name": "rule"}
+				if event.device != "<missing>" {
+					labels["device"] = event.device
+				}
+				if _, err := m.Inject(context.Background(), compiler.AlertPlan{Name: "A", Status: event.status, StartsAt: at, Labels: labels}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			rows, err := m.FindHistory(context.Background(), oscar.HistoryQuery{AlertName: "PARENT"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := len(rows) == 1; got != test.want {
+				t.Fatalf("idealized trigger=%v want=%v", got, test.want)
+			}
+		})
+	}
+}

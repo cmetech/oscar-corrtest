@@ -23,7 +23,8 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/testoscar"
 )
 
-// Test-only Flood/sequence/co-occurrence/cross-source wire responder. The existing independent Model determines
+// Test-only Flood/sequence/co-occurrence/cross-source wire responder, plus the
+// singleton-value Threshold control (no positive HLL oracle). The independent Model determines
 // matched trigger decisions. Captured JSON supplies episode History state;
 // neither branch reads assertions, expected verdicts or case polarity.
 type correlationWireFixture struct {
@@ -70,8 +71,8 @@ func (f *correlationWireFixture) respond(request testoscar.Request) testoscar.Re
 			rule.EmitAlertName = body.EmitSpec.AlertName
 			rule.EmitLabels = body.EmitSpec.Labels
 		}
-		if rule.Pattern != "flood" && rule.Pattern != "sequence" && rule.Pattern != "co_occurrence" && rule.Pattern != "cross_source" {
-			return bad(fmt.Errorf("fixture supports Flood, sequence, co-occurrence and cross-source only"))
+		if rule.Pattern != "flood" && rule.Pattern != "sequence" && rule.Pattern != "co_occurrence" && rule.Pattern != "cross_source" && rule.Pattern != "threshold" {
+			return bad(fmt.Errorf("fixture supports Flood, sequence, co-occurrence, cross-source and singleton Threshold only"))
 		}
 		if request.Path == "/api/v1/correlation_rules/validate" {
 			if err := f.model.ValidateRule(ctx, rule); err != nil {
@@ -112,6 +113,23 @@ func (f *correlationWireFixture) respond(request testoscar.Request) testoscar.Re
 		if alert.Annotations["oscar_test_cleanup"] != "" {
 			f.cleanup = append(f.cleanup, alert)
 			return wireJSON(map[string]string{"status": "accepted"})
+		}
+		// This responder cannot grant Threshold positive qualification using an
+		// exact-set approximation. Only one nonempty distinct value is supported.
+		for _, rule := range f.rules {
+			if rule.Pattern != "threshold" || rule.Name != alert.Labels["oscar_test_rule_name"] {
+				continue
+			}
+			distinct, _ := rule.MatchCriteria["distinct_label"].(string)
+			value := alert.Labels[distinct]
+			if value == "" {
+				return bad(fmt.Errorf("Threshold wire control requires one nonempty value"))
+			}
+			for _, prior := range f.stimuli {
+				if prior.Labels["oscar_test_rule_name"] == rule.Name && prior.Labels[distinct] != value {
+					return bad(fmt.Errorf("multi-value Threshold HLL oracle is unavailable"))
+				}
+			}
 		}
 		f.stimuli = append(f.stimuli, alert)
 		if f.mode == "old refire indeterminate" && len(f.stimuli) == 8 {
@@ -173,7 +191,7 @@ func (f *correlationWireFixture) respond(request testoscar.Request) testoscar.Re
 				}
 			}
 			record := map[string]any{"id": row.ID, "alertname": row.AlertName, "fingerprint": row.Fingerprint, "status": row.Status, "startsAt": row.StartsAt.Format(time.RFC3339Nano), "createdAt": row.CreatedAt.Format(time.RFC3339Nano), "labels": labels, "annotations": []any{}}
-			if f.mode == "sequence ignored recovery" || f.mode == "coocc ignored recovery" || f.mode == "crosssource ignored recovery" {
+			if f.mode == "sequence ignored recovery" || f.mode == "coocc ignored recovery" || f.mode == "crosssource ignored recovery" || f.mode == "threshold ignored recovery" {
 				record["status"] = "firing"
 			}
 			if f.mode == "missing startsAt" {
@@ -210,6 +228,7 @@ func (f *correlationWireFixture) respond(request testoscar.Request) testoscar.Re
 			clause, _ := rule.MatchCriteria["match"].(map[string]any)
 			if clause["alertname"] == f.auditToName[key] {
 				matched = true
+				matchedRule = rule
 			}
 			if rule.Pattern == "sequence" || rule.Pattern == "co_occurrence" || rule.Pattern == "cross_source" {
 				criteriaKey := "sequence"
@@ -259,8 +278,11 @@ func (f *correlationWireFixture) respond(request testoscar.Request) testoscar.Re
 			// Cross-source fixture audits only admitted firing source/name pairs.
 			// Generic model nontrigger does not qualify backend fallback audit
 			// outcomes for rejected tags/pairs or recovery inputs.
-			if (row.Pattern == "sequence" || row.Pattern == "co_occurrence" || row.Pattern == "cross_source") && row.Outcome == "no_trigger" {
+			if (row.Pattern == "sequence" || row.Pattern == "co_occurrence" || row.Pattern == "cross_source" || row.Pattern == "threshold") && row.Outcome == "no_trigger" {
 				row.Outcome = "enriched"
+			}
+			if f.mode == "threshold raw-count trigger" && matchedRule.Pattern == "threshold" && len(f.stimuli) >= 3 && f.stimuli[2].Fingerprint == key {
+				row.Outcome = "parent_emitted"
 			}
 			if f.mode == "coocc premature trigger" && row.Pattern == "co_occurrence" {
 				row.Outcome = "parent_emitted"
