@@ -9,7 +9,7 @@ import (
 
 // Encode returns stable, strict public-v1 YAML for a validated scenario.
 func Encode(document Scenario) ([]byte, error) {
-	if err := validate(document); err != nil {
+	if err := Validate(document); err != nil {
 		return nil, err
 	}
 	wire := wireScenario{
@@ -18,6 +18,7 @@ func Encode(document Scenario) ([]byte, error) {
 		Name:        document.Name,
 		Suite:       document.Suite,
 		Pattern:     document.Pattern,
+		InputPath:   document.InputPath,
 		MaxDuration: document.MaxDuration.String(),
 	}
 	for _, item := range document.Cases {
@@ -49,7 +50,12 @@ func Encode(document Scenario) ([]byte, error) {
 			if event.Delay != 0 {
 				delay = event.Delay.String()
 			}
-			converted.Events = append(converted.Events, wireEvent{Role: event.Role, Status: event.Status, Labels: cloneStringMap(event.Labels), Delay: delay})
+			var source *string
+			if event.Source != "" {
+				value := event.Source
+				source = &value
+			}
+			converted.Events = append(converted.Events, wireEvent{Role: event.Role, Source: source, Status: event.Status, Labels: cloneStringMap(event.Labels), Delay: delay})
 		}
 		wire.Cases = append(wire.Cases, converted)
 	}

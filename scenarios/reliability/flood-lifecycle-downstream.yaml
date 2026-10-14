@@ -1,0 +1,33 @@
+# Downstream stimulus exercise only; see docs/reliability-e2e.md.
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: named-flood-lifecycle
+suite: reliability
+pattern: flood
+inputPath: alert-engine
+maxDuration: 3m
+cases:
+- name: five-distinct
+  code: P01
+  polarity: positive
+  window: 60s
+  groupBy: [site]
+  labels: {site: lab}
+  events:
+  - {role: interface_down, source: A, status: firing}
+  - {role: interface_down, source: B, status: firing, delay: 1s}
+  - {role: interface_down, source: C, status: firing, delay: 2s}
+  - {role: interface_down, source: D, status: firing, delay: 3s}
+  - {role: interface_down, source: E, status: firing, delay: 4s}
+  - {role: interface_down, source: A, status: resolved, delay: 5s}
+  - {role: interface_down, source: B, status: resolved, delay: 6s}
+  - {role: interface_down, source: A, status: firing, delay: 7s}
+  - {role: interface_down, source: A, status: resolved, delay: 8s}
+  assertions: [{kind: audit-count, outcome: parent_emitted, equals: 1}]
+- name: four-distinct
+  code: N01
+  polarity: negative
+  role: interface_down
+  repeat: 4
+  window: 60s
+  assertions: [{kind: audit-count, outcome: parent_emitted, equals: 0}]

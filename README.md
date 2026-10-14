@@ -195,3 +195,5 @@ Windows assets, tests the Windows installer, verifies checksums, and publishes
 the GitHub Release. The guarded `scripts/release.sh v1.2.3` command remains an
 optional local preflight. See [the development guide](docs/development.md#creating-a-github-release)
 for the complete operator procedure.
+
+For the current selective-admission work, see [reliability E2E coverage](docs/reliability-e2e.md): named child recovery/refire stimuli, explicit downstream injection limits, and the backend contracts still required for full E2E scenarios.

@@ -355,6 +355,7 @@ func (a *App) runRunsShow(ctx context.Context, args []string) int {
 		return a.writeJSON(run)
 	}
 	fmt.Fprintf(a.stdout, "Run: %s\nStatus: %s\nVerdict: %s\nCleanup: %s\n", run.ID, run.Status, displayEmpty(string(run.Verdict)), run.CleanupStatus)
+	fmt.Fprintln(a.stdout, "Coverage: OSCAR Alert Engine ingress; receiver admission and Native Alertmanager bypassed. PASS covers declared downstream assertions, not reliability E2E acceptance.")
 	return 0
 }
 

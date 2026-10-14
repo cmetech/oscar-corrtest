@@ -9,6 +9,7 @@ type Scenario struct {
 	Kind        string        `json:"kind" yaml:"kind"`
 	Name        string        `json:"name" yaml:"name"`
 	Suite       string        `json:"suite" yaml:"suite"`
+	InputPath   string        `json:"inputPath,omitempty" yaml:"inputPath,omitempty"`
 	Pattern     string        `json:"pattern" yaml:"pattern"`
 	MaxDuration time.Duration `json:"maxDuration" yaml:"maxDuration"`
 	Cases       []Case        `json:"cases" yaml:"cases"`
@@ -34,6 +35,7 @@ type Case struct {
 // because they intentionally affect OSCAR fingerprints.
 type Event struct {
 	Role   string            `json:"role" yaml:"role"`
+	Source string            `json:"source,omitempty" yaml:"source,omitempty"`
 	Status string            `json:"status" yaml:"status"`
 	Labels map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
 	Delay  time.Duration     `json:"delay,omitempty" yaml:"delay,omitempty"`
@@ -45,3 +47,6 @@ type Assertion struct {
 	Outcome string `json:"outcome,omitempty" yaml:"outcome,omitempty"`
 	Equals  int    `json:"equals" yaml:"equals"`
 }
+
+// IdentityKey distinguishes named children without changing legacy role-based resolution.
+func (e Event) IdentityKey() string { return e.Role + "\x00" + e.Source }

@@ -28,6 +28,7 @@ type Plan struct {
 	Scenario       string         `json:"scenario"`
 	Suite          string         `json:"suite"`
 	Pattern        string         `json:"pattern"`
+	InputPath      string         `json:"inputPath"`
 	RunID          string         `json:"runId"`
 	ShortToken     string         `json:"shortToken"`
 	MaxDuration    time.Duration  `json:"maxDuration"`
@@ -56,11 +57,15 @@ type RulePlan struct {
 	Description   string            `json:"description"`
 }
 type AlertPlan struct {
-	Name        string            `json:"name"`
-	Status      string            `json:"status"`
-	Labels      map[string]string `json:"labels"`
-	Annotations map[string]string `json:"annotations"`
-	Delay       time.Duration     `json:"delay"`
+	Source        string            `json:"source,omitempty"`
+	Name          string            `json:"name"`
+	Status        string            `json:"status"`
+	Labels        map[string]string `json:"labels"`
+	Annotations   map[string]string `json:"annotations"`
+	Delay         time.Duration     `json:"delay"`
+	EpisodeOffset *time.Duration    `json:"episodeOffset,omitempty"`
+	StartsAt      time.Time         `json:"-"`
+	EndsAt        time.Time         `json:"-"`
 }
 type Inspection struct {
 	ExactRun        string            `json:"exactRun"`
@@ -71,6 +76,12 @@ type Inspection struct {
 }
 
 func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities) (Plan, error) {
+	if err := scenario.Validate(input); err != nil {
+		return Plan{}, err
+	}
+	if input.InputPath == "receiver-admission" {
+		return Plan{}, fmt.Errorf("receiver-admission input is unavailable; alert-engine ingress cannot prove receiver admission, native grouping or producer barriers")
+	}
 	if run.ID == "" || len(run.ShortToken) != 8 {
 		return Plan{}, fmt.Errorf("run identity is invalid")
 	}
@@ -84,7 +95,7 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 	if input.MaxDuration <= 0 || input.MaxDuration > scenario.MaxScenarioDuration {
 		return Plan{}, fmt.Errorf("scenario maximum duration is outside the safe budget")
 	}
-	plan := Plan{APIVersion: input.APIVersion, Scenario: input.Name, Suite: input.Suite, Pattern: input.Pattern, RunID: run.ID, ShortToken: strings.ToUpper(run.ShortToken), MaxDuration: input.MaxDuration}
+	plan := Plan{APIVersion: input.APIVersion, Scenario: input.Name, Suite: input.Suite, Pattern: input.Pattern, InputPath: "alert-engine", RunID: run.ID, ShortToken: strings.ToUpper(run.ShortToken), MaxDuration: input.MaxDuration}
 	coOccurrenceRoles := requiredCoOccurrenceRoles(input)
 	for _, source := range input.Cases {
 		events := source.Events
@@ -136,11 +147,14 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 		item := CasePlan{Name: source.Name, Code: caseCode, Polarity: source.Polarity, Assertions: source.Assertions, ObservationWindow: observationWindow}
 		item.Rule = RulePlan{Name: ruleName, Pattern: input.Pattern, WindowSeconds: int(source.Window / time.Second), GroupBy: source.GroupBy, MatchCriteria: matchCriteria(input.Pattern, names, source), EmitAlertName: syntheticName, EmitLabels: identityLabels(run, input, source, ruleName, "synthetic", "synthetic_parent"), Description: fmt.Sprintf("Temporary OSCAR correlation test rule; run=%s scenario=%s case=%s", run.ID, input.Name, source.Name)}
 		activeByRole := map[string]map[string]string{}
+		retainedSources := map[string]map[string]string{}
+		episodeOffsets := map[string]time.Duration{}
 		eventSequence := 0
 		for index, event := range events {
+			key := event.IdentityKey()
 			var labels map[string]string
 			if strings.EqualFold(event.Status, "resolved") {
-				firing, ok := activeByRole[event.Role]
+				firing, ok := activeByRole[key]
 				if !ok {
 					return Plan{}, fmt.Errorf("case %q resolves role %q without a preceding firing event", source.Name, event.Role)
 				}
@@ -148,7 +162,9 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 					return Plan{}, fmt.Errorf("case %q resolution for role %q cannot change identity labels", source.Name, event.Role)
 				}
 				labels = cloneLabels(firing)
-				delete(activeByRole, event.Role)
+				delete(activeByRole, key)
+			} else if event.Source != "" && retainedSources[key] != nil {
+				labels = cloneLabels(retainedSources[key])
 			} else {
 				eventSequence++
 				labels = identityLabels(run, input, source, ruleName, "source", event.Role)
@@ -167,9 +183,18 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 			name := names[event.Role]
 			labels["alertname"] = name
 			if !strings.EqualFold(event.Status, "resolved") {
-				activeByRole[event.Role] = cloneLabels(labels)
+				activeByRole[key] = cloneLabels(labels)
+				if event.Source != "" {
+					retainedSources[key] = cloneLabels(labels)
+					episodeOffsets[key] = event.Delay
+				}
 			}
-			item.Alerts = append(item.Alerts, AlertPlan{Name: name, Status: event.Status, Labels: labels, Delay: event.Delay, Annotations: map[string]string{"oscar_test_event_id": labels["oscar_test_event_id"], "oscar_test_event_index": labels["oscar_test_event_index"], "oscar_test_attempt_index": strconv.Itoa(index + 1), "summary": fmt.Sprintf("[CORRTEST][%s][%s][%s] source alert %d of %d", patternCode, caseCode, short, index+1, len(events))}})
+			var episodeOffset *time.Duration
+			if event.Source != "" {
+				value := episodeOffsets[key]
+				episodeOffset = &value
+			}
+			item.Alerts = append(item.Alerts, AlertPlan{Source: event.Source, EpisodeOffset: episodeOffset, Name: name, Status: event.Status, Labels: labels, Delay: event.Delay, Annotations: map[string]string{"oscar_test_event_id": labels["oscar_test_event_id"], "oscar_test_event_index": labels["oscar_test_event_index"], "oscar_test_attempt_index": strconv.Itoa(index + 1), "summary": fmt.Sprintf("[CORRTEST][%s][%s][%s] source alert %d of %d", patternCode, caseCode, short, index+1, len(events))}})
 			if event.Delay > item.ObservationWindow || event.Delay > input.MaxDuration {
 				return Plan{}, fmt.Errorf("case %q event delay exceeds its observation budget", source.Name)
 			}

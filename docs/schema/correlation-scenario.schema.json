@@ -84,6 +84,12 @@
         }
       ]
     },
+    "inputPath": {
+      "enum": [
+        "alert-engine",
+        "receiver-admission"
+      ]
+    },
     "kind": {
       "const": "CorrelationScenario"
     },
@@ -416,6 +422,12 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 100
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
         },
         "status": {
           "enum": [

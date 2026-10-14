@@ -34,6 +34,7 @@ type HistoryQuery struct {
 }
 
 type HistoryRecord struct {
+	StartsAt    time.Time         `json:"startsAt"`
 	ID          string            `json:"id"`
 	AlertName   string            `json:"alertName"`
 	Fingerprint string            `json:"fingerprint"`

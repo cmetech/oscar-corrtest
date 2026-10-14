@@ -107,6 +107,7 @@ type caseResult struct {
 }
 
 type canonicalReport struct {
+	Coverage     map[string]string            `json:"coverage"`
 	APIVersion   string                       `json:"apiVersion"`
 	RunID        string                       `json:"runId"`
 	Pattern      string                       `json:"pattern"`
@@ -158,6 +159,9 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 			return err
 		}
 		return ctx.Err()
+	}
+	if plan.InputPath != "" && plan.InputPath != "alert-engine" {
+		return r.finishWithoutMutation(ctx, run, plan, capabilities, domain.VerdictError, "unsupported input path: "+plan.InputPath)
 	}
 	if len(plan.Cases) == 0 {
 		return r.finishWithoutMutation(ctx, run, plan, capabilities, domain.VerdictError, "compiled plan contains no executable cases")
@@ -234,6 +238,16 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 					return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, err)
 				}
 				elapsed = alert.Delay
+			}
+			if alert.EpisodeOffset != nil {
+				alert.StartsAt = caseStarted[item.Code].Truncate(time.Millisecond).Add(*alert.EpisodeOffset)
+				if alert.Status == "resolved" {
+					alert.EndsAt = caseStarted[item.Code].Truncate(time.Millisecond).Add(alert.Delay)
+				}
+				detail, _ := json.Marshal(map[string]any{"caseCode": item.Code, "eventId": alert.Labels["oscar_test_event_id"], "attempt": alertIndex + 1, "status": alert.Status, "startsAt": alert.StartsAt, "endsAt": alert.EndsAt})
+				if _, err := r.store.AppendRunEvent(ctx, domain.RunEvent{RunID: run.ID, Type: "alert.prepared", Level: "info", OccurredAt: r.opts.Now().UTC(), Summary: "Named source episode prepared for OSCAR Alert Engine ingress", DetailJSON: string(detail)}); err != nil {
+					return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, err)
+				}
 			}
 			result, err := r.api.Inject(ctx, alert)
 			if err != nil {
@@ -353,11 +367,18 @@ func (r *Runner) cleanup(ctx context.Context, runID string, resources []domain.R
 	return domain.CleanupClean, resolutions, nil
 }
 
+// Refires share a fingerprint; API row order must not select an obsolete cleanup episode.
+func retainLatestHistory(records map[string]oscar.HistoryRecord, next oscar.HistoryRecord) {
+	if previous, found := records[next.Fingerprint]; !found || !previous.StartsAt.After(next.StartsAt) {
+		records[next.Fingerprint] = next
+	}
+}
+
 func uniqueHistory(records []oscar.HistoryRecord) []oscar.HistoryRecord {
 	byFingerprint := make(map[string]oscar.HistoryRecord, len(records))
 	for _, record := range records {
 		if record.Fingerprint != "" {
-			byFingerprint[record.Fingerprint] = record
+			retainLatestHistory(byFingerprint, record)
 		}
 	}
 	keys := make([]string, 0, len(byFingerprint))
@@ -462,7 +483,7 @@ func (r *Runner) discoverAttemptedHistory(ctx context.Context, run domain.Run, p
 				continue
 			}
 			found[eventID] = true
-			byFingerprint[record.Fingerprint] = record
+			retainLatestHistory(byFingerprint, record)
 		}
 		for eventID := range expected[alertName] {
 			if !found[eventID] {
@@ -483,7 +504,7 @@ func (r *Runner) discoverAttemptedHistory(ctx context.Context, run domain.Run, p
 		}
 		for _, record := range records {
 			if record.AlertName == alertName && record.Labels["oscar_test_run_id"] == run.ID && record.Fingerprint != "" {
-				byFingerprint[record.Fingerprint] = record
+				retainLatestHistory(byFingerprint, record)
 			}
 		}
 	}
@@ -528,7 +549,9 @@ func (r *Runner) complete(ctx context.Context, run domain.Run, plan compiler.Pla
 			facts.Artifacts = append(facts.Artifacts, item)
 		}
 	}
-	report, err := json.Marshal(canonicalReport{APIVersion: "corrtest.oscar/v1alpha1", RunID: run.ID, Pattern: plan.Pattern,
+	report, err := json.Marshal(canonicalReport{Coverage: map[string]string{
+		"inputPath": "alert-engine", "endpoint": "POST /api/v1/alerts", "receiverAdmission": "NOT_TESTED", "nativeAlertmanager": "BYPASSED", "lifecycleTransitions": "NOT_PROVEN", "producerBarriers": "NOT_TESTED", "physicalClear": "NOT_PROVEN",
+	}, APIVersion: "corrtest.oscar/v1alpha1", RunID: run.ID, Pattern: plan.Pattern,
 		PlanDigest: plan.Digest, Verdict: verdict, Cleanup: cleanup, Capabilities: capabilities, Cases: results, Attempts: facts.Attempts, Artifacts: facts.Artifacts, Resolutions: facts.Resolutions, CompletedAt: completed})
 	if err != nil {
 		return err

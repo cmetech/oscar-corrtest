@@ -265,3 +265,9 @@ git diff --exit-code docs/schema/correlation-scenario.schema.json
 The second command is the byte-drift check: it must produce no diff after a
 committed schema update. Release archives carry this schema together with this
 guide, the built-in catalog, and the operator guide.
+
+### Named source lifecycles and input coverage
+
+Optional `event.source` is a safe identifier (`A`, `child_1`) scoped to the role and case. It lets several children share an alert role and recover independently. Refire requires a preceding resolution, strictly later delay than its previous firing, and no new labels. The first label set is retained, while the firing episode (`startsAt`) advances. Named-source delays require whole milliseconds; the case clock anchor is truncated to milliseconds to match History storage. Omitted `source` keeps the original last-firing-per-role resolution behavior.
+
+Optional `inputPath` defaults to `alert-engine`, the existing downstream `POST /api/v1/alerts` adapter. `receiver-admission` states a requirement that currently fails compilation; it cannot silently run downstream. See [reliability E2E coverage](reliability-e2e.md) and the [Flood lifecycle fixture](../scenarios/reliability/flood-lifecycle-downstream.yaml). Terminal audit/count assertions do not prove intermediate recovery or safe parent clear.

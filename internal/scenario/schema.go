@@ -111,6 +111,7 @@ func buildSchema(contract Contract) jsonSchema {
 			"name":        {Type: "string", MinLength: integer(1), MaxLength: integer(MaxScenarioNameLength), Pattern: "^\\S(?:.*\\S)?$"},
 			"suite":       {Type: "string", MinLength: integer(1), MaxLength: integer(MaxSuiteLength), Pattern: "^\\S(?:.*\\S)?$"},
 			"pattern":     {Enum: patterns},
+			"inputPath":   {Enum: []string{"alert-engine", "receiver-admission"}},
 			"maxDuration": duration("> 0", MaxScenarioDuration.String()),
 			"cases": {Type: "array", MinItems: integer(RequiredCaseCount), MaxItems: integer(RequiredCaseCount), Items: &schemaValue{Ref: "#/$defs/case"}, AllOf: []schemaValue{
 				{Contains: &casePositive, MinContains: integer(1), MaxContains: integer(1)},
@@ -149,6 +150,7 @@ func buildSchema(contract Contract) jsonSchema {
 				Type: "object", AdditionalProperties: false, Required: []string{"role", "status"},
 				Properties: map[string]schemaValue{
 					"role":   {Type: "string", MinLength: integer(1), MaxLength: integer(MaxRoleLength)},
+					"source": {Type: "string", MinLength: integer(1), MaxLength: integer(MaxRoleLength), Pattern: "^[A-Za-z_][A-Za-z0-9_]*$"},
 					"status": {Enum: []string{"firing", "resolved"}},
 					"labels": labels,
 					"delay":  duration(">= 0", "scenario and observation budgets"),

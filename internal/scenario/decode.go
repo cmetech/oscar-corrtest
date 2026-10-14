@@ -19,6 +19,7 @@ type wireScenario struct {
 	Name        string     `yaml:"name"`
 	Suite       string     `yaml:"suite"`
 	Pattern     string     `yaml:"pattern"`
+	InputPath   string     `yaml:"inputPath,omitempty"`
 	MaxDuration string     `yaml:"maxDuration"`
 	Cases       []wireCase `yaml:"cases"`
 }
@@ -40,6 +41,7 @@ type wireCase struct {
 
 type wireEvent struct {
 	Role   string            `yaml:"role"`
+	Source *string           `yaml:"source,omitempty"`
 	Status string            `yaml:"status"`
 	Labels map[string]string `yaml:"labels,omitempty"`
 	Delay  string            `yaml:"delay,omitempty"`
@@ -128,7 +130,7 @@ func Decode(reader io.Reader) (Scenario, error) {
 	if err != nil {
 		return Scenario{}, fmt.Errorf("maxDuration: %w", err)
 	}
-	result := Scenario{APIVersion: wire.APIVersion, Kind: wire.Kind, Name: wire.Name, Suite: wire.Suite, Pattern: wire.Pattern, MaxDuration: maxDuration}
+	result := Scenario{APIVersion: wire.APIVersion, Kind: wire.Kind, Name: wire.Name, Suite: wire.Suite, Pattern: wire.Pattern, InputPath: wire.InputPath, MaxDuration: maxDuration}
 	for index, item := range wire.Cases {
 		window, parseErr := time.ParseDuration(item.Window)
 		if parseErr != nil {
@@ -177,17 +179,28 @@ func Decode(reader io.Reader) (Scenario, error) {
 					return Scenario{}, fmt.Errorf("case %q event delay: %w", item.Name, parseErr)
 				}
 			}
-			converted.Events = append(converted.Events, Event{Role: event.Role, Status: event.Status, Labels: event.Labels, Delay: delay})
+			source := ""
+			if event.Source != nil {
+				source = *event.Source
+				if source == "" {
+					return Scenario{}, fmt.Errorf("case %q source must not be empty", item.Name)
+				}
+			}
+			converted.Events = append(converted.Events, Event{Role: event.Role, Source: source, Status: event.Status, Labels: event.Labels, Delay: delay})
 		}
 		result.Cases = append(result.Cases, converted)
 	}
-	if err := validate(result); err != nil {
+	if err := Validate(result); err != nil {
 		return Scenario{}, err
 	}
 	return result, nil
 }
 
-func validate(document Scenario) error {
+// Validate checks the same closed scenario contract for decoded and compiled inputs.
+func Validate(document Scenario) error {
+	if document.InputPath != "" && document.InputPath != "alert-engine" && document.InputPath != "receiver-admission" {
+		return fmt.Errorf("unsupported inputPath %q", document.InputPath)
+	}
 	if document.APIVersion != APIVersion || document.Kind != Kind || !isSupportedPattern(document.Pattern) {
 		return fmt.Errorf("scenario apiVersion, kind, or pattern is unsupported")
 	}
@@ -254,8 +267,23 @@ func validate(document Scenario) error {
 			return fmt.Errorf("case %q mixes or exceeds event stimulus forms", item.Name)
 		}
 		latestFiringByRole := map[string]bool{}
+		seenSources := map[string]bool{}
+		sourceStarts := map[string]time.Duration{}
 		var previousDelay time.Duration
 		for index, event := range events {
+			key := event.IdentityKey()
+			if event.Source != "" && event.Delay%time.Millisecond != 0 {
+				return fmt.Errorf("case %q named source offsets require whole milliseconds", item.Name)
+			}
+			if event.Source != "" && (!labelName.MatchString(event.Source) || len(event.Source) > MaxRoleLength) {
+				return fmt.Errorf("case %q source is invalid", item.Name)
+			}
+			if event.Source != "" && event.Status == "firing" && seenSources[key] && event.Delay <= sourceStarts[key] {
+				return fmt.Errorf("case %q refire must have a later firing episode time", item.Name)
+			}
+			if event.Source != "" && event.Status == "firing" && (latestFiringByRole[key] || (seenSources[key] && len(event.Labels) != 0)) {
+				return fmt.Errorf("case %q named source must resolve before refire and retain its labels", item.Name)
+			}
 			if event.Role == "" || len(event.Role) > MaxRoleLength || (event.Status != "firing" && event.Status != "resolved") || event.Delay < 0 || event.Delay > document.MaxDuration {
 				return fmt.Errorf("case %q event is invalid", item.Name)
 			}
@@ -270,13 +298,15 @@ func validate(document Scenario) error {
 				if len(event.Labels) != 0 {
 					return fmt.Errorf("case %q resolved event must not supply labels", item.Name)
 				}
-				if !latestFiringByRole[event.Role] {
+				if !latestFiringByRole[key] {
 					return fmt.Errorf("case %q resolves role %q without an active preceding firing", item.Name, event.Role)
 				}
-				delete(latestFiringByRole, event.Role)
+				delete(latestFiringByRole, key)
 				continue
 			}
-			latestFiringByRole[event.Role] = true
+			latestFiringByRole[key] = true
+			seenSources[key] = true
+			sourceStarts[key] = event.Delay
 		}
 	}
 	if !codes["P01"] || !codes["N01"] {

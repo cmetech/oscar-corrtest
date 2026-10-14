@@ -110,7 +110,7 @@ func (r *Runner) readSnapshot(ctx context.Context, run domain.Run, item compiler
 				continue
 			}
 			foundEvents[alertName+"\x00"+eventID] = true
-			sourcesByFingerprint[record.Fingerprint] = record
+			retainLatestHistory(sourcesByFingerprint, record)
 		}
 	}
 	snapshot := observationSnapshot{Sources: historyValues(sourcesByFingerprint)}
@@ -160,7 +160,7 @@ func (r *Runner) readSnapshot(ctx context.Context, run domain.Run, item compiler
 		parentsByFingerprint := map[string]oscar.HistoryRecord{}
 		for _, parent := range parents {
 			if parent.AlertName == item.Rule.EmitAlertName && parent.Labels["oscar_test_run_id"] == run.ID && parent.Fingerprint != "" {
-				parentsByFingerprint[parent.Fingerprint] = parent
+				retainLatestHistory(parentsByFingerprint, parent)
 			}
 		}
 		snapshot.Parents = historyValues(parentsByFingerprint)

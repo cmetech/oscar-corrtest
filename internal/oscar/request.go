@@ -8,6 +8,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/compiler"
 )
@@ -46,6 +47,8 @@ type AlertGroupRequest struct {
 
 // AlertRequest is one alert in the public-v1 Alertmanager envelope.
 type AlertRequest struct {
+	StartsAt    string            `json:"startsAt,omitempty"`
+	EndsAt      string            `json:"endsAt,omitempty"`
 	Fingerprint string            `json:"fingerPrint"`
 	Status      string            `json:"status"`
 	Labels      map[string]string `json:"labels"`
@@ -82,12 +85,19 @@ func BuildAlertRequest(alert compiler.AlertPlan) (AlertGroupRequest, error) {
 	if err != nil {
 		return AlertGroupRequest{}, err
 	}
+	startsAt, endsAt := "", ""
+	if !alert.StartsAt.IsZero() {
+		startsAt = alert.StartsAt.UTC().Format(time.RFC3339Nano)
+	}
+	if !alert.EndsAt.IsZero() {
+		endsAt = alert.EndsAt.UTC().Format(time.RFC3339Nano)
+	}
 	annotations := alertTransportAnnotations(alert.Annotations)
 	return AlertGroupRequest{
 		Receiver: "oscar-corrtest", Status: status, GroupKey: labels["oscar_test_run_id"] + ":" + name,
 		GroupLabels: map[string]string{"alertname": name}, CommonLabels: cloneStringMap(labels),
 		CommonAnnotations: cloneStringMap(annotations),
-		Alerts:            []AlertRequest{{Fingerprint: fingerprint, Status: status, Labels: labels, Annotations: annotations}},
+		Alerts:            []AlertRequest{{StartsAt: startsAt, EndsAt: endsAt, Fingerprint: fingerprint, Status: status, Labels: labels, Annotations: annotations}},
 	}, nil
 }
 
@@ -106,13 +116,17 @@ func BuildResolutionRequest(record HistoryRecord) (AlertGroupRequest, error) {
 		annotations = map[string]string{}
 	}
 	annotations["oscar_test_cleanup"] = "resolved by oscar-corrtest after exact history read-back"
+	startsAt := ""
+	if !record.StartsAt.IsZero() {
+		startsAt = record.StartsAt.UTC().Format(time.RFC3339Nano)
+	}
 	hash := sha256.Sum256([]byte("corrtest-resolve\x00" + record.Fingerprint))
 	fingerprint := hex.EncodeToString(hash[:])[:16]
 	return AlertGroupRequest{
 		Receiver: "oscar-corrtest", Status: "resolved", GroupKey: runID + ":cleanup:" + record.AlertName,
 		GroupLabels: map[string]string{"alertname": record.AlertName}, CommonLabels: cloneStringMap(labels),
 		CommonAnnotations: cloneStringMap(annotations),
-		Alerts:            []AlertRequest{{Fingerprint: fingerprint, Status: "resolved", Labels: labels, Annotations: annotations}},
+		Alerts:            []AlertRequest{{StartsAt: startsAt, Fingerprint: fingerprint, Status: "resolved", Labels: labels, Annotations: annotations}},
 	}, nil
 }
 

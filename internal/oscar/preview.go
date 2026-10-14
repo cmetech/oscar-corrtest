@@ -99,8 +99,18 @@ func BuildOperationPreview(plan compiler.Plan, harnessVersion string) ([]Operati
 			if err != nil {
 				return nil, fmt.Errorf("build %s alert attempt %d: %w", item.Code, index+1, err)
 			}
+			var runtimeFields []string
+			if alert.EpisodeOffset != nil {
+				request.Alerts[0].StartsAt = "{case-start+" + alert.EpisodeOffset.String() + "}"
+				runtimeFields = append(runtimeFields, "alerts[0].startsAt: case-start plus episodeOffset")
+				if alert.Status == "resolved" {
+					request.Alerts[0].EndsAt = "{case-start+" + alert.Delay.String() + "}"
+					runtimeFields = append(runtimeFields, "alerts[0].endsAt: case-start plus scheduledDelay")
+				}
+			}
 			if err := appendBody(OperationPreview{
-				Stage: "stimulus.inject_alert", CaseCode: item.Code, Method: http.MethodPost, Path: alertsPath,
+				RuntimeFields: runtimeFields,
+				Stage:         "stimulus.inject_alert", CaseCode: item.Code, Method: http.MethodPost, Path: alertsPath,
 				Summary: "Inject one compiled alert stimulus.", Attempt: index + 1, ScheduledDelay: alert.Delay,
 			}, request); err != nil {
 				return nil, err

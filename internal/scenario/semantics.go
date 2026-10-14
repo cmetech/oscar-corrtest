@@ -65,6 +65,7 @@ func expandSemanticEvents(testCase Case) []semanticEvent {
 	}
 	result := make([]semanticEvent, 0, len(source))
 	active := map[string]semanticEvent{}
+	retained := map[string]semanticEvent{}
 	for index, event := range source {
 		labels := cloneStringMap(testCase.Labels)
 		if labels == nil {
@@ -79,15 +80,24 @@ func expandSemanticEvents(testCase Case) []semanticEvent {
 		observation := semanticEvent{Role: event.Role, Status: event.Status, Labels: labels, At: event.Delay, Ordinal: index}
 		observation.GroupKey = semanticGroupKey(testCase.GroupBy, labels)
 		if event.Status == "resolved" {
-			if firing, found := active[event.Role]; found {
+			if firing, found := active[event.IdentityKey()]; found {
 				observation.Labels = cloneStringMap(firing.Labels)
 				observation.GroupKey = firing.GroupKey
 				observation.Identity = firing.Identity
-				delete(active, event.Role)
+				delete(active, event.IdentityKey())
 			}
 		} else {
 			observation.Identity = fmt.Sprintf("%s#%d", event.Role, index)
-			active[event.Role] = observation
+			if event.Source != "" {
+				observation.Identity = event.IdentityKey()
+				if previous, found := retained[event.IdentityKey()]; found {
+					observation.Labels = cloneStringMap(previous.Labels)
+					observation.GroupKey = previous.GroupKey
+				} else {
+					retained[event.IdentityKey()] = observation
+				}
+			}
+			active[event.IdentityKey()] = observation
 		}
 		result = append(result, observation)
 	}

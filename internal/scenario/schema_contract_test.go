@@ -16,11 +16,11 @@ import (
 func TestPublicContractCoversClosedWireModel(t *testing.T) {
 	want := []string{
 		"scenario.apiVersion", "scenario.kind", "scenario.name", "scenario.suite",
-		"scenario.pattern", "scenario.maxDuration", "scenario.cases",
+		"scenario.pattern", "scenario.inputPath", "scenario.maxDuration", "scenario.cases",
 		"case.name", "case.code", "case.polarity", "case.window", "case.groupBy",
 		"case.labels", "case.role", "case.repeat", "case.events",
 		"case.suppressForNotifiers", "case.tagForNotifiers", "case.assertions",
-		"event.role", "event.status", "event.labels", "event.delay",
+		"event.role", "event.source", "event.status", "event.labels", "event.delay",
 		"assertion.kind", "assertion.outcome", "assertion.equals",
 	}
 	got := map[string]int{}

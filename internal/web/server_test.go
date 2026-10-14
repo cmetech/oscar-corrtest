@@ -392,7 +392,7 @@ func TestDurableTargetsRunsAndSettingsPages(t *testing.T) {
 	}{
 		{"/targets", []string{"Targets", "Lab A", "OSCAR_API_TOKEN"}},
 		{"/runs?status=INTERRUPTED", []string{"Runs", run.ID, "INTERRUPTED"}},
-		{"/runs/" + run.ID, []string{"Run detail", run.ID, "NOT_REQUIRED", "data-run-timeline"}},
+		{"/runs/" + run.ID, []string{"Run detail", run.ID, "NOT_REQUIRED", "data-run-timeline", "Coverage boundary", "bypassing receiver admission and Native Alertmanager"}},
 	}
 	for _, test := range tests {
 		t.Run(test.path, func(t *testing.T) {
