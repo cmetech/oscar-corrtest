@@ -141,3 +141,5 @@ Enhanced admission, parent dispatch/suppression and physical clear stay disabled
 ## Ordinary webhook input
 
 The additional [basic ordinary Flood fixture](../scenarios/reliability/flood-ordinary-webhook.yaml) uses `inputPath: ordinary-webhook`. Read [the setup and cleanup contract](ordinary-webhook-input.md) before a controlled lab run. This route exercises ordinary profile forwarding with a pinned definition; it does not provide selected admission, source ordering or recovery authority. Existing direct fixtures remain unchanged.
+
+For resolved History rows, OSCAR replaces current severity with `cleared` and exposes `original_severity`. Source episode observations can bind that documented transition only when status is `resolved`, current severity is exactly `cleared`, original severity matches the input, and the exact episode/remaining labels are intact. Missing or contradictory original evidence remains inconclusive. This observation-only rule does not relax ordinary receiver probing or native cleanup and is not physical recovery authority.

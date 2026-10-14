@@ -76,7 +76,7 @@ func bindSourceEpisodes(item compiler.CasePlan, rows []oscar.HistoryRecord) ([]s
 				valid = false
 			}
 			for label, value := range alert.Labels {
-				if !row.MatchesInputLabel(label, value) {
+				if !matchesEpisodeInputLabel(row, label, value) {
 					valid = false
 				}
 			}
@@ -90,4 +90,21 @@ func bindSourceEpisodes(item compiler.CasePlan, rows []oscar.HistoryRecord) ([]s
 		evidence = append(evidence, proof)
 	}
 	return evidence, allReady
+}
+
+// History replaces current severity on resolution but retains the original
+// episode severity. This correspondence is only for observing source status;
+// it never relaxes the ordinary probe or native cleanup identity checks.
+func matchesEpisodeInputLabel(row oscar.HistoryRecord, name, expected string) bool {
+	if name == "severity" && row.OriginalSeverity != nil && *row.OriginalSeverity != expected {
+		return false
+	}
+	if row.MatchesInputLabel(name, expected) {
+		return true
+	}
+	if name != "severity" || row.Status != "resolved" || row.Severity == nil || *row.Severity != "cleared" || row.OriginalSeverity == nil || *row.OriginalSeverity != expected {
+		return false
+	}
+	value, present := row.Labels[name]
+	return !present || value == expected
 }

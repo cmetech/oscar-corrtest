@@ -35,15 +35,16 @@ type HistoryQuery struct {
 }
 
 type HistoryRecord struct {
-	Severity    *string           `json:"severity,omitempty"`
-	StartsAt    time.Time         `json:"startsAt"`
-	ID          string            `json:"id"`
-	AlertName   string            `json:"alertName"`
-	Fingerprint string            `json:"fingerprint"`
-	Status      string            `json:"status"`
-	CreatedAt   time.Time         `json:"createdAt"`
-	Labels      map[string]string `json:"labels"`
-	Annotations map[string]string `json:"annotations"`
+	OriginalSeverity *string           `json:"originalSeverity,omitempty"`
+	Severity         *string           `json:"severity,omitempty"`
+	StartsAt         time.Time         `json:"startsAt"`
+	ID               string            `json:"id"`
+	AlertName        string            `json:"alertName"`
+	Fingerprint      string            `json:"fingerprint"`
+	Status           string            `json:"status"`
+	CreatedAt        time.Time         `json:"createdAt"`
+	Labels           map[string]string `json:"labels"`
+	Annotations      map[string]string `json:"annotations"`
 }
 
 // MatchesInputLabel compares observed History identity without reconstructing

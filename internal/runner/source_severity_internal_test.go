@@ -48,3 +48,31 @@ func TestSourceEpisodeRequiresNonconflictingObservedSeverity(t *testing.T) {
 		})
 	}
 }
+
+func TestResolvedSeverityObservationDoesNotRelaxNativeInputIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw string
+		observe   bool
+	}{
+		{"canonical", `{"status":"resolved","severity":"cleared","originalSeverity":"critical"}`, true},
+		{"matching original label", `{"status":"resolved","severity":"cleared","originalSeverity":"critical","labels":{"severity":"critical"}}`, true},
+		{"changed label", `{"status":"resolved","severity":"cleared","originalSeverity":"critical","labels":{"severity":"warning"}}`, false},
+		{"missing original", `{"status":"resolved","severity":"cleared"}`, false},
+		{"wrong original", `{"status":"resolved","severity":"cleared","originalSeverity":"warning"}`, false},
+		{"not resolved", `{"status":"firing","severity":"cleared","originalSeverity":"critical"}`, false},
+		{"arbitrary current", `{"status":"resolved","severity":"warning","originalSeverity":"critical"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var row oscar.HistoryRecord
+			if err := json.Unmarshal([]byte(tc.raw), &row); err != nil {
+				t.Fatal(err)
+			}
+			if got := matchesEpisodeInputLabel(row, "severity", "critical"); got != tc.observe {
+				t.Fatalf("observation=%t", got)
+			}
+			if row.MatchesInputLabel("severity", "critical") {
+				t.Fatal("resolved lifecycle exception weakened firing/native-clear identity")
+			}
+		})
+	}
+}
