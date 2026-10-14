@@ -1,0 +1,55 @@
+# Downstream audit + source History only; no parent recovery or receiver proof.
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: staged-co-occurrence-lifecycle
+suite: reliability
+pattern: co_occurrence
+inputPath: alert-engine
+maxDuration: 90s
+cases:
+- name: both-required-roles
+  code: P01
+  polarity: positive
+  window: 30s
+  groupBy: [site]
+  labels: {site: lab}
+  events:
+  - {role: disk_full, source: disk_A, status: firing}
+  - {role: cpu_high, source: cpu_A, status: firing, delay: 3s}
+  - {role: disk_full, source: disk_A, status: resolved, delay: 6s}
+  - {role: cpu_high, source: cpu_A, status: resolved, delay: 9s}
+  checkpoints:
+  - name: one-role-advances-without-trigger
+    afterEvent: 1
+    window: 2s
+    assertions:
+    - {kind: audit-count, outcome: enriched, equals: 1}
+    - {kind: audit-count, outcome: parent_emitted, equals: 0}
+  - name: both-roles-trigger-audit
+    afterEvent: 2
+    window: 2s
+    assertions:
+    - {kind: audit-count, outcome: enriched, equals: 1}
+    - {kind: audit-count, outcome: parent_emitted, equals: 1}
+  - name: one-source-visible-as-resolved
+    afterEvent: 3
+    window: 2s
+    assertions:
+    - {kind: source-episode-state-count, outcome: resolved, equals: 1}
+    - {kind: source-episode-state-count, outcome: firing, equals: 1}
+  - name: both-sources-visible-as-resolved
+    afterEvent: 4
+    window: 2s
+    assertions: [{kind: source-episode-state-count, outcome: resolved, equals: 2}]
+  assertions: [{kind: source-episode-state-count, outcome: resolved, equals: 2}]
+- name: missing-required-cpu-role
+  code: N01
+  polarity: negative
+  window: 30s
+  groupBy: [site]
+  labels: {site: lab}
+  events:
+  - {role: disk_full, source: disk_A, status: firing}
+  assertions:
+  - {kind: audit-count, outcome: enriched, equals: 1}
+  - {kind: audit-count, outcome: parent_emitted, equals: 0}

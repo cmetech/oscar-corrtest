@@ -81,6 +81,17 @@ This control supports only Flood N01, explicitly named single firing events and 
 
 The report and visible coverage text explicitly exclude receiver admission/health, selector revision or fleet coverage, selected-table isolation and notification delivery. The saved fixture is not a global-rule snapshot: unrelated deployed rules may match and correctly prevent the required no-match witness. No ordinary-path performance or delivery acceptance is inferred from History or audit alone. Existing owned cleanup applies; accepted cleanup is not terminal recovery proof.
 
+## Staged co-occurrence fixture
+
+`scenarios/reliability/co-occurrence-lifecycle-downstream.yaml` reuses the same runner and assertions for two different required roles in one `site` group:
+
+1. Send named `disk_full`; observe one `enriched` audit and zero `parent_emitted` audits for the full checkpoint interval.
+2. Send named `cpu_high`; observe the original enriched row plus one trigger audit. The required clauses are distinct exact alertnames with `min_matches=2`.
+3. Resolve the disk source; observe one current resolved and one current firing History episode.
+4. Resolve the CPU source; observe two current resolved source episodes.
+
+N01 sends only the disk role and checks enriched/no-trigger evidence through its bounded observation. It still matches one required clause and **is not a no-match control**. Counts are cumulative per fixture rule. `parent_emitted` is the recorded trigger decision in audit-only mode, not confirmation that a synthetic parent was created or delivered. Partial or complete source History recovery never proves parent recovery or physical clear; those remain unproved in reports. API delay may require longer lab checkpoints and correspondingly later event offsets.
+
 ## Next shared backend contracts
 
 1. A supported authenticated receiver input adapter that exercises actual selection and recovery-owner lookup. The current private native-array receiver endpoint is ordinary-only and is not this adapter.
