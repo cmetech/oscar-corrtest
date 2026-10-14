@@ -25,6 +25,17 @@ type checkpointAPI struct {
 	auditErrorAfter   int
 }
 
+func (api *checkpointAPI) InjectRecorded(ctx context.Context, alert compiler.AlertPlan, record oscar.InjectionRecorder) (oscar.InjectionResult, error) {
+	evidence, _, err := oscar.PrepareInjection(alert, "test-model", "https://model.invalid/api/v1/alerts")
+	if err != nil {
+		return oscar.InjectionResult{}, err
+	}
+	if err := record(evidence); err != nil {
+		return oscar.InjectionResult{}, err
+	}
+	return api.Inject(ctx, alert)
+}
+
 func (api *checkpointAPI) Inject(ctx context.Context, alert compiler.AlertPlan) (oscar.InjectionResult, error) {
 	api.sent = append(api.sent, alert)
 	api.sentAt = append(api.sentAt, api.Now())

@@ -33,6 +33,7 @@ type Options struct {
 
 type Client struct {
 	baseURL        *url.URL
+	targetID       string
 	http           *http.Client
 	credential     string
 	harnessVersion string
@@ -79,7 +80,7 @@ func New(target domain.Target, options Options) (*Client, error) {
 	if pollInterval <= 0 {
 		pollInterval = time.Second
 	}
-	return &Client{baseURL: baseURL, http: httpClient, credential: credential, harnessVersion: options.HarnessVersion, pollInterval: pollInterval}, nil
+	return &Client{baseURL: baseURL, targetID: target.ID, http: httpClient, credential: credential, harnessVersion: options.HarnessVersion, pollInterval: pollInterval}, nil
 }
 
 func resolveCredential(reference domain.CredentialRef, getenv func(string) string) (string, error) {
@@ -208,6 +209,10 @@ func (c *Client) sendAlert(ctx context.Context, payload AlertGroupRequest) (Inje
 	if err != nil {
 		return InjectionResult{}, err
 	}
+	return classifyInjection(status, raw), nil
+}
+
+func classifyInjection(status int, raw []byte) InjectionResult {
 	result := InjectionResult{StatusCode: status, Body: raw, Class: InjectionIndeterminate}
 	var response struct {
 		Status   string `json:"status"`
@@ -251,7 +256,7 @@ func (c *Client) sendAlert(ctx context.Context, payload AlertGroupRequest) (Inje
 			result.Class = InjectionQueued
 		}
 	}
-	return result, nil
+	return result
 }
 
 func (c *Client) FindHistory(ctx context.Context, query HistoryQuery) ([]HistoryRecord, error) {
@@ -415,12 +420,20 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 	endpoint := *c.baseURL
 	endpoint.Path = strings.TrimRight(c.baseURL.Path, "/") + path
 	endpoint.RawQuery = query.Encode()
-	var body io.Reader
+	var encoded []byte
 	if input != nil {
-		encoded, err := json.Marshal(input)
+		var err error
+		encoded, err = json.Marshal(input)
 		if err != nil {
 			return 0, nil, fmt.Errorf("encode OSCAR request: %w", err)
 		}
+	}
+	return c.doBytes(ctx, method, path, &endpoint, encoded, c.http)
+}
+
+func (c *Client) doBytes(ctx context.Context, method, path string, endpoint *url.URL, encoded []byte, transport *http.Client) (int, []byte, error) {
+	var body io.Reader
+	if encoded != nil {
 		body = bytes.NewReader(encoded)
 	}
 	request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), body)
@@ -429,13 +442,13 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 	}
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("User-Agent", "oscar-corrtest/"+c.harnessVersion)
-	if input != nil {
+	if encoded != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
 	if c.credential != "" {
 		request.Header.Set("X-API-Key", c.credential)
 	}
-	response, err := c.http.Do(request)
+	response, err := transport.Do(request)
 	if err != nil {
 		return 0, nil, &MachineError{Operation: method + " " + path, Code: "transport", Detail: "OSCAR request failed"}
 	}

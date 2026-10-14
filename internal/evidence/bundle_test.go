@@ -6,13 +6,16 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
+	"github.com/cmetech/oscar-corrtest/internal/oscar"
 )
 
 func TestWriteAndVerifyBundle(t *testing.T) {
@@ -95,5 +98,56 @@ func TestVerifyDetectsTamperedBundle(t *testing.T) {
 	}
 	if err := Verify(context.Background(), path); err == nil {
 		t.Fatal("expected invalid bundle error")
+	}
+}
+
+func TestRecordedRequestExportRefusesOversizedTimelineBeforePublication(t *testing.T) {
+	now := time.Now().UTC()
+	run := domain.Run{ID: "crt_01K00000000000000000000000", Status: domain.RunCompleted, Verdict: domain.VerdictPass, CleanupStatus: domain.CleanupClean, CompiledPlanJSON: json.RawMessage(`{}`), CanonicalReportJSON: json.RawMessage(`{}`), UpdatedAt: now}
+	labels := map[string]string{"alertname": "A"}
+	for i := 0; i < 63; i++ {
+		labels[fmt.Sprintf("label_%030d", i)] = strings.Repeat("x", 500)
+	}
+	request, _, err := oscar.PrepareInjection(compiler.AlertPlan{Name: "A", Status: "firing", Labels: labels}, "test", "https://model.invalid/api/v1/alerts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := json.Marshal(map[string]any{"request": request})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := make([]domain.RunEvent, 200)
+	for i := range events {
+		events[i] = domain.RunEvent{RunID: run.ID, Sequence: int64(i + 1), Type: "alert.attempting", OccurredAt: now, DetailJSON: string(detail)}
+	}
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "valid.zip")
+	if _, err := Write(context.Background(), existing, run, nil); err != nil {
+		t.Fatal(err)
+	}
+	original, err := os.ReadFile(existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(dir, "oversized.zip")
+	if _, err := Write(context.Background(), destination, run, events); err == nil || !strings.Contains(err.Error(), "events.json") {
+		t.Fatalf("oversized timeline export error=%v", err)
+	}
+	if _, err := os.Stat(destination); !os.IsNotExist(err) {
+		t.Fatalf("invalid export was published: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "valid.zip" {
+		t.Fatalf("partial export left behind: %v", entries)
+	}
+	current, err := os.ReadFile(existing)
+	if err != nil || string(original) != string(current) {
+		t.Fatal("prior valid export changed")
+	}
+	if err := Verify(context.Background(), existing); err != nil {
+		t.Fatal(err)
 	}
 }

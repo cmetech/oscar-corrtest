@@ -31,6 +31,17 @@ type attemptCheckingAPI struct {
 	check func(compiler.AlertPlan)
 }
 
+func (a *attemptCheckingAPI) InjectRecorded(ctx context.Context, alert compiler.AlertPlan, record oscar.InjectionRecorder) (oscar.InjectionResult, error) {
+	evidence, _, err := oscar.PrepareInjection(alert, "test-model", "https://model.invalid/api/v1/alerts")
+	if err != nil {
+		return oscar.InjectionResult{}, err
+	}
+	if err := record(evidence); err != nil {
+		return oscar.InjectionResult{}, err
+	}
+	return a.Inject(ctx, alert)
+}
+
 func (a *attemptCheckingAPI) Inject(ctx context.Context, alert compiler.AlertPlan) (oscar.InjectionResult, error) {
 	a.check(alert)
 	return a.fakeAPI.Inject(ctx, alert)

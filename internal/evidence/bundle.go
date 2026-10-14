@@ -21,6 +21,7 @@ import (
 )
 
 const bundleAPIVersion = "corrtest.oscar/bundle-v1"
+const maxBundleEntryBytes = 16 << 20
 
 // Result identifies the immutable bundle published by Write.
 type Result struct {
@@ -135,7 +136,7 @@ func WriteWithArtifacts(ctx context.Context, destination string, run domain.Run,
 		"plan.json": planJSON, "report.html": html.Bytes(), "report.json": reportJSON,
 	}
 	for _, item := range attachments {
-		if item.Name == "" || filepath.Base(item.Name) != item.Name || item.Name == "manifest.json" || files[item.Name] != nil || len(item.Content) > 16<<20 {
+		if item.Name == "" || filepath.Base(item.Name) != item.Name || item.Name == "manifest.json" || files[item.Name] != nil || len(item.Content) > maxBundleEntryBytes {
 			return Result{}, fmt.Errorf("unsafe evidence attachment %q", item.Name)
 		}
 		digest := sha256.Sum256(item.Content)
@@ -164,6 +165,14 @@ func WriteWithArtifacts(ctx context.Context, destination string, run domain.Run,
 	}
 	files["manifest.json"] = append(manifestJSON, '\n')
 	names = append(names, "manifest.json")
+
+	// Never publish a bundle that our verifier must reject. Large timelines
+	// remain in the run store; exporting does not discard or truncate evidence.
+	for _, name := range names {
+		if len(files[name]) > maxBundleEntryBytes {
+			return Result{}, fmt.Errorf("evidence entry %q exceeds the 16 MiB export limit; retained run evidence is unchanged", name)
+		}
+	}
 
 	temporary, err := os.CreateTemp(filepath.Dir(destination), ".corrtest-bundle-*")
 	if err != nil {
@@ -222,7 +231,7 @@ func Verify(ctx context.Context, bundlePath string) error {
 	}
 	files := make(map[string]*zip.File, len(reader.File))
 	for _, file := range reader.File {
-		if filepath.Base(file.Name) != file.Name || file.UncompressedSize64 > 16<<20 {
+		if filepath.Base(file.Name) != file.Name || file.UncompressedSize64 > maxBundleEntryBytes {
 			return fmt.Errorf("unsafe evidence entry %q", file.Name)
 		}
 		if _, exists := files[file.Name]; exists {
@@ -294,11 +303,11 @@ func readZipEntry(ctx context.Context, file *zip.File) ([]byte, error) {
 		return nil, err
 	}
 	defer stream.Close()
-	data, err := io.ReadAll(io.LimitReader(&contextReader{ctx: ctx, reader: stream}, 16<<20+1))
+	data, err := io.ReadAll(io.LimitReader(&contextReader{ctx: ctx, reader: stream}, maxBundleEntryBytes+1))
 	if err != nil {
 		return nil, err
 	}
-	if len(data) > 16<<20 {
+	if len(data) > maxBundleEntryBytes {
 		return nil, fmt.Errorf("evidence entry %q exceeds size limit", file.Name)
 	}
 	return data, nil

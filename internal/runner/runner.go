@@ -22,7 +22,7 @@ type API interface {
 	GetRule(context.Context, int) (oscar.Rule, error)
 	FindRules(context.Context, string) ([]oscar.Rule, error)
 	DeleteRule(context.Context, int) error
-	Inject(context.Context, compiler.AlertPlan) (oscar.InjectionResult, error)
+	InjectRecorded(context.Context, compiler.AlertPlan, oscar.InjectionRecorder) (oscar.InjectionResult, error)
 	ResolveHistory(context.Context, oscar.HistoryRecord) (oscar.InjectionResult, error)
 	FindHistory(context.Context, oscar.HistoryQuery) ([]oscar.HistoryRecord, error)
 	CorrelationAudit(context.Context, string) ([]oscar.AuditRecord, error)
@@ -270,12 +270,31 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 			// possible attempt, not acceptance or permission to retry the POST.
 			prepared := domain.AlertAttemptFact{CaseStableKey: item.Code, EventID: alert.Labels["oscar_test_event_id"], EventIndex: alertIndex + 1,
 				SendState: "ATTEMPTED", InjectionClass: string(oscar.InjectionIndeterminate), StartsAt: alert.StartsAt}
-			detail, _ := json.Marshal(prepared)
-			if _, err := r.store.AppendRunEvent(ctx, domain.RunEvent{RunID: run.ID, Type: "alert.attempting", Level: "info", OccurredAt: r.opts.Now().UTC(), Summary: "Input responsibility recorded before OSCAR POST", DetailJSON: string(detail)}); err != nil {
+			recorded := false
+			result, err := r.api.InjectRecorded(ctx, alert, func(request oscar.InjectionRequestEvidence) error {
+				if recorded {
+					return errors.New("input request was already recorded")
+				}
+				detail, err := json.Marshal(struct {
+					domain.AlertAttemptFact
+					Request oscar.InjectionRequestEvidence `json:"request"`
+				}{prepared, request})
+				if err != nil {
+					return err
+				}
+				if _, err := r.store.AppendRunEvent(ctx, domain.RunEvent{RunID: run.ID, Type: "alert.attempting", Level: "info", OccurredAt: r.opts.Now().UTC(), Summary: "Exact request and input responsibility recorded before OSCAR POST", DetailJSON: string(detail)}); err != nil {
+					return err
+				}
+				attempts = append(attempts, prepared)
+				recorded = true
+				return nil
+			})
+			if !recorded {
+				if err == nil {
+					err = errors.New("injection returned without recording its request")
+				}
 				return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
 			}
-			attempts = append(attempts, prepared)
-			result, err := r.api.Inject(ctx, alert)
 			attempt := &attempts[len(attempts)-1]
 			attempt.StatusCode = result.StatusCode
 			if err != nil {

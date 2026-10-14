@@ -99,6 +99,17 @@ func (m *Model) DeleteRule(_ context.Context, id int) error {
 	return nil
 }
 
+func (m *Model) InjectRecorded(ctx context.Context, alert compiler.AlertPlan, record oscar.InjectionRecorder) (oscar.InjectionResult, error) {
+	evidence, _, err := oscar.PrepareInjection(alert, "test-model", "https://model.invalid/api/v1/alerts")
+	if err != nil {
+		return oscar.InjectionResult{}, err
+	}
+	if err := record(evidence); err != nil {
+		return oscar.InjectionResult{}, err
+	}
+	return m.Inject(ctx, alert)
+}
+
 func (m *Model) Inject(_ context.Context, alert compiler.AlertPlan) (oscar.InjectionResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

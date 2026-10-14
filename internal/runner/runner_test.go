@@ -434,6 +434,17 @@ func (f *fakeAPI) DeleteRule(_ context.Context, id int) error {
 	f.deleted = append(f.deleted, id)
 	return nil
 }
+func (f *fakeAPI) InjectRecorded(ctx context.Context, alert compiler.AlertPlan, record oscar.InjectionRecorder) (oscar.InjectionResult, error) {
+	evidence, _, err := oscar.PrepareInjection(alert, "test-model", "https://model.invalid/api/v1/alerts")
+	if err != nil {
+		return oscar.InjectionResult{}, err
+	}
+	if err := record(evidence); err != nil {
+		return oscar.InjectionResult{}, err
+	}
+	return f.Inject(ctx, alert)
+}
+
 func (f *fakeAPI) Inject(_ context.Context, alert compiler.AlertPlan) (oscar.InjectionResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
