@@ -242,7 +242,7 @@ func TestRetryCleanupRequiresReadBackOwnershipBeforeDelete(t *testing.T) {
 	}
 	ownedRunID = run.ID
 	now := time.Now().UTC()
-	for _, state := range []domain.RunStatus{domain.RunPreflight, domain.RunSettingUp, domain.RunInjecting, domain.RunObserving, domain.RunAsserting, domain.RunCleaningUp} {
+	for _, state := range []domain.RunStatus{domain.RunPreflight, domain.RunSettingUp, domain.RunCancelling, domain.RunCleaningUp} {
 		if err := runtime.database.TransitionRun(context.Background(), run.ID, state, now, "test transition"); err != nil {
 			t.Fatal(err)
 		}

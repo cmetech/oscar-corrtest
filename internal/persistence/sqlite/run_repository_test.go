@@ -210,6 +210,18 @@ func TestInterruptedRunSurvivesProcessLoss(t *testing.T) {
 		if err := database.CreateRun(context.Background(), run); err != nil {
 			panic(err)
 		}
+		if os.Getenv("CORRTEST_WITH_ATTEMPT") == "1" {
+			resource := domain.Resource{ID: "res_crash", RunID: run.ID, Kind: "correlation_rule", ExternalName: "owned-crash-rule", OwnershipToken: run.ID, LifecycleState: domain.ResourceProposed}
+			if err := database.CreateResource(context.Background(), resource); err != nil {
+				panic(err)
+			}
+			if err := database.MarkResourceDeleted(context.Background(), resource.ID, time.Now().UTC()); err != nil {
+				panic(err)
+			}
+			if _, err := database.AppendRunEvent(context.Background(), domain.RunEvent{RunID: run.ID, Type: "alert.attempting", Level: "info", OccurredAt: time.Now().UTC(), Summary: "before POST", DetailJSON: `{"eventId":"owned","eventIndex":8,"startsAt":"2026-10-13T12:00:08.123Z"}`}); err != nil {
+				panic(err)
+			}
+		}
 		fmt.Println("READY")
 		select {}
 	}
@@ -265,7 +277,7 @@ func TestInterruptedRunSurvivesProcessLoss(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Status != domain.RunInterrupted || run.CleanupStatus != domain.CleanupNotRequired {
+	if run.Status != domain.RunInterrupted || run.CleanupStatus != domain.CleanupUnknown {
 		t.Fatalf("run=%+v", run)
 	}
 	events, err := database.ListRunEvents(context.Background(), run.ID)

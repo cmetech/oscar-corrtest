@@ -304,7 +304,7 @@ func (d *Database) RecoverInterruptedRuns(ctx context.Context, at time.Time) (in
 	if err != nil {
 		return 0, fmt.Errorf("begin interrupted-run recovery: %w", err)
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT id, status FROM runs
+	rows, err := tx.QueryContext(ctx, `SELECT id, status, canonical_report_json FROM runs
 		WHERE status NOT IN ('INTERRUPTED','COMPLETED') OR (status='COMPLETED' AND verdict IS NULL)
 		ORDER BY id`)
 	if err != nil {
@@ -314,11 +314,12 @@ func (d *Database) RecoverInterruptedRuns(ctx context.Context, at time.Time) (in
 	type activeRun struct {
 		id     string
 		status domain.RunStatus
+		report sql.NullString
 	}
 	var active []activeRun
 	for rows.Next() {
 		var item activeRun
-		if err := rows.Scan(&item.id, &item.status); err != nil {
+		if err := rows.Scan(&item.id, &item.status, &item.report); err != nil {
 			closeErr := rows.Close()
 			_ = tx.Rollback()
 			if closeErr != nil {
@@ -338,8 +339,31 @@ func (d *Database) RecoverInterruptedRuns(ctx context.Context, at time.Time) (in
 			_ = tx.Rollback()
 			return 0, fmt.Errorf("inspect run resources: %w", err)
 		}
+		eventRows, err := tx.QueryContext(ctx, `SELECT type,detail_json FROM run_events WHERE run_id=? ORDER BY sequence`, item.id)
+		if err != nil {
+			_ = tx.Rollback()
+			return 0, fmt.Errorf("inspect interrupted input responsibility: %w", err)
+		}
+		var events []domain.RunEvent
+		for eventRows.Next() {
+			var event domain.RunEvent
+			var detail sql.NullString
+			if err := eventRows.Scan(&event.Type, &detail); err != nil {
+				_ = eventRows.Close()
+				_ = tx.Rollback()
+				return 0, err
+			}
+			event.DetailJSON = detail.String
+			events = append(events, event)
+		}
+		readErr := eventRows.Err()
+		closeErr := eventRows.Close()
+		if readErr != nil || closeErr != nil {
+			_ = tx.Rollback()
+			return 0, errors.Join(readErr, closeErr)
+		}
 		cleanup := domain.CleanupNotRequired
-		if resources > 0 {
+		if resources > 0 || domain.PossibleAlertInputs(domain.Run{Status: item.status, CanonicalReportJSON: rawJSON(item.report)}, events) {
 			cleanup = domain.CleanupUnknown
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE runs SET status='INTERRUPTED', cleanup_status=?, updated_at=? WHERE id=?`, string(cleanup), formatTime(at), item.id); err != nil {

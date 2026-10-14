@@ -266,10 +266,15 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 					return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
 				}
 			}
-			// Retain uncertain work before the external call. This is in-memory evidence,
-			// not a durable before-send ledger or permission to retry the POST.
-			attempts = append(attempts, domain.AlertAttemptFact{CaseStableKey: item.Code, EventID: alert.Labels["oscar_test_event_id"], EventIndex: alertIndex + 1,
-				SendState: "ATTEMPTED", InjectionClass: string(oscar.InjectionIndeterminate), StartsAt: alert.StartsAt})
+			// Commit responsibility before the external call. The event records a
+			// possible attempt, not acceptance or permission to retry the POST.
+			prepared := domain.AlertAttemptFact{CaseStableKey: item.Code, EventID: alert.Labels["oscar_test_event_id"], EventIndex: alertIndex + 1,
+				SendState: "ATTEMPTED", InjectionClass: string(oscar.InjectionIndeterminate), StartsAt: alert.StartsAt}
+			detail, _ := json.Marshal(prepared)
+			if _, err := r.store.AppendRunEvent(ctx, domain.RunEvent{RunID: run.ID, Type: "alert.attempting", Level: "info", OccurredAt: r.opts.Now().UTC(), Summary: "Input responsibility recorded before OSCAR POST", DetailJSON: string(detail)}); err != nil {
+				return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
+			}
+			attempts = append(attempts, prepared)
 			result, err := r.api.Inject(ctx, alert)
 			attempt := &attempts[len(attempts)-1]
 			attempt.StatusCode = result.StatusCode

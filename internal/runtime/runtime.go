@@ -489,7 +489,8 @@ func (r *Runtime) VerifyBundle(ctx context.Context, path string) error {
 	return evidence.Verify(ctx, path)
 }
 
-// RetryCleanup deletes only resources whose exact full-run ownership can be read back.
+// RetryCleanup deletes only rules whose exact full-run ownership can be read back.
+// It cannot discharge unresolved source input responsibility.
 func (r *Runtime) RetryCleanup(ctx context.Context, runID string) (domain.Run, error) {
 	run, err := r.GetRun(ctx, runID)
 	if err != nil {
@@ -510,7 +511,14 @@ func (r *Runtime) RetryCleanup(ctx context.Context, runID string) (domain.Run, e
 	if err != nil {
 		return run, err
 	}
+	events, err := r.database.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		return run, err
+	}
 	var failures []string
+	if domain.PossibleAlertInputs(run, events) {
+		failures = append(failures, "source input responsibility requires explicit reconciliation; rule-only retry cannot prove cleanup")
+	}
 	for _, resource := range resources {
 		if resource.DeletedAt != nil {
 			continue
