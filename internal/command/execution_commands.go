@@ -280,7 +280,7 @@ func (a *App) runPlanOrExecute(ctx context.Context, args []string, execute bool)
 		}
 	} else {
 		fmt.Fprintf(a.stdout, "Run: %s\nVerdict: %s\nCleanup: %s\n", run.ID, run.Verdict, run.CleanupStatus)
-		fmt.Fprintln(a.stdout, "Coverage: OSCAR Alert Engine ingress; receiver admission and Native Alertmanager bypassed. PASS covers declared downstream assertions, not reliability E2E acceptance.")
+		fmt.Fprintln(a.stdout, "Coverage: OSCAR Alert Engine ingress; receiver admission and Native Alertmanager bypassed. PASS covers declared downstream assertions, not reliability E2E acceptance. No-match audits do not prove receiver health, selector revision, selected-row isolation or notification delivery.")
 		a.printCheckpoints(run.CanonicalReportJSON)
 	}
 	return runExitCode(run)

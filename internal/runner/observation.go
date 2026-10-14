@@ -13,6 +13,8 @@ import (
 )
 
 type observationSnapshot struct {
+	NoMatchCount        int                        `json:"noMatchCount"`
+	NoMatchReady        bool                       `json:"noMatchReady"`
 	SourceEpisodes      []sourceEpisodeEvidence    `json:"sourceEpisodes,omitempty"`
 	SourceEpisodesReady bool                       `json:"sourceEpisodesReady"`
 	Sources             []oscar.HistoryRecord      `json:"sources"`
@@ -40,7 +42,7 @@ func (r *Runner) observe(ctx context.Context, run domain.Run, item compiler.Case
 		deadline = r.opts.Now().Add(window)
 	}
 	shadow := pipelineMode != "phase_b_dispatch"
-	fullWindow := checkpoint || requiresFullWindow(item.Assertions)
+	fullWindow := checkpoint || item.Control == "downstream-unmatched" || requiresFullWindow(item.Assertions)
 	var last observationSnapshot
 	var violation *observationSnapshot
 	var episodeGap *observationSnapshot
@@ -173,6 +175,9 @@ func (r *Runner) readSnapshot(ctx context.Context, run domain.Run, item compiler
 	if usesSourceEpisodes(item.Assertions) {
 		snapshot.SourceEpisodes, snapshot.SourceEpisodesReady = bindSourceEpisodes(item, episodeRows)
 		snapshot.SourceEpisodesReady = snapshot.SourceEpisodesReady && snapshot.SourceReady
+	}
+	if item.Control == "downstream-unmatched" {
+		return r.readNoMatchAudits(ctx, snapshot)
 	}
 	if onlySourceEpisodes(item.Assertions) {
 		// Source History assertions do not need or inherit earlier correlation audits.

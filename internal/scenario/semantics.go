@@ -121,6 +121,9 @@ func validateCaseSemantics(contract semanticContract, testCase Case, events []se
 		if err := validateSingleSourceRole(testCase, events); err != nil {
 			return err
 		}
+		if testCase.Control == "downstream-unmatched" {
+			return nil
+		}
 		return validateFloodSemantics(testCase, events)
 	case "co_occurrence":
 		return validateCoOccurrenceSemantics(contract, testCase, events)

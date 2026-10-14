@@ -45,6 +45,7 @@ type HistoryRecord struct {
 }
 
 type AuditRecord struct {
+	RuleIdentityNull    bool              `json:"ruleIdentityNull,omitempty"`
 	ID                  int               `json:"id"`
 	CreatedAt           time.Time         `json:"createdAt"`
 	AlertFingerprint    string            `json:"alertFingerprint"`

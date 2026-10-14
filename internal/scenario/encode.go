@@ -23,7 +23,7 @@ func Encode(document Scenario) ([]byte, error) {
 	}
 	for _, item := range document.Cases {
 		converted := wireCase{
-			Name: item.Name, Code: item.Code, Polarity: item.Polarity,
+			Name: item.Name, Code: item.Code, Polarity: item.Polarity, Control: item.Control,
 			Window:  item.Window.String(),
 			GroupBy: append([]string(nil), item.GroupBy...), Labels: cloneStringMap(item.Labels),
 			SuppressForNotifiers: append([]string(nil), item.SuppressForNotifiers...),

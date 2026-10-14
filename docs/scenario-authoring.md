@@ -105,8 +105,9 @@ machine-readable form of this same contract.
 | `events[].status` | required string | `firing` or `resolved`. |
 | `events[].labels` | optional string map | Firing-only overrides; a resolution cannot change identity labels. Label keys are 1–100 characters and values are at most 500 characters. |
 | `events[].delay` | optional Go duration | Non-negative absolute offset, non-decreasing, and within the budgets. |
-| `assertions[].kind` | required string | `synthetic-alert-count`, `audit-count`, `parent-link-count`, or `source-episode-state-count`. |
-| `assertions[].outcome` | conditional string | Required, nonblank, and at most 100 characters for `audit-count` and `parent-link-count`; forbidden for `synthetic-alert-count`. For `source-episode-state-count`, exactly `firing` or `resolved`. |
+| `control` | optional string | `downstream-unmatched` only for Flood N01; explicit unique named firing events and positive downstream-no-match-count assertions required. Ordinary negative cases stay unchanged. |
+| `assertions[].kind` | required string | `synthetic-alert-count`, `audit-count`, `parent-link-count`, `source-episode-state-count`, or `downstream-no-match-count`. |
+| `assertions[].outcome` | conditional string | Required, nonblank, and at most 100 characters for `audit-count` and `parent-link-count`; forbidden for `synthetic-alert-count`. For `source-episode-state-count`, exactly `firing` or `resolved`. Also forbidden for `downstream-no-match-count`. |
 | `assertions[].equals` | required integer | Exact expected count from 0 through 100. |
 
 CorrTest supplies reserved labels such as `alertname`, `category`, and
@@ -142,6 +143,7 @@ for the complete applicable observation window and checks exact counts:
 
 - `synthetic-alert-count` reads matching synthetic parents from OSCAR history;
   it has no `outcome`.
+- `downstream-no-match-count` requires exact current History plus a positive `released_no_trigger` / `no_matching_rules` audit with explicit null rule identity. It is available only with `control: downstream-unmatched` in Flood N01 and has no `outcome`. It proves a downstream decision, not receiver health, delivery or selected-table isolation.
 - `source-episode-state-count` counts named sources whose latest sent episode has exact `startsAt`, matching input labels and unambiguous History status (`firing` or `resolved`). All events in its case must name their source. Incomplete or conflicting episode evidence is INCONCLUSIVE. It proves downstream History visibility only, never physical clear. See [reliability testing](reliability-e2e.md).
 - `audit-count` reads correlation audit rows with the stated exact `outcome`.
 - `parent-link-count` reads parent-child audit rows with the stated exact

@@ -32,6 +32,12 @@ func evaluateAssertions(assertions []scenario.Assertion, snapshot observationSna
 			continue
 		}
 		switch assertion.Kind {
+		case "downstream-no-match-count":
+			if !snapshot.NoMatchReady {
+				results = append(results, assertionResult{Kind: assertion.Kind, Expected: assertion.Equals, Verdict: domain.VerdictInconclusive, Explanation: "current source History and explicit no_matching_rules audit not proven; receiver health, revision, delivery and isolation are outside this witness"})
+				continue
+			}
+			observed = snapshot.NoMatchCount
 		case "source-episode-state-count":
 			if !snapshot.SourceEpisodesReady {
 				results = append(results, assertionResult{Kind: assertion.Kind, Outcome: assertion.Outcome, Expected: assertion.Equals, Verdict: domain.VerdictInconclusive, Explanation: "current named episode timestamp, labels, identity or unambiguous History status not proven; no physical recovery inference"})

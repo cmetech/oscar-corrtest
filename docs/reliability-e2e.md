@@ -65,12 +65,28 @@ Checkpoints containing only source episode assertions query History without requ
 
 A visible `resolved` source is **not physical-clear authority**. No accepted-intent receipt, producer completeness, correlator application checkpoint, delivery receipt or parent recovery evidence is exposed by this assertion. The report's lifecycle/clear coverage warnings remain unchanged. The sample's short intervals illustrate the contract; live lab timing still needs qualification.
 
+## Downstream no-match control
+
+`scenarios/reliability/flood-downstream-no-match.yaml` keeps the normal positive Flood fixture and opts N01 into `control: downstream-unmatched`. N01 sends **five** uniquely named firing sources using an alertname excluded by every compiled fixture rule. Five controls make this distinct from the ordinary four-source below-threshold negative case. The compiler and runner reject overlapping or unprovable fixture predicates before mutation. This narrow check handles only the fixture's exact Flood alertname clauses, not arbitrary operator rules.
+
+```yaml
+control: downstream-unmatched
+# Explicit unique named firing events are required.
+assertions: [{kind: downstream-no-match-count, equals: 5}]
+```
+
+The count requires current named episode History still in `firing` status and a positive CorrelationAudit witness for each authoritative source fingerprint: `released_no_trigger`, reason `no_matching_rules`, and explicitly null rule ID, name and pattern. Missing keys or zero-valued rule identity do not qualify. Audit timestamps must be present, no earlier than the expected episode and no later than observation time. Duplicate valid audit rows count the source once. A concurrent incompatible current audit makes the result inconclusive. Empty audit, `no_rule_index`, `no_alertname_label`, wrong fingerprint, stale/future/missing timestamps, changed episode evidence or a bound rule cannot substitute for that witness; missing proof is INCONCLUSIVE and API failure is ERROR.
+
+This control supports only Flood N01, explicitly named single firing events and positive `downstream-no-match-count` assertions without an `outcome`. Recovery/refire is rejected because these legacy audits have no firing-episode field. Existing below-threshold scenarios are unchanged. Controls run in the existing sequential case order, not an interleaved 90/10 load stream. The checkpoint uses its full declared window and terminal control observation uses the case's bounded deadline. A witness proves an observed downstream decision, not uninterrupted health throughout that interval.
+
+The report and visible coverage text explicitly exclude receiver admission/health, selector revision or fleet coverage, selected-table isolation and notification delivery. The saved fixture is not a global-rule snapshot: unrelated deployed rules may match and correctly prevent the required no-match witness. No ordinary-path performance or delivery acceptance is inferred from History or audit alone. Existing owned cleanup applies; accepted cleanup is not terminal recovery proof.
+
 ## Next shared backend contracts
 
 1. A supported authenticated receiver input adapter that exercises actual selection and recovery-owner lookup. The current private native-array receiver endpoint is ordinary-only and is not this adapter.
 2. Read-only, versioned evidence tying accepted inputs, firing episodes, bundle revisions, parents/members, delivery receipts and expected producer barriers to the run. No endpoint is invented by CorrTest.
 3. Staged observation: send five children; prove one parent; recover four; prove the fifth still blocks clear; recover the fifth with complete coverage; prove one safe parent clear; refire without stale recovery affecting it.
-4. Interleaved ordinary controls proving normal delivery and no exact-source persistence, plus restart/retry and missing-evidence cases. The current negative below-threshold case still matches a correlation rule and **is not an ordinary no-match control**.
+4. Interleaved ordinary controls proving normal delivery and no exact-source persistence, plus restart/retry and missing-evidence cases. The lifecycle fixture's negative below-threshold case still matches a correlation rule. The separate downstream-unmatched fixture supplies only the narrower witness above; it does not provide delivery or persistence-isolation evidence.
 5. Exact ownership and cleanup for newly required selector rules and receiver resources, in addition to today's temporary correlation rules.
 
 Enhanced admission, parent dispatch/suppression and physical clear stay disabled. No production capacity figure or any of the 39 UAT cases is accepted by local CorrTest tests. Live SNMP remains deferred; absence/collector-health is unsupported and ticket-provider tests are excluded from reliability qualification. Older built-ins remain for compatibility, not as support claims.

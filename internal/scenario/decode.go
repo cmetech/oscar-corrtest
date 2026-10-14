@@ -25,6 +25,7 @@ type wireScenario struct {
 }
 
 type wireCase struct {
+	Control              string            `yaml:"control,omitempty"`
 	Name                 string            `yaml:"name"`
 	Code                 string            `yaml:"code"`
 	Polarity             string            `yaml:"polarity"`
@@ -167,7 +168,7 @@ func Decode(reader io.Reader) (Scenario, error) {
 		if item.Repeat != nil {
 			repeat = *item.Repeat
 		}
-		converted := Case{Name: item.Name, Code: item.Code, Polarity: item.Polarity, Role: role, Repeat: repeat, Window: window, GroupBy: item.GroupBy, Labels: item.Labels,
+		converted := Case{Control: item.Control, Name: item.Name, Code: item.Code, Polarity: item.Polarity, Role: role, Repeat: repeat, Window: window, GroupBy: item.GroupBy, Labels: item.Labels,
 			SuppressForNotifiers: item.SuppressForNotifiers, TagForNotifiers: item.TagForNotifiers}
 		converted.Assertions, parseErr = decodeAssertions(item.Name, item.Assertions)
 		if parseErr != nil {
@@ -257,6 +258,9 @@ func Validate(document Scenario) error {
 		}
 		if err := validateNames(append(append([]string{}, item.SuppressForNotifiers...), item.TagForNotifiers...), MaxNotifierNameLength, "notifier"); err != nil {
 			return fmt.Errorf("case %q: %w", item.Name, err)
+		}
+		if err := validateDownstreamControl(document.Pattern, item); err != nil {
+			return err
 		}
 		if err := validateNamedEpisodeAssertions(item); err != nil {
 			return err
@@ -404,7 +408,7 @@ func containsAlias(node *yaml.Node) bool {
 func decodeAssertions(name string, wire []wireAssertion) ([]Assertion, error) {
 	var result []Assertion
 	for _, assertion := range wire {
-		if assertion.Kind == "synthetic-alert-count" && assertion.Outcome != nil {
+		if (assertion.Kind == "synthetic-alert-count" || assertion.Kind == "downstream-no-match-count") && assertion.Outcome != nil {
 			return nil, fmt.Errorf("case %q synthetic-alert-count assertion must not supply outcome", name)
 		}
 		if (assertion.Kind == "audit-count" || assertion.Kind == "parent-link-count" || assertion.Kind == "source-episode-state-count") && (assertion.Outcome == nil || strings.TrimSpace(*assertion.Outcome) == "") {
@@ -425,7 +429,7 @@ func validateAssertions(name string, assertions []Assertion) error {
 		return fmt.Errorf("case %q must contain bounded assertions", name)
 	}
 	for _, assertion := range assertions {
-		if assertion.Kind != "synthetic-alert-count" && assertion.Kind != "audit-count" && assertion.Kind != "parent-link-count" && assertion.Kind != "source-episode-state-count" {
+		if assertion.Kind != "synthetic-alert-count" && assertion.Kind != "audit-count" && assertion.Kind != "parent-link-count" && assertion.Kind != "source-episode-state-count" && assertion.Kind != "downstream-no-match-count" {
 			return fmt.Errorf("case %q assertion kind is unsupported", name)
 		}
 		if assertion.Equals < 0 || assertion.Equals > MaxExpectedCount || len(assertion.Outcome) > MaxOutcomeLength {
@@ -437,7 +441,7 @@ func validateAssertions(name string, assertions []Assertion) error {
 		if assertion.Kind == "source-episode-state-count" && assertion.Outcome != "firing" && assertion.Outcome != "resolved" {
 			return fmt.Errorf("case %q source episode outcome must be firing or resolved", name)
 		}
-		if assertion.Kind == "synthetic-alert-count" && assertion.Outcome != "" {
+		if (assertion.Kind == "synthetic-alert-count" || assertion.Kind == "downstream-no-match-count") && assertion.Outcome != "" {
 			return fmt.Errorf("case %q synthetic assertion outcome is forbidden", name)
 		}
 	}

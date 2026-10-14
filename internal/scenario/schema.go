@@ -101,7 +101,7 @@ func buildSchema(contract Contract) jsonSchema {
 		Schema:               "https://json-schema.org/draft/2020-12/schema",
 		ID:                   "https://github.com/cmetech/oscar-corrtest/docs/schema/correlation-scenario.schema.json",
 		Title:                "OSCAR Correlation Scenario",
-		Description:          "Draft 2020-12 enforces closed objects, reserved label exclusion, pattern-restricted notifier fields, resolved-event labels, and conditional assertions. Cross-array notifier disjointness, event ordering and prior-firing identity, cross-field duration budgets, unique case names, YAML-only syntax protections, and pattern semantics remain strict decoder checks.",
+		Description:          "Draft 2020-12 enforces closed objects, reserved label exclusion, pattern-restricted notifier fields, resolved-event labels, and conditional assertions. Cross-array notifier disjointness, event ordering and prior-firing identity, cross-field duration budgets, unique case names, YAML-only syntax protections, pattern semantics, and Flood N01 downstream-control identity/exclusion rules remain strict decoder checks.",
 		Type:                 "object",
 		AdditionalProperties: closed(),
 		Required:             []string{"apiVersion", "kind", "name", "suite", "pattern", "maxDuration", "cases"},
@@ -130,6 +130,7 @@ func buildSchema(contract Contract) jsonSchema {
 				Properties: map[string]schemaValue{
 					"name":                 {Type: "string", MinLength: integer(1), MaxLength: integer(MaxCaseNameLength)},
 					"code":                 {Enum: []string{"P01", "N01"}},
+					"control":              {Enum: []string{"downstream-unmatched"}},
 					"polarity":             {Enum: []string{"positive", "negative"}},
 					"role":                 {Type: "string", MinLength: integer(1), MaxLength: integer(MaxRoleLength)},
 					"repeat":               {Type: "integer", Minimum: integer(1), Maximum: integer(MaxEvents)},
@@ -171,13 +172,13 @@ func buildSchema(contract Contract) jsonSchema {
 			"assertion": {
 				Type: "object", AdditionalProperties: false, Required: []string{"kind", "equals"},
 				Properties: map[string]schemaValue{
-					"kind":    {Enum: []string{"synthetic-alert-count", "audit-count", "parent-link-count", "source-episode-state-count"}},
+					"kind":    {Enum: []string{"synthetic-alert-count", "audit-count", "parent-link-count", "source-episode-state-count", "downstream-no-match-count"}},
 					"outcome": {Type: "string", MinLength: integer(1), MaxLength: integer(MaxOutcomeLength), Pattern: "^\\S(?:.*\\S)?$"},
 					"equals":  {Type: "integer", Minimum: integer(0), Maximum: integer(MaxExpectedCount)},
 				},
 				AllOf: []schemaValue{
 					{If: &schemaValue{Properties: map[string]schemaValue{"kind": {Const: "source-episode-state-count"}}, Required: []string{"kind"}}, Then: &schemaValue{Properties: map[string]schemaValue{"outcome": {Enum: []string{"firing", "resolved"}}}}},
-					{If: &schemaValue{Properties: map[string]schemaValue{"kind": {Const: "synthetic-alert-count"}}, Required: []string{"kind"}}, Then: &schemaValue{Not: &schemaValue{Required: []string{"outcome"}}}},
+					{If: &schemaValue{Properties: map[string]schemaValue{"kind": {Enum: []string{"synthetic-alert-count", "downstream-no-match-count"}}}, Required: []string{"kind"}}, Then: &schemaValue{Not: &schemaValue{Required: []string{"outcome"}}}},
 					{If: &schemaValue{Properties: map[string]schemaValue{"kind": {Enum: []string{"audit-count", "parent-link-count", "source-episode-state-count"}}}, Required: []string{"kind"}}, Then: &schemaValue{Required: []string{"outcome"}}},
 				},
 			},

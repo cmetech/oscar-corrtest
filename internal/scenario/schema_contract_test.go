@@ -18,7 +18,7 @@ func TestPublicContractCoversClosedWireModel(t *testing.T) {
 		"scenario.apiVersion", "scenario.kind", "scenario.name", "scenario.suite",
 		"scenario.pattern", "scenario.inputPath", "scenario.maxDuration", "scenario.cases",
 		"case.name", "case.code", "case.polarity", "case.window", "case.groupBy",
-		"case.labels", "case.role", "case.repeat", "case.events", "case.checkpoints",
+		"case.labels", "case.control", "case.role", "case.repeat", "case.events", "case.checkpoints",
 		"checkpoint.name", "checkpoint.afterEvent", "checkpoint.window", "checkpoint.assertions",
 		"case.suppressForNotifiers", "case.tagForNotifiers", "case.assertions",
 		"event.role", "event.source", "event.status", "event.labels", "event.delay",

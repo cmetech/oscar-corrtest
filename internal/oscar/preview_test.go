@@ -428,3 +428,27 @@ func TestSourceOnlyPreviewRequiresHistoryWithoutAuditOrParentQueries(t *testing.
 		t.Fatalf("source History reads=%d", histories)
 	}
 }
+
+func TestDownstreamControlPreviewReadsWitnessWithoutParent(t *testing.T) {
+	plan := compilePreviewPlan(t, "flood")
+	plan.Cases[1].Control = "downstream-unmatched"
+	plan.Cases[1].Assertions = []scenario.Assertion{{Kind: "downstream-no-match-count", Equals: 4}}
+	operations, err := oscar.BuildOperationPreview(plan, "test-version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	audits := 0
+	for _, op := range operations {
+		if op.CaseCode == "N01" {
+			if op.Stage == "evidence.read_correlation_audit" {
+				audits++
+			}
+			if op.Stage == "evidence.read_history" && strings.Contains(op.Path, plan.Cases[1].Rule.EmitAlertName) {
+				t.Fatal("control preview requires synthetic parent")
+			}
+		}
+	}
+	if audits != 4 {
+		t.Fatalf("witness reads=%d", audits)
+	}
+}

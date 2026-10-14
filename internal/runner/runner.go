@@ -172,6 +172,9 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 	if plan.InputPath != "" && plan.InputPath != "alert-engine" {
 		return r.finishWithoutMutation(ctx, run, plan, capabilities, domain.VerdictError, "unsupported input path: "+plan.InputPath)
 	}
+	if err := compiler.ValidateControlExclusion(plan); err != nil {
+		return r.finishWithoutMutation(ctx, run, plan, capabilities, domain.VerdictError, err.Error())
+	}
 	if len(plan.Cases) == 0 {
 		return r.finishWithoutMutation(ctx, run, plan, capabilities, domain.VerdictError, "compiled plan contains no executable cases")
 	}
@@ -605,7 +608,7 @@ func (r *Runner) complete(ctx context.Context, run domain.Run, plan compiler.Pla
 		}
 	}
 	report, err := json.Marshal(canonicalReport{Coverage: map[string]string{
-		"inputPath": "alert-engine", "endpoint": "POST /api/v1/alerts", "receiverAdmission": "NOT_TESTED", "nativeAlertmanager": "BYPASSED", "lifecycleTransitions": "NOT_PROVEN", "producerBarriers": "NOT_TESTED", "physicalClear": "NOT_PROVEN",
+		"inputPath": "alert-engine", "endpoint": "POST /api/v1/alerts", "receiverAdmission": "NOT_TESTED", "nativeAlertmanager": "BYPASSED", "lifecycleTransitions": "NOT_PROVEN", "producerBarriers": "NOT_TESTED", "physicalClear": "NOT_PROVEN", "selectorRevision": "NOT_PROVEN", "selectedRowIsolation": "NOT_PROVEN", "notificationDelivery": "NOT_PROVEN", "noMatchScope": "DOWNSTREAM_ONLY_IF_ASSERTED",
 	}, APIVersion: "corrtest.oscar/v1alpha1", RunID: run.ID, Pattern: plan.Pattern,
 		Checkpoints: checkpoints, PlanDigest: plan.Digest, Verdict: verdict, Cleanup: cleanup, Capabilities: capabilities, Cases: results, Attempts: facts.Attempts, Artifacts: facts.Artifacts, Resolutions: facts.Resolutions, CompletedAt: completed})
 	if err != nil {

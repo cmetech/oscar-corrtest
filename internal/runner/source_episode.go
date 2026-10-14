@@ -20,7 +20,7 @@ type sourceEpisodeEvidence struct {
 
 func usesSourceEpisodes(assertions []scenario.Assertion) bool {
 	for _, assertion := range assertions {
-		if assertion.Kind == "source-episode-state-count" {
+		if assertion.Kind == "source-episode-state-count" || assertion.Kind == "downstream-no-match-count" {
 			return true
 		}
 	}

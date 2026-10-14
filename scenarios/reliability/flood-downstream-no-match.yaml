@@ -1,0 +1,32 @@
+# Downstream witness only; does not prove receiver admission, delivery or isolation.
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: downstream-no-match
+suite: reliability
+pattern: flood
+maxDuration: 90s
+cases:
+- name: trigger
+  code: P01
+  polarity: positive
+  role: interface_down
+  repeat: 5
+  window: 30s
+  assertions: [{kind: audit-count, outcome: parent_emitted, equals: 1}]
+- name: no-match
+  code: N01
+  polarity: negative
+  control: downstream-unmatched
+  window: 30s
+  events:
+  - {role: interface_down, source: A, status: firing}
+  - {role: interface_down, source: B, status: firing}
+  - {role: interface_down, source: C, status: firing}
+  - {role: interface_down, source: D, status: firing}
+  - {role: interface_down, source: E, status: firing}
+  checkpoints:
+  - name: five-unmatched-sources
+    afterEvent: 5
+    window: 2s
+    assertions: [{kind: downstream-no-match-count, equals: 5}]
+  assertions: [{kind: downstream-no-match-count, equals: 5}]

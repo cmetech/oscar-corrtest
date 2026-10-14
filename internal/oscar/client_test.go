@@ -435,3 +435,20 @@ func loadPublicV1Fixture(t *testing.T, name string) string {
 	}
 	return string(content)
 }
+
+func TestNoMatchAuditRequiresExplicitNullRuleIdentity(t *testing.T) {
+	for _, identity := range []string{`"rule_id":null,"rule_name":null,"pattern":null`, `"rule_id":0,"rule_name":"","pattern":""`, `"rule_id":null,"rule_name":null`, `"rule_name":null,"pattern":null`} {
+		t.Run(identity, func(t *testing.T) {
+			server := testoscar.New(t)
+			server.Enqueue(testoscar.Response{Status: 200, Body: `{"rows":[{"id":1,"alert_fingerprint":"fp","outcome":"released_no_trigger","reason":"no_matching_rules",` + identity + `}],"total":1,"perPage":25}`})
+			rows, err := newClient(t, server.URL()).CorrelationAudit(context.Background(), "fp")
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := identity == `"rule_id":null,"rule_name":null,"pattern":null`
+			if len(rows) != 1 || rows[0].RuleIdentityNull != want {
+				t.Fatalf("identity=%s rows=%+v", identity, rows)
+			}
+		})
+	}
+}

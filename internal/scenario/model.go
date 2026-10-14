@@ -17,6 +17,7 @@ type Scenario struct {
 
 // Case declares stimuli and a typed expected outcome.
 type Case struct {
+	Control              string            `json:"control,omitempty" yaml:"control,omitempty"`
 	Name                 string            `json:"name" yaml:"name"`
 	Code                 string            `json:"code" yaml:"code"`
 	Polarity             string            `json:"polarity" yaml:"polarity"`

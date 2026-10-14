@@ -37,6 +37,7 @@ type Plan struct {
 	Digest         string         `json:"digest"`
 }
 type CasePlan struct {
+	Control           string                `json:"control,omitempty"`
 	EpisodeBase       time.Time             `json:"-"`
 	Name              string                `json:"name"`
 	Code              string                `json:"code"`
@@ -146,7 +147,7 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 		if input.Pattern == "absence" {
 			observationWindow = 55 * time.Second
 		}
-		item := CasePlan{Name: source.Name, Code: caseCode, Polarity: source.Polarity, Checkpoints: source.Checkpoints, Assertions: source.Assertions, ObservationWindow: observationWindow}
+		item := CasePlan{Control: source.Control, Name: source.Name, Code: caseCode, Polarity: source.Polarity, Checkpoints: source.Checkpoints, Assertions: source.Assertions, ObservationWindow: observationWindow}
 		item.Rule = RulePlan{Name: ruleName, Pattern: input.Pattern, WindowSeconds: int(source.Window / time.Second), GroupBy: source.GroupBy, MatchCriteria: matchCriteria(input.Pattern, names, source), EmitAlertName: syntheticName, EmitLabels: identityLabels(run, input, source, ruleName, "synthetic", "synthetic_parent"), Description: fmt.Sprintf("Temporary OSCAR correlation test rule; run=%s scenario=%s case=%s", run.ID, input.Name, source.Name)}
 		activeByRole := map[string]map[string]string{}
 		retainedSources := map[string]map[string]string{}
@@ -183,6 +184,9 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 				labels["oscar_test_event_index"] = strconv.Itoa(eventSequence)
 			}
 			name := names[event.Role]
+			if source.Control == "downstream-unmatched" {
+				name = physicalName(patternCode, caseCode, "unmatched_control", short)
+			}
 			labels["alertname"] = name
 			if !strings.EqualFold(event.Status, "resolved") {
 				activeByRole[key] = cloneLabels(labels)
@@ -202,6 +206,9 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 			}
 		}
 		alertNames := uniqueNames(names)
+		if source.Control == "downstream-unmatched" {
+			alertNames = append(alertNames, item.Alerts[0].Name)
+		}
 		if syntheticName != "" {
 			alertNames = append(alertNames, syntheticName)
 		}
@@ -209,6 +216,9 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 		plan.Cases = append(plan.Cases, item)
 		plan.MutationBudget.Rules++
 		plan.MutationBudget.Alerts += len(events)
+	}
+	if err := ValidateControlExclusion(plan); err != nil {
+		return Plan{}, err
 	}
 	canonical, err := json.Marshal(plan)
 	if err != nil {

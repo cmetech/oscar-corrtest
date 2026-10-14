@@ -526,6 +526,7 @@ type historyListResponse struct {
 }
 
 type auditWire struct {
+	RuleIdentityNull    bool              `json:"-"`
 	ID                  int               `json:"id"`
 	CreatedAt           flexTime          `json:"created_at"`
 	AlertFingerprint    string            `json:"alert_fingerprint"`
@@ -539,8 +540,29 @@ type auditWire struct {
 	Reason              string            `json:"reason"`
 }
 
+// Missing keys and zero-valued identities are not equivalent to explicit nulls.
+func (r *auditWire) UnmarshalJSON(raw []byte) error {
+	type plain auditWire
+	var decoded plain
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return err
+	}
+	var identity map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &identity); err != nil {
+		return err
+	}
+	decoded.RuleIdentityNull = true
+	for _, key := range []string{"rule_id", "rule_name", "pattern"} {
+		if string(bytes.TrimSpace(identity[key])) != "null" {
+			decoded.RuleIdentityNull = false
+		}
+	}
+	*r = auditWire(decoded)
+	return nil
+}
+
 func (r auditWire) normalized() AuditRecord {
-	return AuditRecord{ID: r.ID, CreatedAt: r.CreatedAt.Time, AlertFingerprint: r.AlertFingerprint, RuleID: r.RuleID, RuleName: r.RuleName,
+	return AuditRecord{RuleIdentityNull: r.RuleIdentityNull, ID: r.ID, CreatedAt: r.CreatedAt.Time, AlertFingerprint: r.AlertFingerprint, RuleID: r.RuleID, RuleName: r.RuleName,
 		Pattern: r.Pattern, Outcome: r.Outcome, SuppressedNotifiers: r.SuppressedNotifiers, ParentFingerprint: r.ParentFingerprint, AddedLabels: r.AddedLabels, Reason: r.Reason}
 }
 

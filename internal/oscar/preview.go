@@ -314,7 +314,7 @@ func observationPreview(item compiler.CasePlan) []OperationPreview {
 			operations = append(operations, notificationPreview(item.Code, alert.Name, alert.Labels["oscar_test_event_id"]))
 		}
 	}
-	if !sourceOnly && item.Rule.EmitAlertName != "" && !seenNames[item.Rule.EmitAlertName] {
+	if !sourceOnly && item.Control != "downstream-unmatched" && item.Rule.EmitAlertName != "" && !seenNames[item.Rule.EmitAlertName] {
 		operations = append(operations, historyPreview(item.Code, item.Rule.EmitAlertName, "Read synthetic-alert history for this case."))
 	}
 	return operations

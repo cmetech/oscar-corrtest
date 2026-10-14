@@ -45,6 +45,8 @@ func (api *episodeHistoryAPI) FindHistory(ctx context.Context, q oscar.HistoryQu
 	var out []oscar.HistoryRecord
 	for _, row := range result {
 		switch api.mode {
+		case "all resolved":
+			row.Status = "resolved"
 		case "missing empty label":
 			row.Labels = cloneTestLabels(row.Labels)
 			delete(row.Labels, "empty_identity")
@@ -81,6 +83,8 @@ func (api *episodeHistoryAPI) FindHistory(ctx context.Context, q oscar.HistoryQu
 		if api.mode == "old competing" || api.mode == "missing competing" || api.mode == "future competing" || api.mode == "duplicate current" {
 			other := row
 			switch api.mode {
+			case "all resolved":
+				row.Status = "resolved"
 			case "missing empty label":
 				row.Labels = cloneTestLabels(row.Labels)
 				delete(row.Labels, "empty_identity")
