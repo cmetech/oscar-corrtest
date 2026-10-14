@@ -180,7 +180,7 @@ func (c *Client) ResolveHistoryRecorded(ctx context.Context, row HistoryRecord, 
 		return InjectionResult{}, fmt.Errorf("ordinary native cleanup lacks certain original episode; reconciliation required")
 	}
 	for key, value := range source.alert.Labels {
-		if actual, ok := row.Labels[key]; !ok || actual != value {
+		if !row.MatchesInputLabel(key, value) {
 			return InjectionResult{}, fmt.Errorf("ordinary cleanup identity differs from retained input")
 		}
 	}
@@ -257,9 +257,10 @@ func (c *Client) ProbeLabelSurvivalRecorded(ctx context.Context, runID, shortTok
 			row := rows[0]
 			probe.HistoryFound = true
 			probe.Labels = row.Labels
+			probe.Severity = row.Severity
 			probe.Fingerprint = row.Fingerprint
 			for key, value := range alert.Labels {
-				if actual, ok := row.Labels[key]; !ok || actual != value {
+				if !row.MatchesInputLabel(key, value) {
 					probe.MissingLabels = append(probe.MissingLabels, key)
 				}
 			}

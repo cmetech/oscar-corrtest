@@ -35,6 +35,7 @@ type HistoryQuery struct {
 }
 
 type HistoryRecord struct {
+	Severity    *string           `json:"severity,omitempty"`
 	StartsAt    time.Time         `json:"startsAt"`
 	ID          string            `json:"id"`
 	AlertName   string            `json:"alertName"`
@@ -43,6 +44,23 @@ type HistoryRecord struct {
 	CreatedAt   time.Time         `json:"createdAt"`
 	Labels      map[string]string `json:"labels"`
 	Annotations map[string]string `json:"annotations"`
+}
+
+// MatchesInputLabel compares observed History identity without reconstructing
+// native labels. History promotes severity to a mutable top-level field; either
+// representation may supply it, but all present representations must agree.
+func (r HistoryRecord) MatchesInputLabel(name, expected string) bool {
+	actual, present := r.Labels[name]
+	if present && actual != expected {
+		return false
+	}
+	if name != "severity" {
+		return present
+	}
+	if r.Severity != nil && *r.Severity != expected {
+		return false
+	}
+	return present || r.Severity != nil
 }
 
 type AuditRecord struct {
@@ -71,6 +89,7 @@ type NotificationRecord struct {
 
 // LabelProbeResult records transport acceptance and authoritative history read-back.
 type LabelProbeResult struct {
+	Severity         *string           `json:"severity,omitempty"`
 	InputPath        string            `json:"inputPath,omitempty"`
 	Endpoint         string            `json:"endpoint,omitempty"`
 	CleanupForwarded bool              `json:"cleanupForwarded,omitempty"`

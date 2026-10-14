@@ -76,7 +76,7 @@ func bindSourceEpisodes(item compiler.CasePlan, rows []oscar.HistoryRecord) ([]s
 				valid = false
 			}
 			for label, value := range alert.Labels {
-				if actual, present := row.Labels[label]; !present || actual != value {
+				if !row.MatchesInputLabel(label, value) {
 					valid = false
 				}
 			}
