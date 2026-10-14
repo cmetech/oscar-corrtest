@@ -143,7 +143,8 @@
           "enum": [
             "synthetic-alert-count",
             "audit-count",
-            "parent-link-count"
+            "parent-link-count",
+            "source-episode-state-count"
           ]
         },
         "outcome": {
@@ -154,6 +155,28 @@
         }
       },
       "allOf": [
+        {
+          "if": {
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "source-episode-state-count"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "firing",
+                  "resolved"
+                ]
+              }
+            }
+          }
+        },
         {
           "if": {
             "required": [
@@ -182,7 +205,8 @@
               "kind": {
                 "enum": [
                   "audit-count",
-                  "parent-link-count"
+                  "parent-link-count",
+                  "source-episode-state-count"
                 ]
               }
             }

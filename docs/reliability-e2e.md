@@ -25,7 +25,7 @@ The implemented adapter sends **POST /api/v1/alerts to OSCAR Alert Engine**. It 
 
 Saved reports include these boundaries, and CLI run summaries and the run-detail page display them. The operator's `pipeline_mode` flag remains a declaration, not proof of deployed capabilities. Shadow mode may PASS its audit assertions while synthetic assertions are SKIPPED; this remains **downstream audit evidence only**.
 
-Scenarios without checkpoints retain terminal observation after all stimuli. The Flood fixture now also checks audit counts after four and five inputs, before sending later recovery/refire stimuli. These count assertions do **not** prove that a particular recovery/refire episode was applied, that a parent stayed open between polls, or that clear was safe. A prepared stimulus is an attempted input, not an accepted-intent receipt. History visibility is not notification-delivery confirmation. Missing source/audit evidence remains INCONCLUSIVE, and unsupported assertions are rejected.
+Scenarios without checkpoints retain terminal observation after all stimuli. The Flood fixture now checks audit counts after four and five inputs, then checks current source History counts after partial recovery and refire. Audit counts alone do **not** identify a recovery/refire episode. The new History checks establish downstream visibility for the exact sent episode, not that correlation applied the transition, that a parent stayed open between polls, or that clear was safe. A prepared stimulus is an attempted input, not an accepted-intent receipt. History visibility is not notification-delivery confirmation. Missing source/audit evidence remains INCONCLUSIVE, and unsupported assertions are rejected.
 
 ## Staged checkpoints
 
@@ -45,6 +45,25 @@ The runner pauses after the fourth accepted HTTP input, reads History/audit for 
 Checkpoint names must be unique within a case; event indices must increase. Windows are positive, at most two minutes, within the case/scenario observation budget, and must fit before the next declared event delay. Delays remain absolute from case start: checkpoint waiting does not add another full delay. Slow API calls can make later inputs late; they do not authorize extra run time or change the declared event timestamp. The existing overall run deadline still applies.
 
 On FAIL, INCONCLUSIVE, cancellation or read error, later stimuli stop and owned cleanup runs. The canonical report retains checkpoint snapshots, assertions and intervals, including earlier checkpoints when a later operation fails. The timeline records start/completion; CLI run summaries and `runs show` print checkpoint verdicts. Preview shows the pause and the existing History/audit reads. A missing cleanup identity remains DIRTY. Accepted cleanup requests remain distinct from proven terminal recovery.
+
+## Current source episode History checks
+
+```yaml
+- name: two-sources-visible-as-resolved
+  afterEvent: 7
+  window: 1s
+  assertions:
+    - {kind: source-episode-state-count, outcome: resolved, equals: 2}
+    - {kind: source-episode-state-count, outcome: firing, equals: 3}
+```
+
+This assertion requires every event in the case to name its source. It counts each source once, binding its latest sent firing episode to the exact millisecond `startsAt`, original input labels (including presence of empty-valued keys) and authoritative History fingerprint. Only `firing` and `resolved` are supported outcomes. It does not count old episodes as current recoveries. The result is a count across named sources, not an assertion of which individual source is resolved.
+
+Missing timestamps, a stale-only or future row, changed required labels, unknown statuses, competing fingerprints or conflicting statuses for the same current episode make the result INCONCLUSIVE. Old rows may coexist with an unambiguous matching current row; identical current duplicates count once. Every candidate row and expected timestamp are retained in `sourceEpisodes` in the canonical checkpoint/case evidence. A zero-count check with missing episode evidence at any poll stays INCONCLUSIVE, even if evidence arrives by its final read. For this assertion, an observed zero-count violation stays failed in terminal observations as well as checkpoints. Positive counts may become satisfied by the deadline. API lag can therefore cause a conservative inconclusive or failed checkpoint; it does not justify relaxing episode identity.
+
+Checkpoints containing only source episode assertions query History without requiring correlation audits, notification records or synthetic parents. Mixed checkpoints retain the audit eligibility required by existing assertions. Old audit rows cannot substitute for current episode History. Existing cumulative audit assertions remain cumulative and do not become episode-scoped by being combined with this new assertion.
+
+A visible `resolved` source is **not physical-clear authority**. No accepted-intent receipt, producer completeness, correlator application checkpoint, delivery receipt or parent recovery evidence is exposed by this assertion. The report's lifecycle/clear coverage warnings remain unchanged. The sample's short intervals illustrate the contract; live lab timing still needs qualification.
 
 ## Next shared backend contracts
 

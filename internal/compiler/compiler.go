@@ -37,6 +37,7 @@ type Plan struct {
 	Digest         string         `json:"digest"`
 }
 type CasePlan struct {
+	EpisodeBase       time.Time             `json:"-"`
 	Name              string                `json:"name"`
 	Code              string                `json:"code"`
 	Polarity          string                `json:"polarity"`

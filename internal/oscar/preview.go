@@ -288,12 +288,21 @@ func formattedTime(value time.Time) string { return value.UTC().Format(time.RFC3
 func observationPreview(item compiler.CasePlan) []OperationPreview {
 	var operations []OperationPreview
 
+	sourceOnly := len(item.Assertions) > 0
+	for _, assertion := range item.Assertions {
+		if assertion.Kind != "source-episode-state-count" {
+			sourceOnly = false
+		}
+	}
 	seenNames := map[string]bool{}
 	seenIdentities := map[string]bool{}
 	for _, alert := range item.Alerts {
 		if !seenNames[alert.Name] {
 			operations = append(operations, historyPreview(item.Code, alert.Name, "Read source-alert history for this case."))
 			seenNames[alert.Name] = true
+		}
+		if sourceOnly {
+			continue
 		}
 		identity := alert.Name + "\x00" + alert.Labels["oscar_test_event_id"]
 		if seenIdentities[identity] {
@@ -305,7 +314,7 @@ func observationPreview(item compiler.CasePlan) []OperationPreview {
 			operations = append(operations, notificationPreview(item.Code, alert.Name, alert.Labels["oscar_test_event_id"]))
 		}
 	}
-	if item.Rule.EmitAlertName != "" && !seenNames[item.Rule.EmitAlertName] {
+	if !sourceOnly && item.Rule.EmitAlertName != "" && !seenNames[item.Rule.EmitAlertName] {
 		operations = append(operations, historyPreview(item.Code, item.Rule.EmitAlertName, "Read synthetic-alert history for this case."))
 	}
 	return operations

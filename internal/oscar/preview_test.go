@@ -400,3 +400,31 @@ func sortedQueryKeys(values url.Values) []string {
 	}
 	return keys
 }
+
+func TestSourceOnlyPreviewRequiresHistoryWithoutAuditOrParentQueries(t *testing.T) {
+	plan := compilePreviewPlan(t, "flood")
+	for i := range plan.Cases {
+		plan.Cases[i].Assertions = []scenario.Assertion{{Kind: "source-episode-state-count", Outcome: "firing", Equals: 5}}
+	}
+	operations, err := oscar.BuildOperationPreview(plan, "test-version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	histories := 0
+	for _, op := range operations {
+		if op.Stage == "evidence.read_correlation_audit" || op.Stage == "evidence.read_notification_audit" {
+			t.Fatalf("unneeded audit: %+v", op)
+		}
+		if op.Stage == "evidence.read_history" {
+			histories++
+			for _, item := range plan.Cases {
+				if strings.Contains(op.Path, item.Rule.EmitAlertName) {
+					t.Fatal("source-only preview requires parent evidence")
+				}
+			}
+		}
+	}
+	if histories != 2 {
+		t.Fatalf("source History reads=%d", histories)
+	}
+}

@@ -32,6 +32,24 @@ cases:
     afterEvent: 5
     window: 1s
     assertions: [{kind: audit-count, outcome: parent_emitted, equals: 1}]
+  - name: two-sources-visible-as-resolved
+    afterEvent: 7
+    window: 1s
+    assertions:
+    - {kind: source-episode-state-count, outcome: resolved, equals: 2}
+    - {kind: source-episode-state-count, outcome: firing, equals: 3}
+  - name: refire-visible-in-new-episode
+    afterEvent: 8
+    window: 1s
+    assertions:
+    - {kind: source-episode-state-count, outcome: firing, equals: 4}
+    - {kind: source-episode-state-count, outcome: resolved, equals: 1}
+  - name: refired-source-visible-as-resolved
+    afterEvent: 9
+    window: 1s
+    assertions:
+    - {kind: source-episode-state-count, outcome: resolved, equals: 2}
+    - {kind: source-episode-state-count, outcome: firing, equals: 3}
   assertions: [{kind: audit-count, outcome: parent_emitted, equals: 1}]
 - name: four-distinct
   code: N01

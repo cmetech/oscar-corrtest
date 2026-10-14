@@ -13,12 +13,14 @@ import (
 )
 
 type observationSnapshot struct {
-	Sources       []oscar.HistoryRecord      `json:"sources"`
-	Parents       []oscar.HistoryRecord      `json:"parents"`
-	Audits        []oscar.AuditRecord        `json:"audits"`
-	Notifications []oscar.NotificationRecord `json:"notifications,omitempty"`
-	SourceReady   bool                       `json:"sourceReady"`
-	AuditReady    bool                       `json:"auditReady"`
+	SourceEpisodes      []sourceEpisodeEvidence    `json:"sourceEpisodes,omitempty"`
+	SourceEpisodesReady bool                       `json:"sourceEpisodesReady"`
+	Sources             []oscar.HistoryRecord      `json:"sources"`
+	Parents             []oscar.HistoryRecord      `json:"parents"`
+	Audits              []oscar.AuditRecord        `json:"audits"`
+	Notifications       []oscar.NotificationRecord `json:"notifications,omitempty"`
+	SourceReady         bool                       `json:"sourceReady"`
+	AuditReady          bool                       `json:"auditReady"`
 }
 
 func (r *Runner) observeCase(ctx context.Context, run domain.Run, item compiler.CasePlan, started, injectedAt time.Time, pipelineMode string) (caseResult, error) {
@@ -41,6 +43,7 @@ func (r *Runner) observe(ctx context.Context, run domain.Run, item compiler.Case
 	fullWindow := checkpoint || requiresFullWindow(item.Assertions)
 	var last observationSnapshot
 	var violation *observationSnapshot
+	var episodeGap *observationSnapshot
 	for {
 		snapshot, err := r.readSnapshot(ctx, run, item, started, deadline)
 		if err != nil {
@@ -51,9 +54,18 @@ func (r *Runner) observe(ctx context.Context, run domain.Run, item compiler.Case
 		if err != nil {
 			return caseResult{Name: item.Name, Code: item.Code}, err
 		}
-		if checkpoint && violation == nil {
+		if fullWindow && episodeGap == nil {
 			for _, assertion := range assertions {
-				if assertion.Expected == 0 && assertion.Verdict == domain.VerdictFail {
+				if assertion.Kind == "source-episode-state-count" && assertion.Expected == 0 && assertion.Verdict == domain.VerdictInconclusive {
+					copy := snapshot
+					episodeGap = &copy
+					break
+				}
+			}
+		}
+		if fullWindow && violation == nil {
+			for _, assertion := range assertions {
+				if (checkpoint || assertion.Kind == "source-episode-state-count") && assertion.Expected == 0 && assertion.Verdict == domain.VerdictFail {
 					copy := snapshot
 					violation = &copy
 					break
@@ -99,10 +111,19 @@ func (r *Runner) observe(ctx context.Context, run domain.Run, item compiler.Case
 	}
 	if violation != nil {
 		assertions, _ := evaluateAssertions(item.Assertions, *violation, shadow)
-		return buildCaseResult(item, *violation, assertions, domain.VerdictFail, "a zero-count assertion was violated during the checkpoint interval", injectedAt, r.opts.Now().UTC()), nil
+		return buildCaseResult(item, *violation, assertions, domain.VerdictFail, "a zero-count assertion was violated during its observation interval", injectedAt, r.opts.Now().UTC()), nil
+	}
+	if episodeGap != nil {
+		assertions, _ := evaluateAssertions(item.Assertions, *episodeGap, shadow)
+		return buildCaseResult(item, *episodeGap, assertions, domain.VerdictInconclusive, "a source episode zero-count check lacked complete evidence during its observation interval", injectedAt, r.opts.Now().UTC()), nil
 	}
 	if !last.SourceReady || !last.AuditReady {
 		return buildCaseResult(item, last, assertions, domain.VerdictInconclusive, "source history or correlation-audit eligibility was not proven by the deadline", injectedAt, r.opts.Now().UTC()), nil
+	}
+	for _, assertion := range assertions {
+		if assertion.Verdict == domain.VerdictInconclusive {
+			return buildCaseResult(item, last, assertions, domain.VerdictInconclusive, "current source episode History evidence was not proven by the deadline", injectedAt, r.opts.Now().UTC()), nil
+		}
 	}
 	if checkpoint {
 		for _, assertion := range assertions {
@@ -121,6 +142,7 @@ func (r *Runner) readSnapshot(ctx context.Context, run domain.Run, item compiler
 	expected := expectedSourceEvents(item)
 	sourcesByFingerprint := map[string]oscar.HistoryRecord{}
 	foundEvents := map[string]bool{}
+	var episodeRows []oscar.HistoryRecord
 	for alertName := range expected {
 		records, err := r.api.FindHistory(ctx, oscar.HistoryQuery{AlertName: alertName, Start: started.Add(-time.Second), End: deadline.Add(time.Minute)})
 		if err != nil {
@@ -134,6 +156,9 @@ func (r *Runner) readSnapshot(ctx context.Context, run domain.Run, item compiler
 			if !expected[alertName][eventID] {
 				continue
 			}
+			if usesSourceEpisodes(item.Assertions) {
+				episodeRows = append(episodeRows, record)
+			}
 			foundEvents[alertName+"\x00"+eventID] = true
 			retainLatestHistory(sourcesByFingerprint, record)
 		}
@@ -144,6 +169,16 @@ func (r *Runner) readSnapshot(ctx context.Context, run domain.Run, item compiler
 		expectedCount += len(eventIDs)
 	}
 	snapshot.SourceReady = len(foundEvents) == expectedCount && len(sourcesByFingerprint) == expectedCount
+
+	if usesSourceEpisodes(item.Assertions) {
+		snapshot.SourceEpisodes, snapshot.SourceEpisodesReady = bindSourceEpisodes(item, episodeRows)
+		snapshot.SourceEpisodesReady = snapshot.SourceEpisodesReady && snapshot.SourceReady
+	}
+	if onlySourceEpisodes(item.Assertions) {
+		// Source History assertions do not need or inherit earlier correlation audits.
+		snapshot.AuditReady = snapshot.SourceReady
+		return snapshot, nil
+	}
 
 	auditByID := map[int]oscar.AuditRecord{}
 	auditedFingerprints := map[string]bool{}
@@ -247,7 +282,7 @@ func auditValues(input map[int]oscar.AuditRecord) []oscar.AuditRecord {
 }
 
 func buildCaseResult(item compiler.CasePlan, snapshot observationSnapshot, assertions []assertionResult, verdict domain.Verdict, explanation string, startedAt, endedAt time.Time) caseResult {
-	result := caseResult{Name: item.Name, Code: item.Code, Verdict: string(verdict), SyntheticCount: len(snapshot.Parents), ObservationComplete: true, Explanation: explanation, Assertions: assertions, SourceHistory: snapshot.Sources, SyntheticHistory: snapshot.Parents, Audits: snapshot.Audits, Notifications: snapshot.Notifications, StartedAt: startedAt, EndedAt: endedAt}
+	result := caseResult{Name: item.Name, Code: item.Code, Verdict: string(verdict), SyntheticCount: len(snapshot.Parents), ObservationComplete: true, Explanation: explanation, Assertions: assertions, SourceHistory: snapshot.Sources, SourceEpisodes: snapshot.SourceEpisodes, SyntheticHistory: snapshot.Parents, Audits: snapshot.Audits, Notifications: snapshot.Notifications, StartedAt: startedAt, EndedAt: endedAt}
 	for _, source := range snapshot.Sources {
 		result.SourceFingerprints = append(result.SourceFingerprints, source.Fingerprint)
 	}

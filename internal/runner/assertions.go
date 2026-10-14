@@ -32,6 +32,16 @@ func evaluateAssertions(assertions []scenario.Assertion, snapshot observationSna
 			continue
 		}
 		switch assertion.Kind {
+		case "source-episode-state-count":
+			if !snapshot.SourceEpisodesReady {
+				results = append(results, assertionResult{Kind: assertion.Kind, Outcome: assertion.Outcome, Expected: assertion.Equals, Verdict: domain.VerdictInconclusive, Explanation: "current named episode timestamp, labels, identity or unambiguous History status not proven; no physical recovery inference"})
+				continue
+			}
+			for _, source := range snapshot.SourceEpisodes {
+				if source.Status == assertion.Outcome {
+					observed++
+				}
+			}
 		case "synthetic-alert-count":
 			observed = len(snapshot.Parents)
 		case "audit-count", "parent-link-count":

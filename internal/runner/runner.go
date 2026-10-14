@@ -98,6 +98,7 @@ type caseResult struct {
 	ObservationComplete  bool                       `json:"observationComplete"`
 	Explanation          string                     `json:"explanation"`
 	Assertions           []assertionResult          `json:"assertions"`
+	SourceEpisodes       []sourceEpisodeEvidence    `json:"sourceEpisodes,omitempty"`
 	SourceHistory        []oscar.HistoryRecord      `json:"sourceHistory"`
 	SyntheticHistory     []oscar.HistoryRecord      `json:"syntheticHistory"`
 	Audits               []oscar.AuditRecord        `json:"audits"`
@@ -233,6 +234,7 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 			}
 			if alertIndex == 0 {
 				caseStarted[item.Code] = r.opts.Now().UTC()
+				item.EpisodeBase = caseStarted[item.Code].Truncate(time.Millisecond)
 			}
 			if len(item.Checkpoints) > 0 {
 				elapsed = r.opts.Now().Sub(caseStarted[item.Code])
@@ -318,6 +320,7 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 	}
 	results := make([]caseResult, 0, len(plan.Cases))
 	for _, item := range plan.Cases {
+		item.EpisodeBase = caseStarted[item.Code].Truncate(time.Millisecond)
 		result, err := r.observeCase(ctx, run, item, started, caseStarted[item.Code], capabilities.PipelineMode)
 		if err != nil {
 			return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)

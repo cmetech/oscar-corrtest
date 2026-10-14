@@ -258,6 +258,9 @@ func Validate(document Scenario) error {
 		if err := validateNames(append(append([]string{}, item.SuppressForNotifiers...), item.TagForNotifiers...), MaxNotifierNameLength, "notifier"); err != nil {
 			return fmt.Errorf("case %q: %w", item.Name, err)
 		}
+		if err := validateNamedEpisodeAssertions(item); err != nil {
+			return err
+		}
 		events := item.Events
 		if len(events) == 0 {
 			if item.Repeat < 1 || item.Repeat > MaxEvents || item.Role == "" || len(item.Role) > MaxRoleLength {
@@ -404,7 +407,7 @@ func decodeAssertions(name string, wire []wireAssertion) ([]Assertion, error) {
 		if assertion.Kind == "synthetic-alert-count" && assertion.Outcome != nil {
 			return nil, fmt.Errorf("case %q synthetic-alert-count assertion must not supply outcome", name)
 		}
-		if (assertion.Kind == "audit-count" || assertion.Kind == "parent-link-count") && (assertion.Outcome == nil || strings.TrimSpace(*assertion.Outcome) == "") {
+		if (assertion.Kind == "audit-count" || assertion.Kind == "parent-link-count" || assertion.Kind == "source-episode-state-count") && (assertion.Outcome == nil || strings.TrimSpace(*assertion.Outcome) == "") {
 			return nil, fmt.Errorf("case %q %s assertion requires a nonblank outcome", name, assertion.Kind)
 		}
 		outcome := ""
@@ -422,18 +425,43 @@ func validateAssertions(name string, assertions []Assertion) error {
 		return fmt.Errorf("case %q must contain bounded assertions", name)
 	}
 	for _, assertion := range assertions {
-		if assertion.Kind != "synthetic-alert-count" && assertion.Kind != "audit-count" && assertion.Kind != "parent-link-count" {
+		if assertion.Kind != "synthetic-alert-count" && assertion.Kind != "audit-count" && assertion.Kind != "parent-link-count" && assertion.Kind != "source-episode-state-count" {
 			return fmt.Errorf("case %q assertion kind is unsupported", name)
 		}
 		if assertion.Equals < 0 || assertion.Equals > MaxExpectedCount || len(assertion.Outcome) > MaxOutcomeLength {
 			return fmt.Errorf("case %q assertion is outside the safe budget", name)
 		}
-		if (assertion.Kind == "audit-count" || assertion.Kind == "parent-link-count") && strings.TrimSpace(assertion.Outcome) == "" {
+		if (assertion.Kind == "audit-count" || assertion.Kind == "parent-link-count" || assertion.Kind == "source-episode-state-count") && strings.TrimSpace(assertion.Outcome) == "" {
 			return fmt.Errorf("case %q assertion outcome is required", name)
+		}
+		if assertion.Kind == "source-episode-state-count" && assertion.Outcome != "firing" && assertion.Outcome != "resolved" {
+			return fmt.Errorf("case %q source episode outcome must be firing or resolved", name)
 		}
 		if assertion.Kind == "synthetic-alert-count" && assertion.Outcome != "" {
 			return fmt.Errorf("case %q synthetic assertion outcome is forbidden", name)
 		}
+	}
+	return nil
+}
+
+func validateNamedEpisodeAssertions(item Case) error {
+	assertions := append([]Assertion{}, item.Assertions...)
+	for _, point := range item.Checkpoints {
+		assertions = append(assertions, point.Assertions...)
+	}
+	for _, assertion := range assertions {
+		if assertion.Kind != "source-episode-state-count" {
+			continue
+		}
+		if len(item.Events) == 0 {
+			return fmt.Errorf("case %q source episode assertions require explicit named events", item.Name)
+		}
+		for _, event := range item.Events {
+			if event.Source == "" {
+				return fmt.Errorf("case %q source episode assertions require every event to name its source", item.Name)
+			}
+		}
+		break
 	}
 	return nil
 }

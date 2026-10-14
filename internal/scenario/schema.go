@@ -171,13 +171,14 @@ func buildSchema(contract Contract) jsonSchema {
 			"assertion": {
 				Type: "object", AdditionalProperties: false, Required: []string{"kind", "equals"},
 				Properties: map[string]schemaValue{
-					"kind":    {Enum: []string{"synthetic-alert-count", "audit-count", "parent-link-count"}},
+					"kind":    {Enum: []string{"synthetic-alert-count", "audit-count", "parent-link-count", "source-episode-state-count"}},
 					"outcome": {Type: "string", MinLength: integer(1), MaxLength: integer(MaxOutcomeLength), Pattern: "^\\S(?:.*\\S)?$"},
 					"equals":  {Type: "integer", Minimum: integer(0), Maximum: integer(MaxExpectedCount)},
 				},
 				AllOf: []schemaValue{
+					{If: &schemaValue{Properties: map[string]schemaValue{"kind": {Const: "source-episode-state-count"}}, Required: []string{"kind"}}, Then: &schemaValue{Properties: map[string]schemaValue{"outcome": {Enum: []string{"firing", "resolved"}}}}},
 					{If: &schemaValue{Properties: map[string]schemaValue{"kind": {Const: "synthetic-alert-count"}}, Required: []string{"kind"}}, Then: &schemaValue{Not: &schemaValue{Required: []string{"outcome"}}}},
-					{If: &schemaValue{Properties: map[string]schemaValue{"kind": {Enum: []string{"audit-count", "parent-link-count"}}}, Required: []string{"kind"}}, Then: &schemaValue{Required: []string{"outcome"}}},
+					{If: &schemaValue{Properties: map[string]schemaValue{"kind": {Enum: []string{"audit-count", "parent-link-count", "source-episode-state-count"}}}, Required: []string{"kind"}}, Then: &schemaValue{Required: []string{"outcome"}}},
 				},
 			},
 		},
