@@ -1,0 +1,171 @@
+{
+  "initial_container": {
+    "name": "/corrtest-linux-ownership-bb026a89f1d1",
+    "exit": 0,
+    "network": "none",
+    "label": "bb026a89f1d144de9ed3a6edb0174d3a",
+    "removed_by_successful_command": "corrtest-linux-ownership-bb026a89f1d1",
+    "independent_absence_check": "docker inspect returned exit1: error: no such object"
+  },
+  "omitted_private_logs": {
+    "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-evidence-nmlik7ou/image-inspect.log": "dbbca3310d84842d838c6630b58e4074af683582eba90bd92765f71787cae6b2",
+    "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-evidence-nmlik7ou/container-inspect.log": "4e35220d91dea9b99d32eff13199af3b8b59ffd7949a7a93827b6cc620cd6bac"
+  },
+  "omission_reason": "Unfiltered initial image/container metadata is unnecessary; raw private artifacts retained. Final inspect logs contain only required fields.",
+  "archives": [
+    {
+      "original": "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-evidence-nmlik7ou/compile-integration.log",
+      "archive": "initial-compile-integration.log.gz",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzip_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+      "bytes": 0
+    },
+    {
+      "original": "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-evidence-nmlik7ou/compile-runtime.log",
+      "archive": "initial-compile-runtime.log.gz",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzip_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+      "bytes": 0
+    },
+    {
+      "original": "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-evidence-nmlik7ou/compiler.log",
+      "archive": "initial-compiler.log.gz",
+      "raw_sha256": "c4a5200d52279a5227d4b3bced622c76081c45d24dba750db29903f9b14641c3",
+      "gzip_sha256": "a93b1a171fe7a97c43e5123700f2f2537a71cfaf009397a2dcddefcff3cebce9",
+      "bytes": 33
+    },
+    {
+      "original": "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-evidence-nmlik7ou/container-create.log",
+      "archive": "initial-container-create.log.gz",
+      "raw_sha256": "035e2421dbfcbcc40d31f0a26ad2fe1d5c1549ace42be91eb0ba9bb7ec411925",
+      "gzip_sha256": "3c7d80421581a2102e399dca49fdc0b227af7b63ca4a791a3939463e1121190a",
+      "bytes": 65
+    },
+    {
+      "original": "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-evidence-nmlik7ou/container-remove.log",
+      "archive": "initial-container-remove.log.gz",
+      "raw_sha256": "d4d61337ff24fba26b38109df37f96699e9bb10e7ca952d7df6b337d6c185bd8",
+      "gzip_sha256": "218e0d18b4c7e8b30968da832a14c752e057687cc12b1e4525c500ab07257671",
+      "bytes": 38
+    },
+    {
+      "original": "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-evidence-nmlik7ou/linux-tests.log",
+      "archive": "initial-linux-tests.log.gz",
+      "raw_sha256": "ac8ec0d6a49a81e3ff1ae107be2cb81f7b932627a58c819cbda3b080131d1456",
+      "gzip_sha256": "15cfb8eef9152ead020375701cab33cdbe29b96324e25e83f12ca3d6c1ced4d7",
+      "bytes": 1304
+    },
+    {
+      "original": "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-evidence-nmlik7ou/manifest.json",
+      "archive": "initial-manifest.json.gz",
+      "raw_sha256": "73c4909596e44f9b776a777e58e402fa00f7bbb415d31179849b51a98e5c705d",
+      "gzip_sha256": "cb39d93e06964cfa6357b6a21764ecfdcf03f1059b2c68b0e149ca25efb8243f",
+      "bytes": 41686
+    },
+    {
+      "original": "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-evidence-10htva5e/image-inspect.log",
+      "archive": "inspect-failure-image-inspect.log.gz",
+      "raw_sha256": "90adb43aa316f0437af61d61ef28f96f23effbe4334bef80fe10ffb3601fcaf4",
+      "gzip_sha256": "f18801222f14c78f494462c3314d9da23250dcd4d98f9bed833d7d8cac1f87e8",
+      "bytes": 112
+    },
+    {
+      "original": "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-evidence-10htva5e/manifest.json",
+      "archive": "inspect-failure-manifest.json.gz",
+      "raw_sha256": "fdb424c6627d537ba39dea5639063946496c807d49a25cd7ce8cee6668227f75",
+      "gzip_sha256": "2803e6cee4bc3e194463029596c5cc1900224c7b79cb955cd3e67eb53dec4cf3",
+      "bytes": 38276
+    },
+    {
+      "original": "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-evidence-ju36otx2/compile-integration.log",
+      "archive": "final-compile-integration.log.gz",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzip_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+      "bytes": 0
+    },
+    {
+      "original": "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-evidence-ju36otx2/compile-runtime.log",
+      "archive": "final-compile-runtime.log.gz",
+      "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "gzip_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+      "bytes": 0
+    },
+    {
+      "original": "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-evidence-ju36otx2/compiler.log",
+      "archive": "final-compiler.log.gz",
+      "raw_sha256": "c4a5200d52279a5227d4b3bced622c76081c45d24dba750db29903f9b14641c3",
+      "gzip_sha256": "a93b1a171fe7a97c43e5123700f2f2537a71cfaf009397a2dcddefcff3cebce9",
+      "bytes": 33
+    },
+    {
+      "original": "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-evidence-ju36otx2/container-absent.log",
+      "archive": "final-container-absent.log.gz",
+      "raw_sha256": "236059e5e0ff8736d8c54968f8280b2b0a9294771899e21f85471bc6871a8d6b",
+      "gzip_sha256": "25abb522c445ea01ca6a35038965e6cdd57e503a64fd9717d22ef0aa12f09c69",
+      "bytes": 64
+    },
+    {
+      "original": "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-evidence-ju36otx2/container-create.log",
+      "archive": "final-container-create.log.gz",
+      "raw_sha256": "d7d37a241de9d180e499c3c7a744e864ad9b765f035748e420a3d2dbf8eeedcd",
+      "gzip_sha256": "445f5afafa81071016ee47197fa09329d0b898a187a79de4f7e5749c8f19c4b6",
+      "bytes": 65
+    },
+    {
+      "original": "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-evidence-ju36otx2/container-inspect.log",
+      "archive": "final-container-inspect.log.gz",
+      "raw_sha256": "076317beedddfe7ca0860cdb40c5b8abc57a2e1761492db7eccc60f0c9d82329",
+      "gzip_sha256": "ebfe1e17f7ab024d52ea60186a3a74cd20a6739175394d0f3d9e6232808715ab",
+      "bytes": 527
+    },
+    {
+      "original": "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-evidence-ju36otx2/container-remove.log",
+      "archive": "final-container-remove.log.gz",
+      "raw_sha256": "2ce843dc400f6831ef4c3bf52c56a04652afe2948176d6af61b83c5784816321",
+      "gzip_sha256": "6f6d56b0a864afb7080c32f2167d912e988da1029a254cfac2b0fb30c1cbf669",
+      "bytes": 38
+    },
+    {
+      "original": "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-evidence-ju36otx2/image-inspect.log",
+      "archive": "final-image-inspect.log.gz",
+      "raw_sha256": "955bab60fea1b64e142b123bf5990a720849802f983a7b72b6e1ee00c46736cd",
+      "gzip_sha256": "41841a2ef0c66eb65b8ad18a39395c4ffbf000d34aa1a346355ec60451794a19",
+      "bytes": 95
+    },
+    {
+      "original": "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-evidence-ju36otx2/linux-tests.log",
+      "archive": "final-linux-tests.log.gz",
+      "raw_sha256": "4dc7168b10d57e99471b32fb50477efc979445fc5d4151f7475d1f1260894538",
+      "gzip_sha256": "a31e82f72cea493721042acda14f0de8f3d057855d7967b33a4345aa84d8df21",
+      "bytes": 1304
+    },
+    {
+      "original": "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-evidence-ju36otx2/manifest.json",
+      "archive": "final-manifest.json.gz",
+      "raw_sha256": "03b1b6ffc2802a9fb1eb2e8e0bfd4e2b26013bd8e5cb6b33d17d52d92ef6a419",
+      "gzip_sha256": "6c78a22588bd0b58eeebd48ffbfe22ddf58e5deef084f526e3ee5137f02d7e75",
+      "bytes": 42240
+    },
+    {
+      "original": "/tmp/corrtest-linux-ownership-runner-first.log",
+      "archive": "runner-first.log.gz",
+      "raw_sha256": "d0de4f26e8dc77fe6a4f3e3becbdfef0b269d91c4c753cded39d3fbc6ccf468b",
+      "gzip_sha256": "77cc04a7b5e132665f1a47932e63c7c5671d812ac9e636815462b30502c8fe74",
+      "bytes": 482
+    },
+    {
+      "original": "/tmp/corrtest-linux-ownership-runner-inspect-failure.log",
+      "archive": "runner-inspect-failure.log.gz",
+      "raw_sha256": "7a85a99a0ca2df3e1511d4a817d27e2091c2a6c7fc4ccd4caeabe0a2aaed80af",
+      "gzip_sha256": "e2f7336ff14244b630ba2a705c1cb484650fa7bed374ecbbbb8a70c30783e922",
+      "bytes": 850
+    },
+    {
+      "original": "/tmp/corrtest-linux-ownership-runner-final.log",
+      "archive": "runner-final.log.gz",
+      "raw_sha256": "eae574a30b6a44bf963cefb6075cd604a38a9cab2069a0f3d06969c40bd95eca",
+      "gzip_sha256": "38a71b3a88b56bb9569f0930b420ab529ed16c2f1e9aeb31ae07d45f0cbb50c6",
+      "bytes": 92
+    }
+  ]
+}

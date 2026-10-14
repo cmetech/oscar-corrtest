@@ -1,0 +1,18 @@
+[
+  {
+    "attempt": "initial",
+    "container": "corrtest-linux-ownership-bb026a89f1d1",
+    "inspect_exit": 1,
+    "inspect_output": "[]\nerror: no such object: corrtest-linux-ownership-bb026a89f1d1\n",
+    "temporary_binary_directory": "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-binaries-zlf_vihs",
+    "temporary_binary_directory_absent": true
+  },
+  {
+    "attempt": "final",
+    "container": "corrtest-linux-ownership-5013762ecd89",
+    "inspect_exit": 1,
+    "inspect_output": "[]\nerror: no such object: corrtest-linux-ownership-5013762ecd89\n",
+    "temporary_binary_directory": "/var/folders/qy/wtx59gms4r708q__3p51fnjc0000gn/T/corrtest-linux-ownership-binaries-ujs5wn4g",
+    "temporary_binary_directory_absent": true
+  }
+]

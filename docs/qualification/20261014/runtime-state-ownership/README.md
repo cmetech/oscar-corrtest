@@ -21,7 +21,7 @@ A runtime now acquires a nonblocking OS file lock in its local state directory b
 
 ## Limits
 
-Execution evidence is macOS ARM64 only; Windows/Linux kernel locking still needs execution on those platforms. State must remain on a private stable local filesystem. Deleting/replacing the state directory or lock file while owned, or launching an older binary that ignores this lock, is unsupported. Stop older binaries before upgrade. Direct external SQLite tools are outside the application ownership contract.
+The original evidence below is macOS ARM64 only. A subsequent [Linux ARM64 execution proof](../runtime-state-ownership-linux/README.md) passed the unchanged tests in an isolated Docker VM with container-local tmpfs. Windows and Linux AMD64 execution and persistent-disk power-loss behavior remain unqualified. State must remain on a private stable local filesystem. Deleting/replacing the state directory or lock file while owned, or launching an older binary that ignores this lock, is unsupported. Stop older binaries before upgrade. Direct external SQLite tools are outside the application ownership contract.
 
 Stateful standalone CLI calls now refuse while `serve` owns the same data directory; use the current UI or wait for shutdown. This is intentional enforcement of the existing single-process design. Separate directories remain independent. CLI process startup may initialize its existing log/environment path before runtime refusal; database migration/recovery is protected. No full correlation E2E or UAT case is accepted from this cut.
 
