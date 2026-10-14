@@ -2,6 +2,8 @@
 
 CorrTest now supports named source lifecycles for Flood and other existing scenarios. This is preparation for consistent E2E runs; it does not turn the older audit-only campaign into acceptance of the selective-admission feature.
 
+For the prepared fixture inventory and remaining external contracts, see the [2026-10-13 handoff](reliability-handoff-20261013.md).
+
 ## What works now
 
 `scenarios/reliability/flood-lifecycle-downstream.yaml` creates five distinct children, recovers A and B independently, then refires and recovers A with the same labels and a new firing episode. Its negative case remains below five children. Both use the existing temporary-rule ownership, bounded observation, saved report and cleanup path.
