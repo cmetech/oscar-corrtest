@@ -280,7 +280,11 @@ func (a *App) runPlanOrExecute(ctx context.Context, args []string, execute bool)
 		}
 	} else {
 		fmt.Fprintf(a.stdout, "Run: %s\nVerdict: %s\nCleanup: %s\n", run.ID, run.Verdict, run.CleanupStatus)
-		fmt.Fprintln(a.stdout, "Coverage: OSCAR Alert Engine ingress; receiver admission and Native Alertmanager bypassed. PASS covers declared downstream assertions, not reliability E2E acceptance. No-match audits do not prove receiver health, selector revision, selected-row isolation or notification delivery.")
+		if run.InputPath() == "ordinary-webhook" {
+			fmt.Fprintln(a.stdout, "Coverage: ordinary webhook receiver with pinned profile forwarding; native callback/grouping and selected admission are not independently proved. PASS covers declared downstream assertions; physical clear and notification delivery remain unproved.")
+		} else {
+			fmt.Fprintln(a.stdout, "Coverage: OSCAR Alert Engine ingress; receiver admission and Native Alertmanager bypassed. PASS covers declared downstream assertions, not reliability E2E acceptance. No-match audits do not prove receiver health, selector revision, selected-row isolation or notification delivery.")
+		}
 		a.printCheckpoints(run.CanonicalReportJSON)
 	}
 	return runExitCode(run)

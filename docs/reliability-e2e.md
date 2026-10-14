@@ -137,3 +137,7 @@ Startup preserves `UNKNOWN` for interrupted runs that may have sent inputs, incl
 5. Exact ownership and cleanup for newly required selector rules and receiver resources, in addition to today's temporary correlation rules.
 
 Enhanced admission, parent dispatch/suppression and physical clear stay disabled. No production capacity figure or any of the 39 UAT cases is accepted by local CorrTest tests. Live SNMP remains deferred; absence/collector-health is unsupported and ticket-provider tests are excluded from reliability qualification. Older built-ins remain for compatibility, not as support claims.
+
+## Ordinary webhook input
+
+The additional [basic ordinary Flood fixture](../scenarios/reliability/flood-ordinary-webhook.yaml) uses `inputPath: ordinary-webhook`. Read [the setup and cleanup contract](ordinary-webhook-input.md) before a controlled lab run. This route exercises ordinary profile forwarding with a pinned definition; it does not provide selected admission, source ordering or recovery authority. Existing direct fixtures remain unchanged.

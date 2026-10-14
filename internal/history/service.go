@@ -109,14 +109,15 @@ func (s *Service) CreateTarget(ctx context.Context, input domain.TargetInput) (d
 	}
 	now := s.now().UTC()
 	target := domain.Target{
-		ID:          id,
-		DisplayName: input.DisplayName,
-		BaseURL:     input.BaseURL,
-		APIProfile:  input.APIProfile,
-		TLS:         input.TLS,
-		Credential:  input.Credential,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		OrdinaryWebhook: input.OrdinaryWebhook,
+		ID:              id,
+		DisplayName:     input.DisplayName,
+		BaseURL:         input.BaseURL,
+		APIProfile:      input.APIProfile,
+		TLS:             input.TLS,
+		Credential:      input.Credential,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	if err := s.store.CreateTarget(ctx, target); err != nil {
 		return domain.Target{}, err

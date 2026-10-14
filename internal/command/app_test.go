@@ -448,3 +448,27 @@ func TestServeReportsServerFailure(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
 	}
 }
+
+func TestTargetAddKeepsOrdinaryReceiverSeparate(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	fake := &fakeRuntime{}
+	app := NewConfigured(&stdout, &stderr, version.Info{}, nil, func(context.Context, config.Settings) (ApplicationRuntime, error) { return fake, nil }, testGetenv)
+	code := app.Run(context.Background(), []string{"target", "add", "--name", "receiver lab", "--url", "https://public.example", "--credential-env", "PUBLIC_KEY", "--receiver-url", "https://receiver.example" + domain.OrdinaryWebhookPath, "--receiver-credential-env", "RECEIVER_KEY", "--receiver-validity-seconds", "600"})
+	if code != 0 {
+		t.Fatalf("code=%d error=%s", code, stderr.String())
+	}
+	got := fake.createdTarget
+	if got.OrdinaryWebhook == nil || got.OrdinaryWebhook.Credential.Reference != "RECEIVER_KEY" || got.OrdinaryWebhook.ValiditySeconds != 600 || got.Credential.Reference != "PUBLIC_KEY" || got.BaseURL != "https://public.example" {
+		t.Fatalf("wrong target %+v", got)
+	}
+}
+
+func TestOrdinaryRunSummaryDescribesActualInputRoute(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	fake := &fakeRuntime{executedRun: domain.Run{ID: "run", Verdict: domain.VerdictPass, CleanupStatus: domain.CleanupClean, CanonicalReportJSON: []byte(`{"coverage":{"inputPath":"ordinary-webhook"}}`)}}
+	app := NewConfigured(&stdout, &stderr, version.Info{}, nil, func(context.Context, config.Settings) (ApplicationRuntime, error) { return fake, nil }, testGetenv)
+	code := app.Run(context.Background(), []string{"run", "../../scenarios/reliability/flood-ordinary-webhook.yaml", "--target", "tgt_lab", "--pipeline-mode", "phase_b_dispatch"})
+	if code != 0 || !strings.Contains(stdout.String(), "ordinary webhook") || strings.Contains(stdout.String(), "Native Alertmanager bypassed") {
+		t.Fatalf("code=%d out=%s error=%s", code, stdout.String(), stderr.String())
+	}
+}

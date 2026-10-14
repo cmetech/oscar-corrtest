@@ -1,0 +1,35 @@
+{
+  "name": "corrtest_ordinary_v1",
+  "mapping_namespace_name": "webhook_profiles",
+  "description": "CorrTest ordinary receiver transport v1; preserves labels and explicit native times; no selected admission authority.",
+  "element": [
+    {
+      "key": "profile~schema_version",
+      "value": "1"
+    },
+    {
+      "key": "profile~enabled",
+      "value": "true"
+    },
+    {
+      "key": "profile~required",
+      "value": "labels.alertname,event_timestamp,ends_at"
+    },
+    {
+      "key": "project_object~labels",
+      "value": "source=body:/labels"
+    },
+    {
+      "key": "project_object~annotations",
+      "value": "source=body:/annotations"
+    },
+    {
+      "key": "parse_time~event_timestamp",
+      "value": "body:/startsAt|rfc3339"
+    },
+    {
+      "key": "parse_time~ends_at",
+      "value": "body:/endsAt|rfc3339"
+    }
+  ]
+}

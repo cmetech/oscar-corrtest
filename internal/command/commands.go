@@ -135,7 +135,7 @@ func (a *App) runDoctor(ctx context.Context, args []string) int {
 			return code
 		}
 	} else {
-		fmt.Fprintf(a.stdout, "Target: %s\nRule validation: %t\nReserved labels survived: %t\nCompatible: %t\n", result.TargetID, result.RuleValidation, result.Compatible, result.Compatible)
+		fmt.Fprintf(a.stdout, "Target: %s\nInput path: alert-engine (direct doctor; receiver readiness not tested)\nRule validation: %t\nReserved labels survived: %t\nCompatible: %t\n", result.TargetID, result.RuleValidation, result.Compatible, result.Compatible)
 		if result.Detail != "" {
 			fmt.Fprintf(a.stdout, "Detail: %s\n", result.Detail)
 		}
@@ -158,6 +158,13 @@ func (a *App) runTargetAdd(ctx context.Context, args []string) int {
 	credentialSystemd := flags.String("credential-systemd", "", "systemd credential reference")
 	caFile := flags.String("ca-file", "", "custom CA file")
 	insecure := flags.Bool("insecure", false, "disable TLS verification for this target")
+	receiverURL := flags.String("receiver-url", "", "ordinary webhook full profile endpoint (optional)")
+	receiverEnv := flags.String("receiver-credential-env", "", "receiver environment credential reference")
+	receiverFile := flags.String("receiver-credential-file", "", "receiver mounted credential reference")
+	receiverSystemd := flags.String("receiver-credential-systemd", "", "receiver systemd credential reference")
+	receiverCA := flags.String("receiver-ca-file", "", "receiver custom CA path")
+	receiverInsecure := flags.Bool("receiver-insecure", false, "disable receiver TLS verification")
+	receiverValidity := flags.Int("receiver-validity-seconds", 0, "explicit native firing validity, 60–3600 seconds")
 	output := flags.String("output", "human", "human or json")
 	if err := flags.Parse(args); err != nil {
 		return 2
@@ -181,13 +188,35 @@ func (a *App) runTargetAdd(ctx context.Context, args []string) int {
 		fmt.Fprintln(a.stderr, "target add accepts at most one credential reference")
 		return 2
 	}
+	var receiver *domain.OrdinaryWebhookBinding
+	if *receiverURL != "" || *receiverEnv != "" || *receiverFile != "" || *receiverSystemd != "" || *receiverCA != "" || *receiverInsecure || *receiverValidity != 0 {
+		receiver = &domain.OrdinaryWebhookBinding{Endpoint: *receiverURL, ValiditySeconds: *receiverValidity, TLS: domain.TLSPolicy{Insecure: *receiverInsecure, CAPath: *receiverCA}}
+		n := 0
+		for _, candidate := range []struct {
+			kind  domain.CredentialKind
+			value string
+		}{{domain.CredentialEnvironment, *receiverEnv}, {domain.CredentialFile, *receiverFile}, {domain.CredentialSystemd, *receiverSystemd}} {
+			if candidate.value != "" {
+				n++
+				receiver.Credential = domain.CredentialRef{Kind: candidate.kind, Reference: candidate.value}
+			}
+		}
+		if n != 1 {
+			fmt.Fprintln(a.stderr, "ordinary receiver requires exactly one credential reference")
+			return 2
+		}
+		if err := receiver.Validate(); err != nil {
+			fmt.Fprintln(a.stderr, err)
+			return 2
+		}
+	}
 	runtime, code := a.openRuntime(ctx, config.Overrides{ConfigPath: *configPath, DataDir: *dataDir})
 	if code != 0 {
 		return code
 	}
 	defer runtime.Close()
 	target, err := runtime.CreateTarget(ctx, domain.TargetInput{
-		DisplayName: *name, BaseURL: *baseURL, APIProfile: *apiProfile,
+		DisplayName: *name, BaseURL: *baseURL, APIProfile: *apiProfile, OrdinaryWebhook: receiver,
 		TLS: domain.TLSPolicy{Insecure: *insecure, CAPath: *caFile}, Credential: credential,
 	})
 	if err != nil {
@@ -355,7 +384,11 @@ func (a *App) runRunsShow(ctx context.Context, args []string) int {
 		return a.writeJSON(run)
 	}
 	fmt.Fprintf(a.stdout, "Run: %s\nStatus: %s\nVerdict: %s\nCleanup: %s\n", run.ID, run.Status, displayEmpty(string(run.Verdict)), run.CleanupStatus)
-	fmt.Fprintln(a.stdout, "Coverage: OSCAR Alert Engine ingress; receiver admission and Native Alertmanager bypassed. PASS covers declared downstream assertions, not reliability E2E acceptance. No-match audits do not prove receiver health, selector revision, selected-row isolation or notification delivery.")
+	if run.InputPath() == "ordinary-webhook" {
+		fmt.Fprintln(a.stdout, "Coverage: ordinary webhook receiver with pinned profile forwarding; native callback/grouping and selected admission are not independently proved. PASS covers declared downstream assertions; physical clear and notification delivery remain unproved.")
+	} else {
+		fmt.Fprintln(a.stdout, "Coverage: OSCAR Alert Engine ingress; receiver admission and Native Alertmanager bypassed. PASS covers declared downstream assertions, not reliability E2E acceptance. No-match audits do not prove receiver health, selector revision, selected-row isolation or notification delivery.")
+	}
 	a.printCheckpoints(run.CanonicalReportJSON)
 	return 0
 }

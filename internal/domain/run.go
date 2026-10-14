@@ -168,3 +168,20 @@ func CanTransition(from, to RunStatus) bool {
 	}
 	return false
 }
+
+// InputPath reports the saved route; legacy runs used direct Alert Engine input.
+func (run Run) InputPath() string {
+	var report struct {
+		Coverage map[string]string `json:"coverage"`
+	}
+	if json.Unmarshal(run.CanonicalReportJSON, &report) == nil && report.Coverage["inputPath"] != "" {
+		return report.Coverage["inputPath"]
+	}
+	var plan struct {
+		InputPath string `json:"inputPath"`
+	}
+	if json.Unmarshal(run.CompiledPlanJSON, &plan) == nil && plan.InputPath != "" {
+		return plan.InputPath
+	}
+	return "alert-engine"
+}

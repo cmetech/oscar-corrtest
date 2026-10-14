@@ -230,8 +230,13 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 			return
 		}
 		credential := domain.CredentialRef{Kind: domain.CredentialKind(r.FormValue("credential_kind")), Reference: r.FormValue("credential_ref")}
+		var receiver *domain.OrdinaryWebhookBinding
+		if r.FormValue("receiver_url") != "" || r.FormValue("receiver_credential_kind") != "" || r.FormValue("receiver_credential_ref") != "" || r.FormValue("receiver_validity") != "" || r.FormValue("receiver_ca_path") != "" || r.FormValue("receiver_insecure") == "on" {
+			validity, _ := strconv.Atoi(r.FormValue("receiver_validity"))
+			receiver = &domain.OrdinaryWebhookBinding{Endpoint: r.FormValue("receiver_url"), ValiditySeconds: validity, Credential: domain.CredentialRef{Kind: domain.CredentialKind(r.FormValue("receiver_credential_kind")), Reference: r.FormValue("receiver_credential_ref")}, TLS: domain.TLSPolicy{Insecure: r.FormValue("receiver_insecure") == "on", CAPath: r.FormValue("receiver_ca_path")}}
+		}
 		_, err := data.CreateTarget(r.Context(), domain.TargetInput{
-			DisplayName: r.FormValue("display_name"), BaseURL: r.FormValue("base_url"), APIProfile: "public-v1",
+			DisplayName: r.FormValue("display_name"), BaseURL: r.FormValue("base_url"), APIProfile: "public-v1", OrdinaryWebhook: receiver,
 			TLS: domain.TLSPolicy{Insecure: r.FormValue("insecure") == "on", CAPath: r.FormValue("ca_path")}, Credential: credential,
 		})
 		if err != nil {

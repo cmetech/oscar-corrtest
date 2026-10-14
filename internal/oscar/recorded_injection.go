@@ -18,15 +18,16 @@ import (
 // destination, not transport completion, source ordering or receiver acceptance.
 // Values contain no credential/header data and share no mutable body bytes.
 type InjectionRequestEvidence struct {
-	Format      string `json:"format"`
-	TargetID    string `json:"targetId"`
-	APIProfile  string `json:"apiProfile"`
-	Method      string `json:"method"`
-	Endpoint    string `json:"endpoint"`
-	ContentType string `json:"contentType"`
-	BodyBytes   int    `json:"bodyBytes"`
-	BodySHA256  string `json:"bodySha256"`
-	BodyBase64  string `json:"bodyBase64"`
+	ProfilePrecondition string `json:"profilePrecondition,omitempty"`
+	Format              string `json:"format"`
+	TargetID            string `json:"targetId"`
+	APIProfile          string `json:"apiProfile"`
+	Method              string `json:"method"`
+	Endpoint            string `json:"endpoint"`
+	ContentType         string `json:"contentType"`
+	BodyBytes           int    `json:"bodyBytes"`
+	BodySHA256          string `json:"bodySha256"`
+	BodyBase64          string `json:"bodyBase64"`
 }
 
 type InjectionRecorder func(InjectionRequestEvidence) error
@@ -59,6 +60,9 @@ func PrepareInjection(alert compiler.AlertPlan, targetID, endpoint string) (Inje
 // InjectRecorded commits the supplied recorder before any HTTP attempt, then
 // sends exactly the frozen body. Failure never authorizes an automatic retry.
 func (c *Client) InjectRecorded(ctx context.Context, alert compiler.AlertPlan, beforeSend InjectionRecorder) (InjectionResult, error) {
+	if c.ordinary != nil {
+		return c.injectOrdinary(ctx, alert, beforeSend)
+	}
 	if beforeSend == nil {
 		return InjectionResult{}, fmt.Errorf("recorded injection requires a before-send recorder")
 	}

@@ -34,16 +34,47 @@ type TLSPolicy struct {
 }
 
 // TargetInput is sanitized metadata accepted when creating a target.
+const OrdinaryWebhookProfile = "corrtest_ordinary_v1"
+const OrdinaryWebhookPath = "/api/v1/webhookreceiver/webhook/" + OrdinaryWebhookProfile
+
+type OrdinaryWebhookBinding struct {
+	Endpoint        string        `json:"endpoint"`
+	ValiditySeconds int           `json:"validitySeconds"`
+	TLS             TLSPolicy     `json:"tls"`
+	Credential      CredentialRef `json:"credential"`
+}
+
+func (binding OrdinaryWebhookBinding) Validate() error {
+	if binding.Credential.Kind == "" || binding.ValiditySeconds < 60 || binding.ValiditySeconds > 3600 {
+		return fmt.Errorf("ordinary webhook requires credential reference and explicit validitySeconds between 60 and 3600")
+	}
+	base := TargetInput{DisplayName: "ordinary webhook", BaseURL: binding.Endpoint, TLS: binding.TLS, Credential: binding.Credential}
+	if err := base.Validate(); err != nil {
+		return err
+	}
+	parsed, _ := url.Parse(binding.Endpoint)
+	if !strings.HasSuffix(parsed.Path, OrdinaryWebhookPath) || parsed.RawPath != "" || parsed.ForceQuery {
+		return fmt.Errorf("ordinary webhook endpoint must use fixed corrtest_ordinary_v1 profile path")
+	}
+	return nil
+}
+
 type TargetInput struct {
-	DisplayName string        `json:"displayName"`
-	BaseURL     string        `json:"baseUrl"`
-	APIProfile  string        `json:"apiProfile,omitempty"`
-	TLS         TLSPolicy     `json:"tls"`
-	Credential  CredentialRef `json:"credential,omitempty"`
+	OrdinaryWebhook *OrdinaryWebhookBinding `json:"ordinaryWebhook,omitempty"`
+	DisplayName     string                  `json:"displayName"`
+	BaseURL         string                  `json:"baseUrl"`
+	APIProfile      string                  `json:"apiProfile,omitempty"`
+	TLS             TLSPolicy               `json:"tls"`
+	Credential      CredentialRef           `json:"credential,omitempty"`
 }
 
 // Validate rejects target metadata that could embed credentials or weaken TLS ambiguously.
 func (input TargetInput) Validate() error {
+	if input.OrdinaryWebhook != nil {
+		if err := input.OrdinaryWebhook.Validate(); err != nil {
+			return err
+		}
+	}
 	if strings.TrimSpace(input.DisplayName) == "" {
 		return fmt.Errorf("target display name is required")
 	}
@@ -81,14 +112,15 @@ func (input TargetInput) Validate() error {
 
 // Target is the durable, sanitized OSCAR endpoint metadata.
 type Target struct {
-	ID          string        `json:"id"`
-	DisplayName string        `json:"displayName"`
-	BaseURL     string        `json:"baseUrl"`
-	APIProfile  string        `json:"apiProfile"`
-	TLS         TLSPolicy     `json:"tls"`
-	Credential  CredentialRef `json:"credential,omitempty"`
-	CreatedAt   time.Time     `json:"createdAt"`
-	UpdatedAt   time.Time     `json:"updatedAt"`
+	OrdinaryWebhook *OrdinaryWebhookBinding `json:"ordinaryWebhook,omitempty"`
+	ID              string                  `json:"id"`
+	DisplayName     string                  `json:"displayName"`
+	BaseURL         string                  `json:"baseUrl"`
+	APIProfile      string                  `json:"apiProfile"`
+	TLS             TLSPolicy               `json:"tls"`
+	Credential      CredentialRef           `json:"credential,omitempty"`
+	CreatedAt       time.Time               `json:"createdAt"`
+	UpdatedAt       time.Time               `json:"updatedAt"`
 }
 
 // NewTargetID returns an opaque target identifier using the run-ID entropy contract.

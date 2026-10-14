@@ -170,8 +170,17 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 		}
 		return ctx.Err()
 	}
-	if plan.InputPath != "" && plan.InputPath != "alert-engine" {
+	if plan.InputPath != "" && plan.InputPath != "alert-engine" && plan.InputPath != "ordinary-webhook" {
 		return r.finishWithoutMutation(ctx, run, plan, capabilities, domain.VerdictError, "unsupported input path: "+plan.InputPath)
+	}
+	if route, ok := r.api.(interface {
+		ValidateInputBudget(compiler.Plan, time.Duration) error
+	}); ok {
+		if err := route.ValidateInputBudget(plan, r.opts.CleanupTimeout); err != nil {
+			return r.finishWithoutMutation(ctx, run, plan, capabilities, domain.VerdictError, err.Error())
+		}
+	} else if plan.InputPath == "ordinary-webhook" {
+		return r.finishWithoutMutation(ctx, run, plan, capabilities, domain.VerdictError, "ordinary receiver client unavailable")
 	}
 	if err := compiler.ValidateControlExclusion(plan); err != nil {
 		return r.finishWithoutMutation(ctx, run, plan, capabilities, domain.VerdictError, err.Error())
@@ -305,7 +314,7 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 				return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
 			}
 			attempt.InjectionClass = string(result.Class)
-			if result.Class != oscar.InjectionAccepted {
+			if !r.inputAccepted(result.Class) {
 				return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, fmt.Errorf("injection was %s", result.Class))
 			}
 			attempt.SendState = "SENT"
@@ -441,8 +450,25 @@ func (r *Runner) cleanup(ctx context.Context, runID string, resources []domain.R
 			failures = append(failures, record.AlertName+": unsafe alert cleanup identity")
 			continue
 		}
-		result, err := r.api.ResolveHistory(ctx, record)
-		fact := domain.AlertResolutionFact{AlertName: record.AlertName, Fingerprint: record.Fingerprint, InjectionClass: string(result.Class), StatusCode: result.StatusCode, Accepted: err == nil && result.Class == oscar.InjectionAccepted}
+		var result oscar.InjectionResult
+		var err error
+		if r.ordinaryRoute() {
+			resolver, ok := r.api.(interface {
+				ResolveHistoryRecorded(context.Context, oscar.HistoryRecord, oscar.InjectionRecorder) (oscar.InjectionResult, error)
+			})
+			if !ok {
+				err = fmt.Errorf("recorded receiver cleanup unavailable")
+			} else {
+				result, err = resolver.ResolveHistoryRecorded(ctx, record, func(request oscar.InjectionRequestEvidence) error {
+					detail, _ := json.Marshal(map[string]any{"request": request, "fingerprint": record.Fingerprint, "startsAt": record.StartsAt})
+					_, saveErr := r.store.AppendRunEvent(ctx, domain.RunEvent{RunID: runID, Type: "alert.cleanup_attempting", Level: "info", OccurredAt: r.opts.Now().UTC(), Summary: "Exact ordinary source clear recorded before receiver POST", DetailJSON: string(detail)})
+					return saveErr
+				})
+			}
+		} else {
+			result, err = r.api.ResolveHistory(ctx, record)
+		}
+		fact := domain.AlertResolutionFact{AlertName: record.AlertName, Fingerprint: record.Fingerprint, InjectionClass: string(result.Class), StatusCode: result.StatusCode, Accepted: err == nil && r.inputAccepted(result.Class)}
 		if err != nil {
 			fact.InjectionClass = string(oscar.InjectionIndeterminate)
 			if fact.StatusCode == 0 {
@@ -450,7 +476,7 @@ func (r *Runner) cleanup(ctx context.Context, runID string, resources []domain.R
 			}
 		}
 		resolutions = append(resolutions, fact)
-		if err != nil || result.Class != oscar.InjectionAccepted {
+		if err != nil || !r.inputAccepted(result.Class) {
 			failures = append(failures, record.AlertName+": alert resolution was not accepted")
 		}
 	}
@@ -638,16 +664,29 @@ func (r *Runner) discoverAttemptedHistory(ctx context.Context, run domain.Run, p
 }
 
 func (r *Runner) finishWithoutMutation(ctx context.Context, run domain.Run, plan compiler.Plan, capabilities CapabilitySnapshot, verdict domain.Verdict, explanation string) error {
-	if err := r.transition(ctx, run.ID, domain.RunCancelling, "Preflight prevented target mutation"); err != nil {
+	message := "Preflight prevented target mutation"
+	cleanupMessage := "No external resources require cleanup"
+	if r.ordinaryRoute() {
+		message = "Preflight prevented scenario execution; durable ordinary probe may have sent input"
+		cleanupMessage = "Check retained ordinary probe responsibility before finalizing cleanup"
+	}
+	if err := r.transition(ctx, run.ID, domain.RunCancelling, message); err != nil {
 		return err
 	}
-	if err := r.transition(ctx, run.ID, domain.RunCleaningUp, "No external resources require cleanup"); err != nil {
+	if err := r.transition(ctx, run.ID, domain.RunCleaningUp, cleanupMessage); err != nil {
 		return err
 	}
 	return r.complete(ctx, run, plan, capabilities, nil, nil, nil, nil, verdict, domain.CleanupNotRequired, explanation)
 }
 
 func (r *Runner) complete(ctx context.Context, run domain.Run, plan compiler.Plan, capabilities CapabilitySnapshot, results []caseResult, checkpoints []checkpointResult, attempts []domain.AlertAttemptFact, resolutions []domain.AlertResolutionFact, verdict domain.Verdict, cleanup domain.CleanupStatus, terminal string) error {
+	if pending, ok := r.api.(interface{ UnresolvedInputCleanup() bool }); ok && pending.UnresolvedInputCleanup() {
+		cleanup = domain.CleanupDirty
+		if terminal != "" {
+			terminal += "; "
+		}
+		terminal += "ordinary receiver input cleanup remains unresolved"
+	}
 	completed := r.opts.Now().UTC()
 	facts, err := normalizedFacts(plan, results, attempts)
 	if err != nil {
@@ -666,9 +705,19 @@ func (r *Runner) complete(ctx context.Context, run domain.Run, plan compiler.Pla
 			facts.Artifacts = append(facts.Artifacts, item)
 		}
 	}
-	report, err := json.Marshal(canonicalReport{Coverage: map[string]string{
+	coverage := map[string]string{
 		"inputPath": "alert-engine", "endpoint": "POST /api/v1/alerts", "receiverAdmission": "NOT_TESTED", "nativeAlertmanager": "BYPASSED", "lifecycleTransitions": "NOT_PROVEN", "producerBarriers": "NOT_TESTED", "physicalClear": "NOT_PROVEN", "selectorRevision": "NOT_PROVEN", "selectedRowIsolation": "NOT_PROVEN", "notificationDelivery": "NOT_PROVEN", "noMatchScope": "DOWNSTREAM_ONLY_IF_ASSERTED",
-	}, APIVersion: "corrtest.oscar/v1alpha1", RunID: run.ID, Pattern: plan.Pattern,
+	}
+	if plan.InputPath == "ordinary-webhook" {
+		coverage["inputPath"] = "ordinary-webhook"
+		coverage["endpoint"] = "POST /api/v1/webhookreceiver/webhook/corrtest_ordinary_v1"
+		coverage["ordinaryForwarding"] = "PINNED_PROFILE_HTTP_ONLY"
+		coverage["nativeAlertmanager"] = "ORDINARY_ROUTE_NOT_INDEPENDENTLY_VERIFIED"
+		if route, ok := r.api.(interface{ InputEndpoint() string }); ok {
+			coverage["endpoint"] = route.InputEndpoint()
+		}
+	}
+	report, err := json.Marshal(canonicalReport{Coverage: coverage, APIVersion: "corrtest.oscar/v1alpha1", RunID: run.ID, Pattern: plan.Pattern,
 		Checkpoints: checkpoints, PlanDigest: plan.Digest, Verdict: verdict, Cleanup: cleanup, Capabilities: capabilities, Cases: results, Attempts: facts.Attempts, Artifacts: facts.Artifacts, Resolutions: facts.Resolutions, CompletedAt: completed})
 	if err != nil {
 		return err
@@ -744,4 +793,12 @@ func errorString(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+func (r *Runner) ordinaryRoute() bool {
+	route, ok := r.api.(interface{ InputPath() string })
+	return ok && route.InputPath() == "ordinary-webhook"
+}
+func (r *Runner) inputAccepted(class oscar.InjectionClass) bool {
+	return class == oscar.InjectionAccepted || (r.ordinaryRoute() && class == oscar.InjectionForwarded)
 }

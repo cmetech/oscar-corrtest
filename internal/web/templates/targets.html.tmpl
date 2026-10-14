@@ -15,13 +15,19 @@
     <label>Credential reference<input name="credential_ref" autocomplete="off" aria-describedby="credential-help"><small id="credential-help">Reference name or path only; never enter a secret value.</small></label>
     <label>Custom CA path<input name="ca_path" autocomplete="off"></label>
     <label class="check"><input type="checkbox" name="insecure"> Disable TLS verification</label>
+    <label>Ordinary webhook endpoint (optional)<input name="receiver_url" type="url" placeholder="https://receiver.example/api/v1/webhookreceiver/webhook/corrtest_ordinary_v1"></label>
+    <label>Receiver credential source<select name="receiver_credential_kind"><option value="">None</option><option value="env">Environment</option><option value="file">Mounted file</option><option value="systemd">systemd credential</option></select></label>
+    <label>Receiver credential reference<input name="receiver_credential_ref" autocomplete="off"><small>Reference only; separate from the public API credential.</small></label>
+    <label>Receiver firing validity (seconds)<input name="receiver_validity" type="number" min="60" max="3600"><small>Required when configured; must cover the entire scenario and cleanup. No automatic renewal.</small></label>
+    <label>Receiver custom CA path<input name="receiver_ca_path" autocomplete="off"></label>
+    <label class="check"><input type="checkbox" name="receiver_insecure"> Disable receiver TLS verification</label>
     <button class="primary-button" type="submit">Add target</button>
   </form>
 </section>
 <section class="panel" aria-labelledby="target-list-title">
   <h2 id="target-list-title">Configured targets</h2>
-  {{if .Targets}}<div class="data-table-wrapper"><table><caption>Configured OSCAR targets</caption><thead><tr><th>Name</th><th>URL</th><th>Credential reference</th><th>TLS</th></tr></thead><tbody>
-  {{range .Targets}}<tr><td>{{.DisplayName}}</td><td><code>{{.BaseURL}}</code></td><td>{{if .Credential.Reference}}<code>{{.Credential.Kind}}:{{.Credential.Reference}}</code>{{else}}None{{end}}</td><td>{{if .TLS.Insecure}}Insecure{{else}}Verified{{end}}</td></tr>{{end}}
+  {{if .Targets}}<div class="data-table-wrapper"><table><caption>Configured OSCAR targets</caption><thead><tr><th>Name</th><th>URL</th><th>Credential reference</th><th>TLS</th><th>Ordinary receiver</th></tr></thead><tbody>
+  {{range .Targets}}<tr><td>{{.DisplayName}}</td><td><code>{{.BaseURL}}</code></td><td>{{if .Credential.Reference}}<code>{{.Credential.Kind}}:{{.Credential.Reference}}</code>{{else}}None{{end}}</td><td>{{if .TLS.Insecure}}Insecure{{else}}Verified{{end}}</td><td>{{with .OrdinaryWebhook}}<code>{{.Endpoint}}</code><br>{{.ValiditySeconds}}s · {{.Credential.Kind}}:{{.Credential.Reference}} · {{if .TLS.Insecure}}Insecure{{else}}Verified{{end}}{{else}}Not configured{{end}}</td></tr>{{end}}
   </tbody></table></div>{{else}}<p class="muted">No targets configured.</p>{{end}}
 </section>
 {{end}}

@@ -32,7 +32,7 @@ func TestInitialMigrationCreatesLedgerSchema(t *testing.T) {
 	if err := database.db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&migrations); err != nil {
 		t.Fatal(err)
 	}
-	if migrations != 2 {
+	if migrations != 3 {
 		t.Fatalf("migration count=%d", migrations)
 	}
 }

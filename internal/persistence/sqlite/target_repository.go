@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -19,11 +20,12 @@ func (d *Database) CreateTarget(ctx context.Context, target domain.Target) error
 		return fmt.Errorf("database is read-only: %w", err)
 	}
 	input := domain.TargetInput{
-		DisplayName: target.DisplayName,
-		BaseURL:     target.BaseURL,
-		APIProfile:  target.APIProfile,
-		TLS:         target.TLS,
-		Credential:  target.Credential,
+		OrdinaryWebhook: target.OrdinaryWebhook,
+		DisplayName:     target.DisplayName,
+		BaseURL:         target.BaseURL,
+		APIProfile:      target.APIProfile,
+		TLS:             target.TLS,
+		Credential:      target.Credential,
 	}
 	if err := input.Validate(); err != nil {
 		return err
@@ -35,12 +37,20 @@ func (d *Database) CreateTarget(ctx context.Context, target domain.Target) error
 	if target.TLS.CAPath != "" {
 		ca = target.TLS.CAPath
 	}
+	var receiver any
+	if target.OrdinaryWebhook != nil {
+		raw, err := json.Marshal(target.OrdinaryWebhook)
+		if err != nil {
+			return err
+		}
+		receiver = string(raw)
+	}
 	_, err := d.db.ExecContext(ctx, `INSERT INTO targets(
         id, display_name, base_url, api_profile, tls_insecure, ca_path,
-        credential_kind, credential_ref, created_at, updated_at
-    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        credential_kind, credential_ref, created_at, updated_at, ordinary_webhook_json
+    ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		target.ID, target.DisplayName, target.BaseURL, target.APIProfile, target.TLS.Insecure,
-		ca, kind, ref, formatTime(target.CreatedAt), formatTime(target.UpdatedAt))
+		ca, kind, ref, formatTime(target.CreatedAt), formatTime(target.UpdatedAt), receiver)
 	if err != nil {
 		return fmt.Errorf("create target: %w", err)
 	}
@@ -82,19 +92,29 @@ func (d *Database) ListTargets(ctx context.Context) ([]domain.Target, error) {
 }
 
 const targetSelect = `SELECT id, display_name, base_url, api_profile, tls_insecure,
-    ca_path, credential_kind, credential_ref, created_at, updated_at FROM targets`
+    ca_path, credential_kind, credential_ref, created_at, updated_at, ordinary_webhook_json FROM targets`
 
 type rowScanner interface{ Scan(...any) error }
 
 func scanTarget(row rowScanner) (domain.Target, error) {
 	var target domain.Target
 	var insecure bool
-	var ca, kind, ref sql.NullString
+	var ca, kind, ref, receiver sql.NullString
 	var created, updated string
 	err := row.Scan(&target.ID, &target.DisplayName, &target.BaseURL, &target.APIProfile, &insecure,
-		&ca, &kind, &ref, &created, &updated)
+		&ca, &kind, &ref, &created, &updated, &receiver)
 	if err != nil {
 		return domain.Target{}, err
+	}
+	if receiver.Valid {
+		var binding domain.OrdinaryWebhookBinding
+		if err := json.Unmarshal([]byte(receiver.String), &binding); err != nil {
+			return domain.Target{}, err
+		}
+		if err := binding.Validate(); err != nil {
+			return domain.Target{}, err
+		}
+		target.OrdinaryWebhook = &binding
 	}
 	target.TLS = domain.TLSPolicy{Insecure: insecure, CAPath: ca.String}
 	target.Credential = domain.CredentialRef{Kind: domain.CredentialKind(kind.String), Reference: ref.String}

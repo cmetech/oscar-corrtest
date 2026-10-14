@@ -87,6 +87,7 @@
     "inputPath": {
       "enum": [
         "alert-engine",
+        "ordinary-webhook",
         "receiver-admission"
       ]
     },

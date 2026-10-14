@@ -212,7 +212,7 @@ func Decode(reader io.Reader) (Scenario, error) {
 
 // Validate checks the same closed scenario contract for decoded and compiled inputs.
 func Validate(document Scenario) error {
-	if document.InputPath != "" && document.InputPath != "alert-engine" && document.InputPath != "receiver-admission" {
+	if document.InputPath != "" && document.InputPath != "alert-engine" && document.InputPath != "receiver-admission" && document.InputPath != "ordinary-webhook" {
 		return fmt.Errorf("unsupported inputPath %q", document.InputPath)
 	}
 	if document.APIVersion != APIVersion || document.Kind != Kind || !isSupportedPattern(document.Pattern) {

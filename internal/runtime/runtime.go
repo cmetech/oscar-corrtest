@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -44,6 +45,8 @@ type Readiness struct {
 
 // Diagnostic is the fail-closed target compatibility result used by doctor and runs.
 type Diagnostic struct {
+	InputPath      string                 `json:"inputPath"`
+	InputEndpoint  string                 `json:"inputEndpoint"`
 	TargetID       string                 `json:"targetId"`
 	APIProfile     string                 `json:"apiProfile"`
 	PipelineMode   string                 `json:"pipelineMode"`
@@ -142,8 +145,12 @@ func (r *Runtime) Operations() *operations.Controller { return r.operations }
 // Version returns immutable harness metadata safe to include in request previews.
 func (r *Runtime) Version() string { return r.version }
 
-func (r *Runtime) newOSCARClient(target domain.Target) (*oscar.Client, error) {
-	client, err := oscar.New(target, oscar.Options{HarnessVersion: r.version, Getenv: r.getenv})
+func (r *Runtime) newOSCARClient(target domain.Target, inputPaths ...string) (*oscar.Client, error) {
+	inputPath := ""
+	if len(inputPaths) > 0 {
+		inputPath = inputPaths[0]
+	}
+	client, err := oscar.New(target, oscar.Options{HarnessVersion: r.version, Getenv: r.getenv, InputPath: inputPath})
 	if err != nil {
 		r.logger.Warn("OSCAR client initialization failed", "target_id", target.ID, "error", err)
 		return nil, err
@@ -193,7 +200,7 @@ func (r *Runtime) ExecuteBuiltin(ctx context.Context, targetID, pattern, pipelin
 	if err != nil {
 		return run, err
 	}
-	client, err := r.newOSCARClient(target)
+	client, err := r.newOSCARClient(target, plan.InputPath)
 	if err != nil {
 		return run, err
 	}
@@ -223,7 +230,7 @@ func (r *Runtime) ExecuteScenario(ctx context.Context, targetID string, document
 	if err != nil {
 		return run, err
 	}
-	client, err := r.newOSCARClient(target)
+	client, err := r.newOSCARClient(target, plan.InputPath)
 	if err != nil {
 		return run, err
 	}
@@ -323,19 +330,49 @@ func (r *Runtime) Doctor(ctx context.Context, targetID, pipelineMode string) (Di
 }
 
 func (r *Runtime) diagnose(ctx context.Context, client *oscar.Client, target domain.Target, run domain.Run, plan compiler.Plan, pipelineMode string) Diagnostic {
-	result := Diagnostic{TargetID: target.ID, APIProfile: target.APIProfile, PipelineMode: pipelineMode}
+	result := Diagnostic{TargetID: target.ID, APIProfile: target.APIProfile, PipelineMode: pipelineMode, InputPath: client.InputPath(), InputEndpoint: client.InputEndpoint()}
+	if err := client.ValidateInputBudget(plan, 30*time.Second); err != nil {
+		result.Detail = err.Error()
+		return result
+	}
 	if len(plan.Cases) == 0 {
 		result.Detail = "compiled plan contained no validation rule"
 		return result
+	}
+	if client.InputPath() == "ordinary-webhook" {
+		rawPlan, err := json.Marshal(plan)
+		if err == nil {
+			err = r.database.SetOrdinaryPreflightPlan(ctx, run.ID, rawPlan, time.Now().UTC())
+		}
+		if err != nil {
+			result.Detail = "persist ordinary preflight route: " + err.Error()
+			return result
+		}
 	}
 	if err := client.ValidateRule(ctx, plan.Cases[0].Rule); err != nil {
 		result.Detail = err.Error()
 		return result
 	}
 	result.RuleValidation = true
-	probeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	probeBudget := 20 * time.Second
+	if client.InputPath() == "ordinary-webhook" {
+		probeBudget = 60 * time.Second
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, probeBudget)
 	defer cancel()
-	probe, err := client.ProbeLabelSurvival(probeCtx, run.ID, run.ShortToken)
+	var probe oscar.LabelProbeResult
+	var err error
+	if client.InputPath() == "ordinary-webhook" {
+		probe, err = client.ProbeLabelSurvivalRecorded(probeCtx, run.ID, run.ShortToken, func(request oscar.InjectionRequestEvidence) error {
+			detail, _ := json.Marshal(map[string]any{"stage": "ordinary_label_probe_or_clear", "request": request})
+			recordCtx, recordCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer recordCancel()
+			_, err := r.database.AppendRunEvent(recordCtx, domain.RunEvent{RunID: run.ID, Type: "alert.attempting", Level: "info", OccurredAt: time.Now().UTC(), Summary: "Ordinary diagnostic request recorded before receiver POST", DetailJSON: string(detail)})
+			return err
+		})
+	} else {
+		probe, err = client.ProbeLabelSurvival(probeCtx, run.ID, run.ShortToken)
+	}
 	result.LabelProbe = probe
 	if err != nil {
 		result.Detail = err.Error()
@@ -343,7 +380,7 @@ func (r *Runtime) diagnose(ctx context.Context, client *oscar.Client, target dom
 	}
 	result.Compatible = probe.Accepted && probe.HistoryFound && probe.Fingerprint != "" && len(probe.MissingLabels) == 0
 	if !result.Compatible {
-		result.Detail = "public-v1 injection/history did not preserve the reserved identity contract"
+		result.Detail = client.InputPath() + " injection/history did not preserve the reserved identity contract"
 	}
 	return result
 }

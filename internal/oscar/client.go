@@ -25,6 +25,8 @@ const maxResponseBytes = 4 << 20
 const maxListPages = 100
 
 type Options struct {
+	InputPath      string
+	Now            func() time.Time
 	Getenv         func(string) string
 	HTTPClient     *http.Client
 	HarnessVersion string
@@ -32,12 +34,15 @@ type Options struct {
 }
 
 type Client struct {
-	baseURL        *url.URL
-	targetID       string
-	http           *http.Client
-	credential     string
-	harnessVersion string
-	pollInterval   time.Duration
+	ordinary            *ordinaryWebhookInput
+	now                 func() time.Time
+	profilePrecondition string
+	baseURL             *url.URL
+	targetID            string
+	http                *http.Client
+	credential          string
+	harnessVersion      string
+	pollInterval        time.Duration
 }
 
 func New(target domain.Target, options Options) (*Client, error) {
@@ -80,7 +85,19 @@ func New(target domain.Target, options Options) (*Client, error) {
 	if pollInterval <= 0 {
 		pollInterval = time.Second
 	}
-	return &Client{baseURL: baseURL, targetID: target.ID, http: httpClient, credential: credential, harnessVersion: options.HarnessVersion, pollInterval: pollInterval}, nil
+	client := &Client{baseURL: baseURL, targetID: target.ID, http: httpClient, credential: credential, harnessVersion: options.HarnessVersion, pollInterval: pollInterval, now: options.Now}
+	if client.now == nil {
+		client.now = time.Now
+	}
+	if options.InputPath != "" && options.InputPath != "alert-engine" {
+		if options.InputPath != "ordinary-webhook" {
+			return nil, fmt.Errorf("unsupported input path %q", options.InputPath)
+		}
+		if err := client.configureOrdinary(target, options); err != nil {
+			return nil, err
+		}
+	}
+	return client, nil
 }
 
 func resolveCredential(reference domain.CredentialRef, getenv func(string) string) (string, error) {
@@ -187,6 +204,9 @@ func (c *Client) DeleteRule(ctx context.Context, id int) error {
 }
 
 func (c *Client) Inject(ctx context.Context, alert compiler.AlertPlan) (InjectionResult, error) {
+	if c.ordinary != nil {
+		return InjectionResult{}, fmt.Errorf("ordinary webhook requires recorded injection")
+	}
 	payload, err := BuildAlertRequest(alert)
 	if err != nil {
 		return InjectionResult{}, err
@@ -197,6 +217,9 @@ func (c *Client) Inject(ctx context.Context, alert compiler.AlertPlan) (Injectio
 // ResolveHistory emits one cleanup-only resolved alert using the authoritative
 // OSCAR history fingerprint. User-authored plans cannot access this override.
 func (c *Client) ResolveHistory(ctx context.Context, record HistoryRecord) (InjectionResult, error) {
+	if c.ordinary != nil && record.Labels["oscar_test_alert_class"] != "synthetic" {
+		return InjectionResult{}, fmt.Errorf("ordinary source cleanup requires retained episode and recorded receiver request")
+	}
 	payload, err := BuildResolutionRequest(record)
 	if err != nil {
 		return InjectionResult{}, err
@@ -432,15 +455,23 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 }
 
 func (c *Client) doBytes(ctx context.Context, method, path string, endpoint *url.URL, encoded []byte, transport *http.Client) (int, []byte, error) {
+	status, body, _, err := c.doBytesWithHeaders(ctx, method, path, endpoint, encoded, transport)
+	return status, body, err
+}
+
+func (c *Client) doBytesWithHeaders(ctx context.Context, method, path string, endpoint *url.URL, encoded []byte, transport *http.Client) (int, []byte, http.Header, error) {
 	var body io.Reader
 	if encoded != nil {
 		body = bytes.NewReader(encoded)
 	}
 	request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), body)
 	if err != nil {
-		return 0, nil, fmt.Errorf("build OSCAR request: %w", err)
+		return 0, nil, nil, fmt.Errorf("build OSCAR request: %w", err)
 	}
 	request.Header.Set("Accept", "application/json")
+	if c.profilePrecondition != "" {
+		request.Header.Set("If-Match", c.profilePrecondition)
+	}
 	request.Header.Set("User-Agent", "oscar-corrtest/"+c.harnessVersion)
 	if encoded != nil {
 		request.Header.Set("Content-Type", "application/json")
@@ -450,20 +481,20 @@ func (c *Client) doBytes(ctx context.Context, method, path string, endpoint *url
 	}
 	response, err := transport.Do(request)
 	if err != nil {
-		return 0, nil, &MachineError{Operation: method + " " + path, Code: "transport", Detail: "OSCAR request failed"}
+		return 0, nil, nil, &MachineError{Operation: method + " " + path, Code: "transport", Detail: "OSCAR request failed"}
 	}
 	defer response.Body.Close()
 	raw, readErr := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if readErr != nil {
-		return response.StatusCode, nil, &MachineError{Operation: method + " " + path, Code: "read", Detail: "could not read OSCAR response"}
+		return response.StatusCode, nil, response.Header, &MachineError{Operation: method + " " + path, Code: "read", Detail: "could not read OSCAR response"}
 	}
 	if len(raw) > maxResponseBytes {
-		return response.StatusCode, nil, &MachineError{Operation: method + " " + path, Code: "response_too_large", Detail: "OSCAR response exceeded 4 MiB"}
+		return response.StatusCode, nil, response.Header, &MachineError{Operation: method + " " + path, Code: "response_too_large", Detail: "OSCAR response exceeded 4 MiB"}
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return response.StatusCode, nil, &MachineError{Operation: method + " " + path, StatusCode: response.StatusCode, Code: "http_error", Detail: safeDetail(raw)}
+		return response.StatusCode, nil, response.Header, &MachineError{Operation: method + " " + path, StatusCode: response.StatusCode, Code: "http_error", Detail: safeDetail(raw)}
 	}
-	return response.StatusCode, raw, nil
+	return response.StatusCode, raw, response.Header, nil
 }
 
 func safeDetail(raw []byte) string {

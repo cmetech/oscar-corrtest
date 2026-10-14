@@ -69,3 +69,24 @@ func TestTargetRepositoryEnforcesCaseInsensitiveNames(t *testing.T) {
 		t.Fatal("duplicate name was accepted")
 	}
 }
+
+func TestTargetRepositoryKeepsSeparateOrdinaryReceiverBinding(t *testing.T) {
+	db := openRepositoryDatabase(t)
+	now := time.Now().UTC()
+	binding := domain.OrdinaryWebhookBinding{Endpoint: "https://receiver.example" + domain.OrdinaryWebhookPath, ValiditySeconds: 600, Credential: domain.CredentialRef{Kind: domain.CredentialEnvironment, Reference: "RECEIVER_KEY"}}
+	target := domain.Target{ID: "tgt_ordinary", DisplayName: "Ordinary", BaseURL: "https://public.example", APIProfile: "public-v1", Credential: domain.CredentialRef{Kind: domain.CredentialEnvironment, Reference: "PUBLIC_KEY"}, OrdinaryWebhook: &binding, CreatedAt: now, UpdatedAt: now}
+	if err := db.CreateTarget(context.Background(), target); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.GetTarget(context.Background(), target.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.OrdinaryWebhook == nil || *got.OrdinaryWebhook != binding || got.BaseURL != target.BaseURL || got.Credential != target.Credential {
+		t.Fatalf("binding lost: %+v", got)
+	}
+	list, err := db.ListTargets(context.Background())
+	if err != nil || len(list) != 1 || list[0].OrdinaryWebhook == nil || *list[0].OrdinaryWebhook != binding {
+		t.Fatalf("listed binding lost: %+v %v", list, err)
+	}
+}

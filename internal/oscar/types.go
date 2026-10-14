@@ -14,6 +14,7 @@ type InjectionClass string
 
 const (
 	InjectionAccepted      InjectionClass = "accepted"
+	InjectionForwarded     InjectionClass = "forwarded"
 	InjectionRejected      InjectionClass = "rejected"
 	InjectionQueued        InjectionClass = "queued"
 	InjectionPartial       InjectionClass = "partial"
@@ -70,11 +71,15 @@ type NotificationRecord struct {
 
 // LabelProbeResult records transport acceptance and authoritative history read-back.
 type LabelProbeResult struct {
-	Accepted      bool              `json:"accepted"`
-	HistoryFound  bool              `json:"historyFound"`
-	Fingerprint   string            `json:"fingerprint,omitempty"`
-	Labels        map[string]string `json:"labels,omitempty"`
-	MissingLabels []string          `json:"missingLabels,omitempty"`
+	InputPath        string            `json:"inputPath,omitempty"`
+	Endpoint         string            `json:"endpoint,omitempty"`
+	CleanupForwarded bool              `json:"cleanupForwarded,omitempty"`
+	CleanupRequired  bool              `json:"cleanupRequired,omitempty"`
+	Accepted         bool              `json:"accepted"`
+	HistoryFound     bool              `json:"historyFound"`
+	Fingerprint      string            `json:"fingerprint,omitempty"`
+	Labels           map[string]string `json:"labels,omitempty"`
+	MissingLabels    []string          `json:"missingLabels,omitempty"`
 }
 
 // MachineError preserves safe HTTP failure metadata without credentials.

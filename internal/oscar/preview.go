@@ -178,6 +178,9 @@ func BuildOperationPreview(plan compiler.Plan, harnessVersion string) ([]Operati
 		Stage: "evidence.persist_final_transaction", Method: "LOCAL", Path: "",
 		Summary: "Persist normalized assertions, cleanup outcome, and terminal evidence in the runtime's final SQLite transaction; this is not an OSCAR request.",
 	})
+	if plan.InputPath == "ordinary-webhook" {
+		return ordinaryOperationPreview(operations, plan.RunID)
+	}
 	return operations, nil
 }
 

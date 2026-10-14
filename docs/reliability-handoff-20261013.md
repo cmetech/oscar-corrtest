@@ -44,3 +44,9 @@ The subsequent [recorded-injection cut](qualification/20261013/recorded-injectio
 See [the detailed runner contract](reliability-e2e.md) for assertion semantics, observation limits and cleanup behavior.
 
 A [design-only lab-source contract proposal](corrtest-lab-source-contract-proposal-20261013.md) maps the remaining identity/order/episode/fencing requirements onto existing storage. It is not implementation-ready or an activation grant; backend protocol review remains required.
+
+## Ordinary receiver route increment
+
+In addition to the five direct downstream fixtures, [ordinary webhook Flood](../scenarios/reliability/flood-ordinary-webhook.yaml) adds a bounded receiver profile route for five-versus-four named firing inputs. Its [setup and limits](ordinary-webhook-input.md) require a fixed profile hash/acknowledgment, separate credentials and explicit validity. Local model qualification does not prove deployed native grouping or selected admission. Source clears use the same receiver and original episode; ambiguous input remains DIRTY. Standalone doctor and the five earlier fixtures remain direct.
+
+Ordinary route qualification: **859 tests/subtests, 27 passing packages, zero failures**, with two command packages reporting no test files. [Retained review and test evidence](qualification/20261013/ordinary-webhook/README.md) includes the two reproduced/fixed review findings. No live qualification is implied.

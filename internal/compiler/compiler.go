@@ -99,6 +99,24 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 		return Plan{}, fmt.Errorf("scenario maximum duration is outside the safe budget")
 	}
 	plan := Plan{APIVersion: input.APIVersion, Scenario: input.Name, Suite: input.Suite, Pattern: input.Pattern, InputPath: "alert-engine", RunID: run.ID, ShortToken: strings.ToUpper(run.ShortToken), MaxDuration: input.MaxDuration}
+	if input.InputPath == "ordinary-webhook" {
+		if input.Pattern != "flood" {
+			return Plan{}, fmt.Errorf("ordinary webhook currently supports only basic Flood")
+		}
+		for _, item := range input.Cases {
+			seen := map[string]bool{}
+			if len(item.Events) == 0 {
+				return Plan{}, fmt.Errorf("ordinary webhook requires explicit named firing sources")
+			}
+			for _, event := range item.Events {
+				if event.Source == "" || event.Status != "firing" || seen[event.Source] {
+					return Plan{}, fmt.Errorf("ordinary webhook supports unique named firing only; recovery/refire unsupported")
+				}
+				seen[event.Source] = true
+			}
+		}
+		plan.InputPath = "ordinary-webhook"
+	}
 	coOccurrenceRoles := requiredCoOccurrenceRoles(input)
 	for _, source := range input.Cases {
 		events := source.Events

@@ -179,6 +179,30 @@ func (d *Database) TransitionRun(ctx context.Context, id string, next domain.Run
 	return nil
 }
 
+// SetOrdinaryPreflightPlan saves route identity before the durable receiver probe.
+// Case/attempt initialization remains owned by SetRunExecutionDocuments.
+func (d *Database) SetOrdinaryPreflightPlan(ctx context.Context, id string, plan json.RawMessage, at time.Time) error {
+	if err := d.Ready(); err != nil {
+		return err
+	}
+	var document struct {
+		RunID     string `json:"runId"`
+		InputPath string `json:"inputPath"`
+	}
+	if json.Unmarshal(plan, &document) != nil || document.RunID != id || document.InputPath != "ordinary-webhook" || at.IsZero() {
+		return fmt.Errorf("ordinary preflight plan identity is invalid")
+	}
+	result, err := d.db.ExecContext(ctx, `UPDATE runs SET compiled_plan_json=?, updated_at=? WHERE id=? AND status='QUEUED' AND compiled_plan_json IS NULL`, string(plan), formatTime(at), id)
+	if err != nil {
+		return fmt.Errorf("persist ordinary preflight plan: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil || count != 1 {
+		return fmt.Errorf("ordinary preflight requires an uninitialized queued run")
+	}
+	return nil
+}
+
 // SetRunExecutionDocuments persists preflight facts before external mutation.
 func (d *Database) SetRunExecutionDocuments(ctx context.Context, id string, capabilities, plan json.RawMessage, at time.Time) error {
 	if !json.Valid(capabilities) || !json.Valid(plan) || at.IsZero() {
