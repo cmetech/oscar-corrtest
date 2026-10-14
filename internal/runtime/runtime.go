@@ -58,6 +58,9 @@ type Diagnostic struct {
 
 // Runtime owns one process's durable services.
 type Runtime struct {
+	stateLock  *os.File
+	closeOnce  sync.Once
+	closeErr   error
 	settings   config.Settings
 	database   *storage.Database
 	history    *history.Service
@@ -100,6 +103,16 @@ func OpenWithOptions(ctx context.Context, settings config.Settings, info version
 	if err := os.Chmod(settings.DataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("restrict data directory: %w", err)
 	}
+	stateLock, err := acquireStateLock(settings.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	owned := false
+	defer func() {
+		if !owned {
+			_ = stateLock.Close()
+		}
+	}()
 	databasePath := filepath.Join(settings.DataDir, "corrtest.db")
 	database, err := storage.Open(ctx, databasePath)
 	if err != nil {
@@ -120,18 +133,20 @@ func OpenWithOptions(ctx context.Context, settings config.Settings, info version
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	result := &Runtime{
-		settings: settings, database: database, history: service, artifacts: artifacts,
+		settings: settings, stateLock: stateLock, database: database, history: service, artifacts: artifacts,
 		readiness: Readiness{Ready: database.Ready() == nil, DatabasePath: databasePath}, version: info.Version, getenv: getenv, logger: logger, logs: options.Logs, operations: options.Operations, rootCtx: ctx,
 		active: make(map[string]context.CancelFunc),
 	}
 	if readyErr := database.Ready(); readyErr != nil {
 		result.readiness.Error = readyErr.Error()
+		owned = true
 		return result, nil
 	}
 	if _, err := service.RecoverInterruptedRuns(ctx); err != nil {
 		_ = database.Close()
 		return nil, fmt.Errorf("recover interrupted runs: %w", err)
 	}
+	owned = true
 	result.logger.InfoContext(ctx, "runtime opened", "ready", result.readiness.Ready, "database_path", databasePath)
 	return result, nil
 }
@@ -403,15 +418,21 @@ func (r *Runtime) Settings() config.Settings { return r.settings }
 func (r *Runtime) Artifacts() *artifact.Store { return r.artifacts }
 
 // Close cancels active executions, waits for their bounded cleanup, then
-// releases the database pool.
+// releases the database pool and state-directory ownership exactly once.
 func (r *Runtime) Close() error {
-	r.activeMu.Lock()
-	for _, cancel := range r.active {
-		cancel()
-	}
-	r.activeMu.Unlock()
-	r.runWG.Wait()
-	return r.database.Close()
+	r.closeOnce.Do(func() {
+		r.activeMu.Lock()
+		for _, cancel := range r.active {
+			cancel()
+		}
+		r.activeMu.Unlock()
+		r.runWG.Wait()
+		r.closeErr = r.database.Close()
+		if err := r.stateLock.Close(); r.closeErr == nil {
+			r.closeErr = err
+		}
+	})
+	return r.closeErr
 }
 
 // CreateTarget delegates to the shared history service.

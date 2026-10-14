@@ -128,6 +128,8 @@ Custom YAML/JSON is strict and bounded: unknown/duplicate keys, aliases, multipl
 
 Evidence ZIPs are atomic and non-overwriting. They contain the canonical JSON report, immutable plan, timeline, offline HTML, JUnit XML, and a SHA-256 manifest. Run deletion requires an exact ID, `--yes`, a terminal clean/not-required cleanup state, and verified local artifacts. Retention uses the same gate, provides a separate preview, and processes no more than 500 exact candidates per invocation.
 
+One CorrTest runtime owns each data directory. While `serve` or a CLI run is using it, another stateful CLI command (including `runs show`, `runs list`, backup or export) refuses with “state directory already in use.” Use the running web UI for status, or wait for the owner to exit before using the CLI. Independent data directories remain separate. The persistent `.corrtest.lock` file is normal; never delete it to force access. The OS releases ownership after process exit or a crash, and the next owner performs existing interrupted-run recovery without resuming injection. Stop older CorrTest binaries before upgrading: they do not honor this lock.
+
 SQLite uses WAL, foreign keys, a busy timeout, and full synchronous writes. Keep the data directory on a local filesystem. The online database backup does not include separate run artifact directories; preserve the whole state directory or export the required runs.
 
 ## Serving securely
