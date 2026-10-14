@@ -1,0 +1,64 @@
+# SOURCE TAGS ARE TEST LABELS, NOT TRUSTED RECEIVER PROVENANCE.
+# Downstream audit + source History only; no parent recovery or receiver proof.
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: staged-cross-source-test-labels
+suite: reliability
+pattern: cross_source
+inputPath: alert-engine
+maxDuration: 90s
+cases:
+- name: both-required-test-tags
+  code: P01
+  polarity: positive
+  window: 30s
+  groupBy: [site]
+  labels: {site: lab}
+  events:
+  - {role: interface_down, source: snmp_A, status: firing, labels: {oscar_source: snmp}}
+  - {role: interface_down, source: api_A, status: firing, delay: 3s, labels: {oscar_source: api}}
+  - {role: interface_down, source: snmp_A, status: resolved, delay: 6s}
+  - {role: interface_down, source: api_A, status: resolved, delay: 9s}
+  checkpoints:
+  - name: one-test-tag-advances-without-trigger
+    afterEvent: 1
+    window: 2s
+    assertions:
+    - {kind: audit-count, outcome: enriched, equals: 1}
+    - {kind: audit-count, outcome: parent_emitted, equals: 0}
+  - name: both-test-tags-trigger-audit
+    afterEvent: 2
+    window: 2s
+    assertions:
+    - {kind: audit-count, outcome: enriched, equals: 1}
+    - {kind: audit-count, outcome: parent_emitted, equals: 1}
+  - name: one-source-visible-as-resolved
+    afterEvent: 3
+    window: 2s
+    assertions:
+    - {kind: source-episode-state-count, outcome: resolved, equals: 1}
+    - {kind: source-episode-state-count, outcome: firing, equals: 1}
+  - name: both-sources-visible-as-resolved
+    afterEvent: 4
+    window: 2s
+    assertions: [{kind: source-episode-state-count, outcome: resolved, equals: 2}]
+  assertions: [{kind: source-episode-state-count, outcome: resolved, equals: 2}]
+- name: same-test-tag-does-not-satisfy-source-mix
+  code: N01
+  polarity: negative
+  window: 30s
+  groupBy: [site]
+  labels: {site: lab}
+  events:
+  - {role: interface_down, source: snmp_A, status: firing, labels: {oscar_source: snmp}}
+  - {role: interface_down, source: snmp_B, status: firing, delay: 3s, labels: {oscar_source: snmp}}
+  checkpoints:
+  - name: same-test-tag-no-trigger
+    afterEvent: 2
+    window: 2s
+    assertions:
+    - {kind: audit-count, outcome: enriched, equals: 2}
+    - {kind: audit-count, outcome: parent_emitted, equals: 0}
+  assertions:
+  - {kind: audit-count, outcome: enriched, equals: 2}
+  - {kind: audit-count, outcome: parent_emitted, equals: 0}

@@ -146,3 +146,55 @@ func TestSemanticModelCoOccurrenceCountsWindowedDistinctNames(t *testing.T) {
 		})
 	}
 }
+
+func TestSemanticModelCrossSourceUsesRequiredSourcePairs(t *testing.T) {
+	type input struct {
+		name, status, tag, fallback, site string
+		second                            int
+	}
+	for _, test := range []struct {
+		name   string
+		inputs []input
+		want   bool
+	}{
+		{"required tags", []input{{"A", "firing", "snmp", "", "x", 0}, {"B", "firing", "api", "", "x", 3}}, true},
+		{"same tag twice", []input{{"A", "firing", "snmp", "", "x", 0}, {"A", "firing", "snmp", "", "x", 3}}, false},
+		{"source fallback", []input{{"A", "firing", "", "snmp", "x", 0}, {"B", "firing", "", "api", "x", 3}}, true},
+		{"primary tag wins", []input{{"A", "firing", "snmp", "api", "x", 0}, {"B", "firing", "api", "snmp", "x", 3}}, true},
+		{"wrong source name pair", []input{{"B", "firing", "snmp", "", "x", 0}, {"A", "firing", "api", "", "x", 3}}, false},
+		{"different groups", []input{{"A", "firing", "snmp", "", "x", 0}, {"B", "firing", "api", "", "y", 3}}, false},
+		{"expired first", []input{{"A", "firing", "snmp", "", "x", 0}, {"B", "firing", "api", "", "x", 31}}, false},
+		{"resolution ignored", []input{{"A", "resolved", "snmp", "", "x", 0}, {"B", "firing", "api", "", "x", 3}}, false},
+		{"repeat refresh", []input{{"A", "firing", "snmp", "", "x", 0}, {"A", "firing", "snmp", "", "x", 20}, {"B", "firing", "api", "", "x", 40}}, true},
+		{"last arriving timestamp wins", []input{{"A", "firing", "snmp", "", "x", 20}, {"A", "firing", "snmp", "", "x", 0}, {"B", "firing", "api", "", "x", 40}}, false},
+		{"unknown tag ignored", []input{{"A", "firing", "snmp", "", "x", 0}, {"B", "firing", "other", "", "x", 3}}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			base := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+			m := NewModel(base)
+			rule := compiler.RulePlan{Name: "rule", Pattern: "cross_source", WindowSeconds: 30, GroupBy: []string{"site"}, MatchCriteria: map[string]any{"required_sources": []any{map[string]any{"source": "snmp", "match": map[string]string{"alertname": "A"}}, map[string]any{"source": "api", "match": map[string]string{"alertname": "B"}}}}, EmitAlertName: "PARENT", EmitLabels: map[string]string{"alertname": "PARENT", "oscar_test_run_id": "test"}}
+			if _, err := m.CreateRule(context.Background(), rule); err != nil {
+				t.Fatal(err)
+			}
+			for index, event := range test.inputs {
+				eventTime := base.Add(time.Duration(event.second) * time.Second)
+				if eventTime.After(m.Now()) {
+					if err := m.Sleep(context.Background(), eventTime.Sub(m.Now())); err != nil {
+						t.Fatal(err)
+					}
+				}
+				_, err := m.Inject(context.Background(), compiler.AlertPlan{Name: event.name, Status: event.status, StartsAt: eventTime, Labels: map[string]string{"alertname": event.name, "event": fmt.Sprint(index), "oscar_source": event.tag, "source": event.fallback, "site": event.site, "oscar_test_rule_name": "rule", "oscar_test_run_id": "test"}})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			rows, err := m.FindHistory(context.Background(), oscar.HistoryQuery{AlertName: "PARENT"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := len(rows) == 1; got != test.want {
+				t.Fatalf("trigger=%v want=%v", got, test.want)
+			}
+		})
+	}
+}

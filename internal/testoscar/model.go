@@ -230,20 +230,7 @@ func (m *Model) triggerIndex(rule compiler.RulePlan) int {
 	case "sequence":
 		return m.sequenceTriggerIndex(rule, events)
 	case "cross_source":
-		required, _ := rule.MatchCriteria["required_sources"].([]any)
-		seen := map[string]bool{}
-		for _, index := range events {
-			for _, raw := range required {
-				item, _ := raw.(map[string]any)
-				source := fmt.Sprint(item["source"])
-				if m.alerts[index].plan.Labels["oscar_source"] == source && m.matches(m.alerts[index], stringMap(item["match"])) {
-					seen[source] = true
-				}
-			}
-			if len(seen) == len(required) {
-				return index
-			}
-		}
+		return m.crossSourceTriggerIndex(rule, events)
 	case "threshold":
 		match, distinct := stringMap(rule.MatchCriteria["match"]), fmt.Sprint(rule.MatchCriteria["distinct_label"])
 		seen := map[string]bool{}
@@ -282,6 +269,61 @@ func (m *Model) triggerIndex(rule compiler.RulePlan) int {
 		}
 		if lastIndex >= 0 && !m.now.Before(last.Add(time.Duration(seconds)*time.Second)) {
 			return lastIndex
+		}
+	}
+	return -1
+}
+
+// crossSourceTriggerIndex models the first ordinary trigger from source-tag
+// labels, not real receiver provenance. Required pairs filter inputs before a
+// per-group, event-time source map is updated; TTL/cooldown rearming is excluded.
+func (m *Model) crossSourceTriggerIndex(rule compiler.RulePlan, events []int) int {
+	rawRequired, _ := rule.MatchCriteria["required_sources"].([]any)
+	required := map[string]string{}
+	for _, raw := range rawRequired {
+		item, _ := raw.(map[string]any)
+		source, _ := item["source"].(string)
+		if source != "" {
+			required[source] = stringMap(item["match"])["alertname"]
+		}
+	}
+	groups := map[string]map[string]int64{}
+	for _, index := range events {
+		alert := m.alerts[index]
+		if alert.plan.Status == "resolved" {
+			continue
+		}
+		source := alert.plan.Labels["oscar_source"]
+		if source == "" {
+			source = alert.plan.Labels["source"]
+		}
+		expected, exists := required[source]
+		if source == "" || !exists || (expected != "" && alert.plan.Labels["alertname"] != expected) {
+			continue
+		}
+		timestamp := alert.plan.StartsAt
+		if timestamp.IsZero() {
+			timestamp = alert.at
+		}
+		millis := timestamp.UnixMilli()
+		group := map[string]string{}
+		for _, label := range rule.GroupBy {
+			group[label] = alert.plan.Labels[label]
+		}
+		key := labelFingerprint(group)
+		sources := groups[key]
+		if sources == nil {
+			sources = map[string]int64{}
+			groups[key] = sources
+		}
+		for tag, stored := range sources {
+			if stored < millis-int64(rule.WindowSeconds)*1000 {
+				delete(sources, tag)
+			}
+		}
+		sources[source] = millis
+		if len(sources) >= len(required) {
+			return index
 		}
 	}
 	return -1
