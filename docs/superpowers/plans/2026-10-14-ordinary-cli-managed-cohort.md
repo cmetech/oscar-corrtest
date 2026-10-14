@@ -1,6 +1,6 @@
 # Ordinary CorrTest CLI managed-cohort implementation plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Execute the committed ordinary Flood scenario with the actual CorrTest CLI and real receiver, Native callback, History, rule and audit APIs in a newly owned disposable backend cohort.
 
@@ -12,7 +12,15 @@
 
 ## Status and ownership
 
-Design proposal only. Backend owner must finalize it against the in-progress W16 five-source/repeat/no-match/clear proof before implementation. CorrTest `4553f5b` is the minimum checked source checkpoint. No listener, role, container or live request was created to write this plan. Backend fixture files below belong to the parent workstream; this document does not authorize CorrTest agents to edit them.
+Completed finite qualification, recorded in backend commit `502fb01a3` and
+[the joined evidence](../../../../oscar/docs/qualification/20261014/ordinary-cli-cohort/README.md).
+The actual CLI used committed `e247ddd` with the lifetime SQLite state lock.
+Final MySQL 8 and 5.7 runs passed in 273.34 s and 282.99 s, respectively;
+49 local fixture/observer/cleanup tests plus 13 subtests passed, with one
+explicit owned-SQL opt-in skip. One fresh whole-cut review and its fix pass
+are complete. Production activation, provider delivery, capacity and UAT remain
+unqualified. Backend owns the fixture; no CorrTest product changes were required
+by the joined qualification. Earlier proposal/failure evidence remains retained.
 
 ## Global constraints
 
@@ -38,14 +46,41 @@ Design proposal only. Backend owner must finalize it against the in-progress W16
 
 **Produces:** CLI report/exit code, retained SQLite/request timeline/export, actual API-created rule IDs, independently scoped native/History/Redis/audit evidence, exact grant/config/image records and joined owned-resource teardown evidence. A passing CLI verdict is necessary but insufficient without these independent checks.
 
-- [ ] **Pin fixture baseline and reproduce the missing real transport/authority boundaries.** The existing helper's ASGI transport is not a CLI-reachable listener. Default disposable Correlator credentials lack rule INSERT/DELETE and writer-revision UPDATE. Preserve expected failure evidence before adding the explicit fixture seams; do not replace APIs with SQL seeding or model responses.
-- [ ] **Provision a scoped test-only SQL authority delta before cohort creation.** Temporarily extend only `_APPLICATION_WRITES['correlator']` with `CorrelationRules` and `CorrelationWriterRevision` before `ManagedCallbackCohort.create` calls `provision_application`. Leave the production/helper default unchanged; use scoped restoration even on failure. The existing provisioner grants INSERT/UPDATE/DELETE on each added table, including all three on the revision table. This is an explicitly broader disposable fixture grant, not a claim of minimum production privilege. Assert both tables exist, every other role/table/privilege is unchanged, `application_tables` has exactly this delta and actual grants match. Preserve `_verify_shadow_sql`, binding hashes, account inventory and restore checks. Do not edit a running cohort's grants.
-- [ ] **Start the packaged receiver as an owned private listener.** Reuse the actual router/compiler/AlertHandler/native runtime and fixed artifact/auth fixture. Use verified TLS and owned health/shutdown bounds; preserve exact profile acknowledgment. Record that receiver registry/auth are fixture seams and middleware auth enforcement remains unqualified in the existing managed setup. No public port is required: place the CLI in the same owned network namespace or private network, with reachable certificate-matching middleware/receiver names.
-- [ ] **Run the actual CLI with separate endpoint bindings.** Mount the cross-built binary, unchanged scenario, CA and credential-reference files read-only, with a private writable SQLite/artifact directory. Configure the public middleware URL and fixed receiver URL independently, validity 600 seconds, then run `plan` and `run` with `--pipeline-mode phase_a_audit_only --output json`. The durable scenario's ordinary probe is the preflight; standalone direct `doctor` is not ordinary transport proof. Capture stdout/stderr and nonzero exits without losing artifacts. Target flags already exist: `--ca-file`, `--credential-file`, `--receiver-ca-file`, `--receiver-credential-file`, `--receiver-validity-seconds`, and `--data-dir`.
-- [ ] **Verify real rule ownership and window decisions.** Use actual validate/create/read/delete APIs and their synchronous reload; inspect runtime load where available. P01 must retain all five exact firing episodes and one `parent_emitted` decision, N01 four exact firing episodes and no trigger for the full interval. Native defaults (group_wait 1s/group_interval 5s) may cause partial then repeated whole groups. Independently inspect native fingerprints, scoped Redis membership and audits while the window is still present, rather than waiting until the negative case exhausts the positive window. Scope NATS/task/History evidence to this run; old helper absolute counts are inappropriate. A shadow audit is not emitted parent evidence.
-- [ ] **Verify cleanup and invalidated selected readiness honestly.** API-delete owned rules and check original inventory restored. Rule changes advance writer revision and may withdraw selected readiness; do not reuse old capture evidence or claim selected readiness remained qualified. Native clears must retain original labels/start and explicit endsAt through the same pinned receiver. After CLI cleanup, separately observe resolved callbacks and exact History (current `cleared`, original source severity retained) before stopping the cohort. CLI CLEAN by itself proves only clear forwarding. Missing evidence remains bounded/inconclusive and never authorizes a guessed late clear.
-- [ ] **Archive and join resources.** Preserve canonical report, exact-request SQLite/timeline and export (or explicit export-limit error), independent observations and failures on both MySQL versions. Retain source responsibility on interruption; inspect owner identity and join every owned actor before existing offline restoration. Remove only resources created by this fixture. Run adjacent backend ownership/grant regressions, one fresh whole-cut review, and document gaps before committing the backend fixture. The already verified CorrTest 889-test suite need not rerun without a product change.
+- [x] **Pin fixture baseline and reproduce the missing real transport/authority boundaries.** The existing helper's ASGI transport is not a CLI-reachable listener. Default disposable Correlator credentials lack rule INSERT/DELETE and writer-revision UPDATE. Preserve expected failure evidence before adding the explicit fixture seams; do not replace APIs with SQL seeding or model responses.
+- [x] **Provision a scoped test-only SQL authority delta before cohort creation.** Temporarily extend only `_APPLICATION_WRITES['correlator']` with `CorrelationRules` and `CorrelationWriterRevision` before `ManagedCallbackCohort.create` calls `provision_application`. Leave the production/helper default unchanged; use scoped restoration even on failure. The existing provisioner grants INSERT/UPDATE/DELETE on each added table, including all three on the revision table. This is an explicitly broader disposable fixture grant, not a claim of minimum production privilege. Assert both tables exist, every other role/table/privilege is unchanged, `application_tables` has exactly this delta and actual grants match. Preserve `_verify_shadow_sql`, binding hashes, account inventory and restore checks. Do not edit a running cohort's grants.
+- [x] **Start the packaged receiver as an owned private listener.** Reuse the actual router/compiler/AlertHandler/native runtime and fixed artifact/auth fixture. Use verified TLS and owned health/shutdown bounds; preserve exact profile acknowledgment. Record that receiver registry/auth are fixture seams and middleware auth enforcement remains unqualified in the existing managed setup. No public port is required: place the CLI in the same owned network namespace or private network, with reachable certificate-matching middleware/receiver names.
+- [x] **Run the actual CLI with separate endpoint bindings.** Mount the cross-built binary, unchanged scenario, CA and credential-reference files read-only, with a private writable SQLite/artifact directory. Configure the public middleware URL and fixed receiver URL independently, validity 600 seconds, then run `plan` and `run` with `--pipeline-mode phase_a_audit_only --output json`. The durable scenario's ordinary probe is the preflight; standalone direct `doctor` is not ordinary transport proof. Capture stdout/stderr and nonzero exits without losing artifacts. Target flags already exist: `--ca-file`, `--credential-file`, `--receiver-ca-file`, `--receiver-credential-file`, `--receiver-validity-seconds`, and `--data-dir`.
+- [x] **Verify real rule ownership and window decisions.** Use actual validate/create/read/delete APIs and their synchronous reload; inspect runtime load where available. P01 must retain all five exact firing episodes and one `parent_emitted` decision, N01 four exact firing episodes and no trigger for the full interval. Native defaults (group_wait 1s/group_interval 5s) may cause partial then repeated whole groups. Independently inspect native fingerprints, scoped Redis membership and audits while the window is still present, rather than waiting until the negative case exhausts the positive window. Scope NATS/task/History evidence to this run; old helper absolute counts are inappropriate. A shadow audit is not emitted parent evidence.
+- [x] **Verify cleanup and invalidated selected readiness honestly.** API-delete owned rules and check original inventory restored. Rule changes advance writer revision and may withdraw selected readiness; do not reuse old capture evidence or claim selected readiness remained qualified. Native clears must retain original labels/start and explicit endsAt through the same pinned receiver. After CLI cleanup, separately observe resolved callbacks and exact History (current `cleared`, original source severity retained) before stopping the cohort. CLI CLEAN by itself proves only clear forwarding. Missing evidence remains bounded/inconclusive and never authorizes a guessed late clear.
+- [x] **Archive and join resources.** Preserve canonical report, exact-request SQLite/timeline and export (or explicit export-limit error), independent observations and failures on both MySQL versions. Retain source responsibility on interruption; inspect owner identity and join every owned actor before existing offline restoration. Remove only resources created by this fixture. Run adjacent backend ownership/grant regressions, one fresh whole-cut review, and document gaps before committing the backend fixture. The already verified CorrTest 889-test suite need not rerun without a product change.
 
 ## Explicit limits
 
-This joined cut would qualify one ordinary lab profile and one Flood scenario through real infrastructure. It does not qualify production profile availability/auth, arbitrary native grouping settings, notifier delivery, receiver selected admission, source epoch/order, source completeness, automatic physical recovery or interrupted-run cleanup replay. Unchanged Splunk/common production payloads remain eligible for ordinary window correlation according to their actual contracts; this lab profile is not a demand to change them.
+This joined cut qualifies one ordinary lab profile and one Flood scenario through real infrastructure. It does not qualify production profile availability/auth, arbitrary native grouping settings, notifier delivery, receiver selected admission, source epoch/order, source completeness, automatic physical recovery or interrupted-run cleanup replay. Unchanged Splunk/common production payloads remain eligible for ordinary window correlation according to their actual contracts; this lab profile is not a demand to change them.
+
+
+## Executed deviations and review fixes
+
+The actual private listener reuses packaged W16 and includes a fixed-target
+external middleware forwarder. The initial run failed HTTP 403 because the
+existing fixture had no bound read identity. Only the disposable middleware
+now enables its normal auth middleware and receives a generated cached identity
+with the three required permissions and a bounded TTL; production RBAC and
+identity issuance are unchanged. Cached identity issuance is a test fixture.
+
+Independent final checks observed five positive and four negative window members,
+ten resolved History identities with original severity and exact Native episode
+identity retained, twenty firing/resolved broker records, original durable ACK
+coverage, restored rule/Native inventories and unchanged selected-state tables.
+Late audit rows are queried by retained rule IDs after CLI deletion and buffer
+drain. No parent intent/send/outbox row was created and no parent was dispatched.
+
+The fresh review required persistent private request/owner evidence plus
+label-bound cleanup after controller interruption, and the retained-ID final
+audit check. RED and failed fix attempts are preserved alongside final passes.
+Interruption controls use simulated Docker responses; actual host power loss,
+Linux lock contention/crash and interrupted source-cleanup replay remain open.
+Both final cohorts' exact 13 containers, three networks and three volumes were
+confirmed absent; CLI listeners/runtimes and temporary actors joined. Shared
+application volumes and services were untouched. Finite run duration is not a
+throughput result; zero of the 39 UAT cases is accepted by this qualification.
