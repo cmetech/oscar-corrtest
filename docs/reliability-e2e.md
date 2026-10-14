@@ -92,6 +92,14 @@ The report and visible coverage text explicitly exclude receiver admission/healt
 
 N01 sends only the disk role and checks enriched/no-trigger evidence through its bounded observation. It still matches one required clause and **is not a no-match control**. Counts are cumulative per fixture rule. `parent_emitted` is the recorded trigger decision in audit-only mode, not confirmation that a synthetic parent was created or delivered. Partial or complete source History recovery never proves parent recovery or physical clear; those remain unproved in reports. API delay may require longer lab checkpoints and correspondingly later event offsets.
 
+## Local HTTP qualification and uncertain input cleanup
+
+Both Flood fixtures also run locally through the real `oscar.Client` HTTP adapter against a recorded test server. This exercises the compiled payload, actual rule/History/audit JSON decoding, different History and Alertmanager fingerprints, named episode timestamps, checkpoints, and owned cleanup. The server uses the existing independent Flood model; it does not implement or qualify the backend. Reports still mark receiver admission, native grouping, producer barriers, notification delivery, and physical clear as unproved or untested.
+
+If an input request fails after OSCAR may have accepted it, CorrTest records an `ATTEMPTED`/`indeterminate` fact, stops further stimuli and does **not** retry the POST. The fact retains the actual HTTP error code, or `0` when no response status is available, and the named episode's prepared `startsAt`. Cleanup discovers exact run-owned History. For an uncertain attempt it additionally requires the exact episode, every expected identity label, and one authoritative fingerprint. Missing, delayed, stale or conflicting evidence leaves cleanup `DIRTY`; old History cannot satisfy a failed refire that reused the same source labels. A failed legacy unnamed input lacks a prepared episode and also remains `DIRTY` rather than guessing a clear. Other positively owned inputs and rules can still be cleaned up.
+
+These attempt facts are held in memory until finalization. They are **not** a durable before-send ledger, so this increment does not close process-death/restart reconciliation gaps. `CLEAN` still means owned cleanup requests were accepted under the existing contract, not that source recovery, a physical clear or downstream notification delivery completed. A missing row after an ambiguous request cannot establish that nothing was accepted.
+
 ## Next shared backend contracts
 
 1. A supported authenticated receiver input adapter that exercises actual selection and recovery-owner lookup. The current private native-array receiver endpoint is ordinary-only and is not this adapter.

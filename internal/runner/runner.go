@@ -4,6 +4,7 @@ package runner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -265,15 +266,25 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 					return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
 				}
 			}
+			// Retain uncertain work before the external call. This is in-memory evidence,
+			// not a durable before-send ledger or permission to retry the POST.
+			attempts = append(attempts, domain.AlertAttemptFact{CaseStableKey: item.Code, EventID: alert.Labels["oscar_test_event_id"], EventIndex: alertIndex + 1,
+				SendState: "ATTEMPTED", InjectionClass: string(oscar.InjectionIndeterminate), StartsAt: alert.StartsAt})
 			result, err := r.api.Inject(ctx, alert)
+			attempt := &attempts[len(attempts)-1]
+			attempt.StatusCode = result.StatusCode
 			if err != nil {
+				var remote *oscar.MachineError
+				if errors.As(err, &remote) {
+					attempt.StatusCode = remote.StatusCode
+				}
 				return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
 			}
-			attempts = append(attempts, domain.AlertAttemptFact{CaseStableKey: item.Code, EventID: alert.Labels["oscar_test_event_id"], EventIndex: alertIndex + 1,
-				SendState: "SENT", InjectionClass: string(result.Class), StatusCode: result.StatusCode})
+			attempt.InjectionClass = string(result.Class)
 			if result.Class != oscar.InjectionAccepted {
 				return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, fmt.Errorf("injection was %s", result.Class))
 			}
+			attempt.SendState = "SENT"
 			for _, point := range item.Checkpoints {
 				if point.AfterEvent != alertIndex+1 {
 					continue
@@ -487,30 +498,30 @@ func (r *Runner) failAndCleanup(ctx context.Context, run domain.Run, plan compil
 }
 
 func (r *Runner) discoverAttemptedHistory(ctx context.Context, run domain.Run, plan compiler.Plan, attempts []domain.AlertAttemptFact) ([]oscar.HistoryRecord, error) {
-	attemptedEvents := make(map[string]bool, len(attempts))
-	for _, attempt := range attempts {
-		if attempt.SendState == "SENT" && attempt.EventID != "" {
-			attemptedEvents[attempt.EventID] = true
-		}
+	type expectedSource struct {
+		alert   compiler.AlertPlan
+		attempt domain.AlertAttemptFact
 	}
-	if len(attemptedEvents) == 0 {
-		return nil, nil
-	}
-	expected := map[string]map[string]bool{}
+	// The latest attempt for a named source supersedes prior episodes. An old
+	// firing row cannot satisfy an uncertain refire with the same event ID.
+	expected := map[string]map[string]expectedSource{}
 	syntheticNames := map[string]bool{}
 	for _, item := range plan.Cases {
 		if item.Rule.EmitAlertName != "" {
 			syntheticNames[item.Rule.EmitAlertName] = true
 		}
-		for _, alert := range item.Alerts {
-			eventID := alert.Labels["oscar_test_event_id"]
-			if !attemptedEvents[eventID] {
+		for _, attempt := range attempts {
+			if attempt.CaseStableKey != item.Code || attempt.EventIndex < 1 || attempt.EventIndex > len(item.Alerts) {
+				continue
+			}
+			alert := item.Alerts[attempt.EventIndex-1]
+			if attempt.EventID == "" || attempt.EventID != alert.Labels["oscar_test_event_id"] {
 				continue
 			}
 			if expected[alert.Name] == nil {
-				expected[alert.Name] = map[string]bool{}
+				expected[alert.Name] = map[string]expectedSource{}
 			}
-			expected[alert.Name][eventID] = true
+			expected[alert.Name][attempt.EventID] = expectedSource{alert: alert, attempt: attempt}
 		}
 	}
 	if len(expected) == 0 {
@@ -534,18 +545,42 @@ func (r *Runner) discoverAttemptedHistory(ctx context.Context, run domain.Run, p
 			failures = append(failures, alertName+": "+err.Error())
 			continue
 		}
-		found := map[string]bool{}
+		candidates := map[string]map[string]oscar.HistoryRecord{}
 		for _, record := range records {
 			eventID := record.Labels["oscar_test_event_id"]
-			if record.AlertName != alertName || record.Labels["oscar_test_run_id"] != run.ID || record.Fingerprint == "" || !expected[alertName][eventID] {
+			wanted, exists := expected[alertName][eventID]
+			if record.AlertName != alertName || record.Labels["oscar_test_run_id"] != run.ID || record.Fingerprint == "" || !exists {
 				continue
 			}
-			found[eventID] = true
-			retainLatestHistory(byFingerprint, record)
+			if wanted.attempt.SendState == "ATTEMPTED" {
+				if wanted.attempt.StartsAt.IsZero() || !record.StartsAt.Equal(wanted.attempt.StartsAt) {
+					continue
+				}
+				labelsMatch := true
+				for label, value := range wanted.alert.Labels {
+					actual, present := record.Labels[label]
+					if !present || actual != value {
+						labelsMatch = false
+						break
+					}
+				}
+				if !labelsMatch {
+					continue
+				}
+			}
+			if candidates[eventID] == nil {
+				candidates[eventID] = map[string]oscar.HistoryRecord{}
+			}
+			retainLatestHistory(candidates[eventID], record)
 		}
-		for eventID := range expected[alertName] {
-			if !found[eventID] {
-				failures = append(failures, alertName+"/"+eventID+": history not found")
+		for eventID, wanted := range expected[alertName] {
+			rows := candidates[eventID]
+			if len(rows) == 0 || (wanted.attempt.SendState == "ATTEMPTED" && len(rows) != 1) {
+				failures = append(failures, alertName+"/"+eventID+": exact attempted history not found or ambiguous")
+				continue
+			}
+			for _, record := range rows {
+				retainLatestHistory(byFingerprint, record)
 			}
 		}
 	}

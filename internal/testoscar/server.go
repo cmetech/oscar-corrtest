@@ -29,11 +29,12 @@ type Request struct {
 
 // Server is an ordered scripted httptest server.
 type Server struct {
-	t        testing.TB
-	server   *httptest.Server
-	mu       sync.Mutex
-	queue    []Response
-	requests []Request
+	t         testing.TB
+	server    *httptest.Server
+	mu        sync.Mutex
+	queue     []Response
+	requests  []Request
+	responder func(Request) Response
 }
 
 // New starts a server and registers automatic shutdown with the test.
@@ -42,6 +43,16 @@ func New(t testing.TB) *Server {
 	result := &Server{t: t}
 	result.server = httptest.NewServer(http.HandlerFunc(result.handle))
 	t.Cleanup(result.server.Close)
+	return result
+}
+
+// NewWithResponder adds a stateful response seam while retaining scripted
+// queue priority, credential-redacted recording and automatic server shutdown.
+func NewWithResponder(t testing.TB, responder func(Request) Response) *Server {
+	result := New(t)
+	result.mu.Lock()
+	result.responder = responder
+	result.mu.Unlock()
 	return result
 }
 
@@ -82,15 +93,24 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	s.requests = append(s.requests, recorded)
-	if len(s.queue) == 0 {
+	var response Response
+	if len(s.queue) > 0 {
+		response = s.queue[0]
+		s.queue = s.queue[1:]
 		s.mu.Unlock()
-		s.t.Errorf("unexpected OSCAR test request: %s %s", r.Method, r.URL.Path)
-		http.Error(w, "unexpected request", http.StatusInternalServerError)
-		return
+	} else {
+		responder := s.responder
+		s.mu.Unlock()
+		if responder == nil {
+			s.t.Errorf("unexpected OSCAR test request: %s %s", r.Method, r.URL.Path)
+			http.Error(w, "unexpected request", http.StatusInternalServerError)
+			return
+		}
+		response = responder(recorded)
 	}
-	response := s.queue[0]
-	s.queue = s.queue[1:]
-	s.mu.Unlock()
+	if response.Status == 0 {
+		response.Status = http.StatusOK
+	}
 
 	if response.Release != nil {
 		select {

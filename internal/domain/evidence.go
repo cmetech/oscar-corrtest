@@ -36,13 +36,15 @@ type AssertionFact struct {
 }
 
 type AlertAttemptFact struct {
-	CaseStableKey  string `json:"caseStableKey"`
-	EventID        string `json:"eventId"`
-	EventIndex     int    `json:"eventIndex"`
-	SendState      string `json:"sendState"`
-	InjectionClass string `json:"injectionClass"`
-	StatusCode     int    `json:"statusCode"`
-	Fingerprint    string `json:"fingerprint,omitempty"`
+	// StartsAt binds a named attempt to its prepared episode; zero means unbound.
+	StartsAt       time.Time `json:"startsAt,omitzero"`
+	CaseStableKey  string    `json:"caseStableKey"`
+	EventID        string    `json:"eventId"`
+	EventIndex     int       `json:"eventIndex"`
+	SendState      string    `json:"sendState"`
+	InjectionClass string    `json:"injectionClass"`
+	StatusCode     int       `json:"statusCode"`
+	Fingerprint    string    `json:"fingerprint,omitempty"`
 }
 
 type AlertResolutionFact struct {
@@ -65,7 +67,7 @@ func (facts ExecutionFacts) Validate() error {
 		}
 	}
 	for _, attempt := range facts.Attempts {
-		if attempt.CaseStableKey == "" || attempt.EventID == "" || attempt.EventIndex <= 0 || attempt.SendState == "" || attempt.InjectionClass == "" || attempt.StatusCode < 100 || attempt.StatusCode > 599 {
+		if attempt.CaseStableKey == "" || attempt.EventID == "" || attempt.EventIndex <= 0 || attempt.SendState == "" || attempt.InjectionClass == "" || !((attempt.StatusCode >= 100 && attempt.StatusCode <= 599) || (attempt.StatusCode == 0 && attempt.SendState == "ATTEMPTED" && attempt.InjectionClass == "indeterminate")) {
 			return fmt.Errorf("alert attempt fact %q/%d is invalid", attempt.CaseStableKey, attempt.EventIndex)
 		}
 	}

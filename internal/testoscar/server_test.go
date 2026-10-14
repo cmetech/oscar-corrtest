@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -82,5 +83,32 @@ func TestServerHonorsRequestCancellationWhileBlocked(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("cancelled request remained blocked")
+	}
+}
+
+func TestServerDynamicResponderPreservesScriptPriorityAndRedaction(t *testing.T) {
+	var calls atomic.Int32
+	server := NewWithResponder(t, func(request Request) Response {
+		calls.Add(1)
+		if request.Header.Get("X-Api-Key") != "[REDACTED]" {
+			t.Error("dynamic responder received credentials")
+		}
+		return Response{Body: `{"observed":true}`}
+	})
+	server.Enqueue(Response{Status: http.StatusAccepted})
+	for i := 0; i < 2; i++ {
+		request, _ := http.NewRequest(http.MethodGet, server.URL()+"/dynamic", nil)
+		request.Header.Set("X-Api-Key", "test-only-key")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if i == 0 && response.StatusCode != http.StatusAccepted {
+			t.Fatal("scripted response lost priority")
+		}
+	}
+	if calls.Load() != 1 || len(server.Requests()) != 2 {
+		t.Fatalf("dynamic calls=%d requests=%d", calls, len(server.Requests()))
 	}
 }
