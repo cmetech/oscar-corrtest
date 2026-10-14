@@ -25,7 +25,26 @@ The implemented adapter sends **POST /api/v1/alerts to OSCAR Alert Engine**. It 
 
 Saved reports include these boundaries, and CLI run summaries and the run-detail page display them. The operator's `pipeline_mode` flag remains a declaration, not proof of deployed capabilities. Shadow mode may PASS its audit assertions while synthetic assertions are SKIPPED; this remains **downstream audit evidence only**.
 
-The runner observes terminal snapshots after all stimuli. The fixture's existing audit/count assertions therefore do **not** prove that every intermediate recovery or refire was applied, that a parent stayed open between steps, or that clear was safe. A prepared stimulus is an attempted input, not an accepted-intent receipt. History visibility is not notification-delivery confirmation. Missing source/audit evidence remains INCONCLUSIVE, and unsupported assertions are rejected.
+Scenarios without checkpoints retain terminal observation after all stimuli. The Flood fixture now also checks audit counts after four and five inputs, before sending later recovery/refire stimuli. These count assertions do **not** prove that a particular recovery/refire episode was applied, that a parent stayed open between polls, or that clear was safe. A prepared stimulus is an attempted input, not an accepted-intent receipt. History visibility is not notification-delivery confirmation. Missing source/audit evidence remains INCONCLUSIVE, and unsupported assertions are rejected.
+
+## Staged checkpoints
+
+A case may declare up to 16 checkpoints, ordered by their one-based `afterEvent` index:
+
+```yaml
+checkpoints:
+  - name: before-threshold
+    afterEvent: 4
+    window: 1s
+    assertions:
+      - {kind: audit-count, outcome: parent_emitted, equals: 0}
+```
+
+The runner pauses after the fourth accepted HTTP input, reads History/audit for only that sent prefix, and polls for the entire checkpoint window before proceeding. Assertion counts are cumulative for that prefix and rule, not a delta since the preceding checkpoint. All assertions need an explicit `equals` value. A skipped assertion (including synthetic counts in shadow mode) makes the checkpoint INCONCLUSIVE, even if its other assertions pass. A zero-count violation observed at any poll stays failed even if it disappears by the final read. Polling does not prove that an unobserved transient never occurred between reads.
+
+Checkpoint names must be unique within a case; event indices must increase. Windows are positive, at most two minutes, within the case/scenario observation budget, and must fit before the next declared event delay. Delays remain absolute from case start: checkpoint waiting does not add another full delay. Slow API calls can make later inputs late; they do not authorize extra run time or change the declared event timestamp. The existing overall run deadline still applies.
+
+On FAIL, INCONCLUSIVE, cancellation or read error, later stimuli stop and owned cleanup runs. The canonical report retains checkpoint snapshots, assertions and intervals, including earlier checkpoints when a later operation fails. The timeline records start/completion; CLI run summaries and `runs show` print checkpoint verdicts. Preview shows the pause and the existing History/audit reads. A missing cleanup identity remains DIRTY. Accepted cleanup requests remain distinct from proven terminal recovery.
 
 ## Next shared backend contracts
 

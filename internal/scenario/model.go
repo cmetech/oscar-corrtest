@@ -28,6 +28,7 @@ type Case struct {
 	SuppressForNotifiers []string          `json:"suppressForNotifiers,omitempty" yaml:"suppressForNotifiers,omitempty"`
 	TagForNotifiers      []string          `json:"tagForNotifiers,omitempty" yaml:"tagForNotifiers,omitempty"`
 	Assertions           []Assertion       `json:"assertions" yaml:"assertions"`
+	Checkpoints          []Checkpoint      `json:"checkpoints,omitempty" yaml:"checkpoints,omitempty"`
 	Events               []Event           `json:"events,omitempty" yaml:"events,omitempty"`
 }
 
@@ -50,3 +51,11 @@ type Assertion struct {
 
 // IdentityKey distinguishes named children without changing legacy role-based resolution.
 func (e Event) IdentityKey() string { return e.Role + "\x00" + e.Source }
+
+// Checkpoint observes only the accepted prefix before subsequent stimuli.
+type Checkpoint struct {
+	Name       string        `json:"name" yaml:"name"`
+	AfterEvent int           `json:"afterEvent" yaml:"afterEvent"`
+	Window     time.Duration `json:"window" yaml:"window"`
+	Assertions []Assertion   `json:"assertions" yaml:"assertions"`
+}

@@ -115,31 +115,24 @@ func BuildOperationPreview(plan compiler.Plan, harnessVersion string) ([]Operati
 			}, request); err != nil {
 				return nil, err
 			}
+			for _, checkpoint := range item.Checkpoints {
+				if checkpoint.AfterEvent != index+1 {
+					continue
+				}
+				if err := appendBody(OperationPreview{Stage: "checkpoint.observe", CaseCode: item.Code, Method: "LOCAL", Summary: "Observe checkpoint " + checkpoint.Name + " for its full window; stop if any required assertion cannot pass.", ScheduledDelay: checkpoint.Window}, checkpoint); err != nil {
+					return nil, err
+				}
+				prefix := item
+				prefix.Alerts = item.Alerts[:checkpoint.AfterEvent]
+				operations = append(operations, observationPreview(prefix)...)
+			}
 		}
 	}
 
 	for _, item := range cases {
-		seenNames := map[string]bool{}
-		seenIdentities := map[string]bool{}
-		for _, alert := range item.Alerts {
-			if !seenNames[alert.Name] {
-				operations = append(operations, historyPreview(item.Code, alert.Name, "Read source-alert history for this case."))
-				seenNames[alert.Name] = true
-			}
-			identity := alert.Name + "\x00" + alert.Labels["oscar_test_event_id"]
-			if seenIdentities[identity] {
-				continue
-			}
-			seenIdentities[identity] = true
-			operations = append(operations, auditPreview(item.Code, alert.Name, alert.Labels["oscar_test_event_id"]))
-			if item.Rule.Pattern == "parent_child" {
-				operations = append(operations, notificationPreview(item.Code, alert.Name, alert.Labels["oscar_test_event_id"]))
-			}
-		}
-		if item.Rule.EmitAlertName != "" && !seenNames[item.Rule.EmitAlertName] {
-			operations = append(operations, historyPreview(item.Code, item.Rule.EmitAlertName, "Read synthetic-alert history for this case."))
-		}
+		operations = append(operations, observationPreview(item)...)
 	}
+
 	operations = append(operations, OperationPreview{
 		Stage: "evidence.evaluate_assertions", Method: "LOCAL", Path: "",
 		Summary: "Evaluate declared assertions only after timing and evidence readiness requirements are satisfied; this is not an OSCAR request.",
@@ -291,3 +284,29 @@ func pathWithQuery(path string, query url.Values) string {
 }
 
 func formattedTime(value time.Time) string { return value.UTC().Format(time.RFC3339Nano) }
+
+func observationPreview(item compiler.CasePlan) []OperationPreview {
+	var operations []OperationPreview
+
+	seenNames := map[string]bool{}
+	seenIdentities := map[string]bool{}
+	for _, alert := range item.Alerts {
+		if !seenNames[alert.Name] {
+			operations = append(operations, historyPreview(item.Code, alert.Name, "Read source-alert history for this case."))
+			seenNames[alert.Name] = true
+		}
+		identity := alert.Name + "\x00" + alert.Labels["oscar_test_event_id"]
+		if seenIdentities[identity] {
+			continue
+		}
+		seenIdentities[identity] = true
+		operations = append(operations, auditPreview(item.Code, alert.Name, alert.Labels["oscar_test_event_id"]))
+		if item.Rule.Pattern == "parent_child" {
+			operations = append(operations, notificationPreview(item.Code, alert.Name, alert.Labels["oscar_test_event_id"]))
+		}
+	}
+	if item.Rule.EmitAlertName != "" && !seenNames[item.Rule.EmitAlertName] {
+		operations = append(operations, historyPreview(item.Code, item.Rule.EmitAlertName, "Read synthetic-alert history for this case."))
+	}
+	return operations
+}

@@ -36,7 +36,15 @@ type wireCase struct {
 	SuppressForNotifiers []string          `yaml:"suppressForNotifiers,omitempty"`
 	TagForNotifiers      []string          `yaml:"tagForNotifiers,omitempty"`
 	Assertions           []wireAssertion   `yaml:"assertions"`
+	Checkpoints          []wireCheckpoint  `yaml:"checkpoints,omitempty"`
 	Events               []wireEvent       `yaml:"events,omitempty"`
+}
+
+type wireCheckpoint struct {
+	Name       string          `yaml:"name"`
+	AfterEvent int             `yaml:"afterEvent"`
+	Window     string          `yaml:"window"`
+	Assertions []wireAssertion `yaml:"assertions"`
 }
 
 type wireEvent struct {
@@ -88,6 +96,9 @@ func (assertion *wireAssertion) UnmarshalYAML(value *yaml.Node) error {
 		default:
 			return fmt.Errorf("unknown assertion field %q", key)
 		}
+	}
+	if !seen["kind"] || !seen["equals"] {
+		return fmt.Errorf("assertion requires kind and explicit equals")
 	}
 	return nil
 }
@@ -158,18 +169,20 @@ func Decode(reader io.Reader) (Scenario, error) {
 		}
 		converted := Case{Name: item.Name, Code: item.Code, Polarity: item.Polarity, Role: role, Repeat: repeat, Window: window, GroupBy: item.GroupBy, Labels: item.Labels,
 			SuppressForNotifiers: item.SuppressForNotifiers, TagForNotifiers: item.TagForNotifiers}
-		for _, assertion := range item.Assertions {
-			if assertion.Kind == "synthetic-alert-count" && assertion.Outcome != nil {
-				return Scenario{}, fmt.Errorf("case %q synthetic-alert-count assertion must not supply outcome", item.Name)
+		converted.Assertions, parseErr = decodeAssertions(item.Name, item.Assertions)
+		if parseErr != nil {
+			return Scenario{}, parseErr
+		}
+		for _, checkpoint := range item.Checkpoints {
+			window, err := time.ParseDuration(checkpoint.Window)
+			if err != nil {
+				return Scenario{}, fmt.Errorf("checkpoint %q window: %w", checkpoint.Name, err)
 			}
-			if (assertion.Kind == "audit-count" || assertion.Kind == "parent-link-count") && (assertion.Outcome == nil || strings.TrimSpace(*assertion.Outcome) == "") {
-				return Scenario{}, fmt.Errorf("case %q %s assertion requires a nonblank outcome", item.Name, assertion.Kind)
+			assertions, err := decodeAssertions(checkpoint.Name, checkpoint.Assertions)
+			if err != nil {
+				return Scenario{}, err
 			}
-			outcome := ""
-			if assertion.Outcome != nil {
-				outcome = *assertion.Outcome
-			}
-			converted.Assertions = append(converted.Assertions, Assertion{Kind: assertion.Kind, Outcome: outcome, Equals: assertion.Equals})
+			converted.Checkpoints = append(converted.Checkpoints, Checkpoint{Name: checkpoint.Name, AfterEvent: checkpoint.AfterEvent, Window: window, Assertions: assertions})
 		}
 		for _, event := range item.Events {
 			var delay time.Duration
@@ -230,22 +243,11 @@ func Validate(document Scenario) error {
 		if err := validateLabels(item.Labels); err != nil {
 			return fmt.Errorf("case %q: %w", item.Name, err)
 		}
-		if len(item.Assertions) < 1 || len(item.Assertions) > MaxAssertions {
-			return fmt.Errorf("case %q must contain bounded assertions", item.Name)
+		if err := validateAssertions(item.Name, item.Assertions); err != nil {
+			return err
 		}
-		for _, assertion := range item.Assertions {
-			if assertion.Kind != "synthetic-alert-count" && assertion.Kind != "audit-count" && assertion.Kind != "parent-link-count" {
-				return fmt.Errorf("case %q assertion kind is unsupported", item.Name)
-			}
-			if assertion.Equals < 0 || assertion.Equals > MaxExpectedCount || len(assertion.Outcome) > MaxOutcomeLength {
-				return fmt.Errorf("case %q assertion is outside the safe budget", item.Name)
-			}
-			if (assertion.Kind == "audit-count" || assertion.Kind == "parent-link-count") && strings.TrimSpace(assertion.Outcome) == "" {
-				return fmt.Errorf("case %q assertion outcome is required", item.Name)
-			}
-			if assertion.Kind == "synthetic-alert-count" && assertion.Outcome != "" {
-				return fmt.Errorf("case %q synthetic assertion outcome is forbidden", item.Name)
-			}
+		if err := validateCheckpoints(item, document.MaxDuration); err != nil {
+			return err
 		}
 		if document.Pattern != "parent_child" && (len(item.SuppressForNotifiers) != 0 || len(item.TagForNotifiers) != 0) {
 			return fmt.Errorf("case %q supplies notifiers for a non-parent-child pattern", item.Name)
@@ -394,4 +396,44 @@ func containsAlias(node *yaml.Node) bool {
 		}
 	}
 	return false
+}
+
+func decodeAssertions(name string, wire []wireAssertion) ([]Assertion, error) {
+	var result []Assertion
+	for _, assertion := range wire {
+		if assertion.Kind == "synthetic-alert-count" && assertion.Outcome != nil {
+			return nil, fmt.Errorf("case %q synthetic-alert-count assertion must not supply outcome", name)
+		}
+		if (assertion.Kind == "audit-count" || assertion.Kind == "parent-link-count") && (assertion.Outcome == nil || strings.TrimSpace(*assertion.Outcome) == "") {
+			return nil, fmt.Errorf("case %q %s assertion requires a nonblank outcome", name, assertion.Kind)
+		}
+		outcome := ""
+		if assertion.Outcome != nil {
+			outcome = *assertion.Outcome
+		}
+		result = append(result, Assertion{Kind: assertion.Kind, Outcome: outcome, Equals: assertion.Equals})
+	}
+
+	return result, nil
+}
+
+func validateAssertions(name string, assertions []Assertion) error {
+	if len(assertions) < 1 || len(assertions) > MaxAssertions {
+		return fmt.Errorf("case %q must contain bounded assertions", name)
+	}
+	for _, assertion := range assertions {
+		if assertion.Kind != "synthetic-alert-count" && assertion.Kind != "audit-count" && assertion.Kind != "parent-link-count" {
+			return fmt.Errorf("case %q assertion kind is unsupported", name)
+		}
+		if assertion.Equals < 0 || assertion.Equals > MaxExpectedCount || len(assertion.Outcome) > MaxOutcomeLength {
+			return fmt.Errorf("case %q assertion is outside the safe budget", name)
+		}
+		if (assertion.Kind == "audit-count" || assertion.Kind == "parent-link-count") && strings.TrimSpace(assertion.Outcome) == "" {
+			return fmt.Errorf("case %q assertion outcome is required", name)
+		}
+		if assertion.Kind == "synthetic-alert-count" && assertion.Outcome != "" {
+			return fmt.Errorf("case %q synthetic assertion outcome is forbidden", name)
+		}
+	}
+	return nil
 }

@@ -23,6 +23,15 @@ cases:
   - {role: interface_down, source: B, status: resolved, delay: 6s}
   - {role: interface_down, source: A, status: firing, delay: 7s}
   - {role: interface_down, source: A, status: resolved, delay: 8s}
+  checkpoints:
+  - name: four-inputs-no-parent-audit
+    afterEvent: 4
+    window: 1s
+    assertions: [{kind: audit-count, outcome: parent_emitted, equals: 0}]
+  - name: five-inputs-parent-audit
+    afterEvent: 5
+    window: 1s
+    assertions: [{kind: audit-count, outcome: parent_emitted, equals: 1}]
   assertions: [{kind: audit-count, outcome: parent_emitted, equals: 1}]
 - name: four-distinct
   code: N01

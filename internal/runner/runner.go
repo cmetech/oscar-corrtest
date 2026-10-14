@@ -106,7 +106,14 @@ type caseResult struct {
 	EndedAt              time.Time                  `json:"endedAt"`
 }
 
+type checkpointResult struct {
+	AfterEvent int           `json:"afterEvent"`
+	Window     time.Duration `json:"window"`
+	caseResult
+}
+
 type canonicalReport struct {
+	Checkpoints  []checkpointResult           `json:"checkpoints,omitempty"`
 	Coverage     map[string]string            `json:"coverage"`
 	APIVersion   string                       `json:"apiVersion"`
 	RunID        string                       `json:"runId"`
@@ -125,6 +132,7 @@ type canonicalReport struct {
 // Execute runs one immutable plan. It never resumes injection after interruption.
 func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan, capabilities CapabilitySnapshot) error {
 	attempts := make([]domain.AlertAttemptFact, 0, plan.MutationBudget.Alerts)
+	var checkpoints []checkpointResult
 	started := r.opts.Now().UTC()
 	run.StartedAt = &started
 	budgetDuration := plan.MaxDuration
@@ -180,16 +188,16 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 	resources := make([]domain.Resource, 0, len(plan.Cases))
 	for index, item := range plan.Cases {
 		if err := budgetError(); err != nil {
-			return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, err)
+			return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
 		}
 		resource := domain.Resource{ID: fmt.Sprintf("res_%s_%03d", run.ShortToken, index+1), RunID: run.ID, Kind: "correlation_rule",
 			ExternalName: item.Rule.Name, OwnershipToken: run.ID, LifecycleState: domain.ResourceProposed}
 		if err := r.store.CreateResource(ctx, resource); err != nil {
-			return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, err)
+			return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
 		}
 		resources = append(resources, resource)
 		if err := r.api.ValidateRule(ctx, item.Rule); err != nil {
-			return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, err)
+			return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
 		}
 		created, err := r.api.CreateRule(ctx, item.Rule)
 		if err != nil {
@@ -197,45 +205,48 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 			if reconcileErr != nil || len(candidates) != 1 || candidates[0].Name != item.Rule.Name || candidates[0].Pattern != item.Rule.Pattern || candidates[0].Description != item.Rule.Description {
 				_ = r.store.MarkResourceCleanupError(ctx, resource.ID, "rule create outcome unknown")
 				resources[len(resources)-1].LifecycleState = domain.ResourceUnknown
-				return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, fmt.Errorf("rule create outcome could not be safely reconciled: %w", err))
+				return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, fmt.Errorf("rule create outcome could not be safely reconciled: %w", err))
 			}
 			created = candidates[0]
 		}
 		if created.Name != item.Rule.Name || created.Description != item.Rule.Description {
 			_ = r.store.MarkResourceCleanupError(ctx, resource.ID, "created rule ownership did not round-trip")
 			resources[len(resources)-1].LifecycleState = domain.ResourceUnknown
-			return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, fmt.Errorf("created rule ownership mismatch"))
+			return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, fmt.Errorf("created rule ownership mismatch"))
 		}
 		resources[len(resources)-1].ExternalID = strconv.Itoa(created.ID)
 		if err := r.store.AdoptResource(ctx, resource.ID, strconv.Itoa(created.ID), r.opts.Now().UTC()); err != nil {
-			return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, err)
+			return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
 		}
 		resources[len(resources)-1].LifecycleState = domain.ResourceCreated
 	}
 
 	if err := r.transition(ctx, run.ID, domain.RunInjecting, "Sending deterministic source alerts"); err != nil {
-		return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, err)
+		return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
 	}
 	caseStarted := make(map[string]time.Time, len(plan.Cases))
 	for _, item := range plan.Cases {
 		var elapsed time.Duration
 		for alertIndex, alert := range item.Alerts {
 			if err := budgetError(); err != nil {
-				return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, err)
+				return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
 			}
 			if alertIndex == 0 {
 				caseStarted[item.Code] = r.opts.Now().UTC()
 			}
+			if len(item.Checkpoints) > 0 {
+				elapsed = r.opts.Now().Sub(caseStarted[item.Code])
+			}
 			if alert.Delay > elapsed {
 				detail, _ := json.Marshal(map[string]string{"alertName": alert.Name, "status": alert.Status, "delay": alert.Delay.String()})
 				if _, err := r.store.AppendRunEvent(ctx, domain.RunEvent{RunID: run.ID, Type: "alert.scheduled", Level: "info", OccurredAt: r.opts.Now().UTC(), Summary: "Delayed alert stimulus scheduled", DetailJSON: string(detail)}); err != nil {
-					return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, err)
+					return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
 				}
 				if err := r.opts.Sleep(ctx, alert.Delay-elapsed); err != nil {
-					return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, err)
+					return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
 				}
 				if err := budgetError(); err != nil {
-					return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, err)
+					return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
 				}
 				elapsed = alert.Delay
 			}
@@ -246,37 +257,78 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 				}
 				detail, _ := json.Marshal(map[string]any{"caseCode": item.Code, "eventId": alert.Labels["oscar_test_event_id"], "attempt": alertIndex + 1, "status": alert.Status, "startsAt": alert.StartsAt, "endsAt": alert.EndsAt})
 				if _, err := r.store.AppendRunEvent(ctx, domain.RunEvent{RunID: run.ID, Type: "alert.prepared", Level: "info", OccurredAt: r.opts.Now().UTC(), Summary: "Named source episode prepared for OSCAR Alert Engine ingress", DetailJSON: string(detail)}); err != nil {
-					return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, err)
+					return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
 				}
 			}
 			result, err := r.api.Inject(ctx, alert)
 			if err != nil {
-				return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, err)
+				return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
 			}
 			attempts = append(attempts, domain.AlertAttemptFact{CaseStableKey: item.Code, EventID: alert.Labels["oscar_test_event_id"], EventIndex: alertIndex + 1,
 				SendState: "SENT", InjectionClass: string(result.Class), StatusCode: result.StatusCode})
 			if result.Class != oscar.InjectionAccepted {
-				return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, fmt.Errorf("injection was %s", result.Class))
+				return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, fmt.Errorf("injection was %s", result.Class))
+			}
+			for _, point := range item.Checkpoints {
+				if point.AfterEvent != alertIndex+1 {
+					continue
+				}
+				prefix := item
+				prefix.Name, prefix.Alerts, prefix.Assertions, prefix.ObservationWindow = point.Name, item.Alerts[:point.AfterEvent], point.Assertions, point.Window
+				checkpointStart := r.opts.Now().UTC()
+				detail, _ := json.Marshal(point)
+				if _, err := r.store.AppendRunEvent(ctx, domain.RunEvent{RunID: run.ID, Type: "checkpoint.started", Level: "info", OccurredAt: checkpointStart, Summary: "Observing checkpoint " + point.Name, DetailJSON: string(detail)}); err != nil {
+					return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
+				}
+				observed, observeErr := r.observe(ctx, run, prefix, started, checkpointStart, capabilities.PipelineMode, true)
+				if observeErr != nil {
+					observed = caseResult{Name: point.Name, Code: item.Code, Verdict: string(domain.VerdictError), StartedAt: checkpointStart, EndedAt: r.opts.Now().UTC(), Explanation: observeErr.Error()}
+				}
+				checkpoints = append(checkpoints, checkpointResult{AfterEvent: point.AfterEvent, Window: point.Window, caseResult: observed})
+				detail, _ = json.Marshal(checkpoints[len(checkpoints)-1])
+				evidenceCtx, evidenceCancel := context.WithTimeout(context.WithoutCancel(ctx), r.opts.CleanupTimeout)
+				_, evidenceErr := r.store.AppendRunEvent(evidenceCtx, domain.RunEvent{RunID: run.ID, Type: "checkpoint.completed", Level: "info", OccurredAt: r.opts.Now().UTC(), Summary: "Checkpoint " + point.Name + ": " + observed.Verdict, DetailJSON: string(detail)})
+				evidenceCancel()
+				if err := evidenceErr; err != nil {
+					return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
+				}
+				if observeErr != nil {
+					return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, observeErr)
+				}
+				if err := budgetError(); err != nil {
+					return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
+				}
+				if observed.Verdict != string(domain.VerdictPass) {
+					cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.opts.CleanupTimeout)
+					defer cancel()
+					if err := r.transition(cleanupCtx, run.ID, domain.RunCancelling, "Checkpoint did not pass; stopping later stimuli"); err != nil {
+						return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
+					}
+					cleanup, resolutions, cleanupErr := r.cleanup(cleanupCtx, run.ID, resources, nil, func(ctx context.Context) ([]oscar.HistoryRecord, error) {
+						return r.discoverAttemptedHistory(ctx, run, plan, attempts)
+					})
+					return r.complete(cleanupCtx, run, plan, capabilities, nil, checkpoints, attempts, resolutions, domain.Verdict(observed.Verdict), cleanup, errorString(cleanupErr))
+				}
 			}
 		}
 	}
 
 	if err := r.transition(ctx, run.ID, domain.RunObserving, "Observing OSCAR history and correlation audit"); err != nil {
-		return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, err)
+		return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
 	}
 	results := make([]caseResult, 0, len(plan.Cases))
 	for _, item := range plan.Cases {
 		result, err := r.observeCase(ctx, run, item, started, caseStarted[item.Code], capabilities.PipelineMode)
 		if err != nil {
-			return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, err)
+			return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
 		}
 		if err := budgetError(); err != nil {
-			return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, err)
+			return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
 		}
 		results = append(results, result)
 	}
 	if err := r.transition(ctx, run.ID, domain.RunAsserting, "Evaluating terminal evidence"); err != nil {
-		return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, err)
+		return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)
 	}
 	verdict := domain.VerdictPass
 	for _, result := range results {
@@ -289,7 +341,7 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 		}
 	}
 	if ctx.Err() != nil {
-		return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, ctx.Err())
+		return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, ctx.Err())
 	}
 	completionCtx, completionCancel := context.WithTimeout(context.WithoutCancel(ctx), r.opts.CleanupTimeout)
 	defer completionCancel()
@@ -297,7 +349,7 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 	if cleanupError != nil {
 		cleanup = domain.CleanupDirty
 	}
-	return r.complete(completionCtx, run, plan, capabilities, results, attempts, resolutions, verdict, cleanup, errorString(cleanupError))
+	return r.complete(completionCtx, run, plan, capabilities, results, checkpoints, attempts, resolutions, verdict, cleanup, errorString(cleanupError))
 }
 
 func (r *Runner) cleanup(ctx context.Context, runID string, resources []domain.Resource, histories []oscar.HistoryRecord, discover func(context.Context) ([]oscar.HistoryRecord, error)) (domain.CleanupStatus, []domain.AlertResolutionFact, error) {
@@ -402,7 +454,7 @@ func observedHistory(results []caseResult) []oscar.HistoryRecord {
 	return uniqueHistory(records)
 }
 
-func (r *Runner) failAndCleanup(ctx context.Context, run domain.Run, plan compiler.Plan, capabilities CapabilitySnapshot, resources []domain.Resource, attempts []domain.AlertAttemptFact, cause error) error {
+func (r *Runner) failAndCleanup(ctx context.Context, run domain.Run, plan compiler.Plan, capabilities CapabilitySnapshot, resources []domain.Resource, attempts []domain.AlertAttemptFact, checkpoints []checkpointResult, cause error) error {
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.opts.CleanupTimeout)
 	defer cancel()
 	if err := r.transition(cleanupCtx, run.ID, domain.RunCancelling, "Run failed or was cancelled; cleanup required"); err != nil {
@@ -422,7 +474,7 @@ func (r *Runner) failAndCleanup(ctx context.Context, run domain.Run, plan compil
 	if cleanupErr != nil {
 		terminal += "; cleanup: " + cleanupErr.Error()
 	}
-	if err := r.complete(cleanupCtx, run, plan, capabilities, nil, attempts, resolutions, domain.VerdictError, cleanup, terminal); err != nil {
+	if err := r.complete(cleanupCtx, run, plan, capabilities, nil, checkpoints, attempts, resolutions, domain.VerdictError, cleanup, terminal); err != nil {
 		return err
 	}
 	return cause
@@ -527,10 +579,10 @@ func (r *Runner) finishWithoutMutation(ctx context.Context, run domain.Run, plan
 	if err := r.transition(ctx, run.ID, domain.RunCleaningUp, "No external resources require cleanup"); err != nil {
 		return err
 	}
-	return r.complete(ctx, run, plan, capabilities, nil, nil, nil, verdict, domain.CleanupNotRequired, explanation)
+	return r.complete(ctx, run, plan, capabilities, nil, nil, nil, nil, verdict, domain.CleanupNotRequired, explanation)
 }
 
-func (r *Runner) complete(ctx context.Context, run domain.Run, plan compiler.Plan, capabilities CapabilitySnapshot, results []caseResult, attempts []domain.AlertAttemptFact, resolutions []domain.AlertResolutionFact, verdict domain.Verdict, cleanup domain.CleanupStatus, terminal string) error {
+func (r *Runner) complete(ctx context.Context, run domain.Run, plan compiler.Plan, capabilities CapabilitySnapshot, results []caseResult, checkpoints []checkpointResult, attempts []domain.AlertAttemptFact, resolutions []domain.AlertResolutionFact, verdict domain.Verdict, cleanup domain.CleanupStatus, terminal string) error {
 	completed := r.opts.Now().UTC()
 	facts, err := normalizedFacts(plan, results, attempts)
 	if err != nil {
@@ -552,7 +604,7 @@ func (r *Runner) complete(ctx context.Context, run domain.Run, plan compiler.Pla
 	report, err := json.Marshal(canonicalReport{Coverage: map[string]string{
 		"inputPath": "alert-engine", "endpoint": "POST /api/v1/alerts", "receiverAdmission": "NOT_TESTED", "nativeAlertmanager": "BYPASSED", "lifecycleTransitions": "NOT_PROVEN", "producerBarriers": "NOT_TESTED", "physicalClear": "NOT_PROVEN",
 	}, APIVersion: "corrtest.oscar/v1alpha1", RunID: run.ID, Pattern: plan.Pattern,
-		PlanDigest: plan.Digest, Verdict: verdict, Cleanup: cleanup, Capabilities: capabilities, Cases: results, Attempts: facts.Attempts, Artifacts: facts.Artifacts, Resolutions: facts.Resolutions, CompletedAt: completed})
+		Checkpoints: checkpoints, PlanDigest: plan.Digest, Verdict: verdict, Cleanup: cleanup, Capabilities: capabilities, Cases: results, Attempts: facts.Attempts, Artifacts: facts.Artifacts, Resolutions: facts.Resolutions, CompletedAt: completed})
 	if err != nil {
 		return err
 	}

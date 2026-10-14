@@ -37,14 +37,15 @@ type Plan struct {
 	Digest         string         `json:"digest"`
 }
 type CasePlan struct {
-	Name              string               `json:"name"`
-	Code              string               `json:"code"`
-	Polarity          string               `json:"polarity"`
-	Rule              RulePlan             `json:"rule"`
-	Alerts            []AlertPlan          `json:"alerts"`
-	Assertions        []scenario.Assertion `json:"assertions"`
-	ObservationWindow time.Duration        `json:"observationWindow"`
-	Inspection        Inspection           `json:"inspection"`
+	Name              string                `json:"name"`
+	Code              string                `json:"code"`
+	Polarity          string                `json:"polarity"`
+	Rule              RulePlan              `json:"rule"`
+	Alerts            []AlertPlan           `json:"alerts"`
+	Checkpoints       []scenario.Checkpoint `json:"checkpoints,omitempty"`
+	Assertions        []scenario.Assertion  `json:"assertions"`
+	ObservationWindow time.Duration         `json:"observationWindow"`
+	Inspection        Inspection            `json:"inspection"`
 }
 type RulePlan struct {
 	Name          string            `json:"name"`
@@ -144,7 +145,7 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 		if input.Pattern == "absence" {
 			observationWindow = 55 * time.Second
 		}
-		item := CasePlan{Name: source.Name, Code: caseCode, Polarity: source.Polarity, Assertions: source.Assertions, ObservationWindow: observationWindow}
+		item := CasePlan{Name: source.Name, Code: caseCode, Polarity: source.Polarity, Checkpoints: source.Checkpoints, Assertions: source.Assertions, ObservationWindow: observationWindow}
 		item.Rule = RulePlan{Name: ruleName, Pattern: input.Pattern, WindowSeconds: int(source.Window / time.Second), GroupBy: source.GroupBy, MatchCriteria: matchCriteria(input.Pattern, names, source), EmitAlertName: syntheticName, EmitLabels: identityLabels(run, input, source, ruleName, "synthetic", "synthetic_parent"), Description: fmt.Sprintf("Temporary OSCAR correlation test rule; run=%s scenario=%s case=%s", run.ID, input.Name, source.Name)}
 		activeByRole := map[string]map[string]string{}
 		retainedSources := map[string]map[string]string{}

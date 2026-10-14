@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -280,6 +281,7 @@ func (a *App) runPlanOrExecute(ctx context.Context, args []string, execute bool)
 	} else {
 		fmt.Fprintf(a.stdout, "Run: %s\nVerdict: %s\nCleanup: %s\n", run.ID, run.Verdict, run.CleanupStatus)
 		fmt.Fprintln(a.stdout, "Coverage: OSCAR Alert Engine ingress; receiver admission and Native Alertmanager bypassed. PASS covers declared downstream assertions, not reliability E2E acceptance.")
+		a.printCheckpoints(run.CanonicalReportJSON)
 	}
 	return runExitCode(run)
 }
@@ -306,5 +308,20 @@ func runExitCode(run domain.Run) int {
 		return 2
 	default:
 		return 3
+	}
+}
+
+func (a *App) printCheckpoints(raw json.RawMessage) {
+	var report struct {
+		Checkpoints []struct {
+			Code, Name, Verdict string
+			AfterEvent          int
+		}
+	}
+	if json.Unmarshal(raw, &report) != nil {
+		return
+	}
+	for _, point := range report.Checkpoints {
+		fmt.Fprintf(a.stdout, "Checkpoint %s/%s after input %d: %s\n", point.Code, point.Name, point.AfterEvent, point.Verdict)
 	}
 }

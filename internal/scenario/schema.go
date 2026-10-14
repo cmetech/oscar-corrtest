@@ -139,6 +139,7 @@ func buildSchema(contract Contract) jsonSchema {
 					"suppressForNotifiers": notifierSchema(),
 					"tagForNotifiers":      notifierSchema(),
 					"assertions":           {Type: "array", MinItems: integer(1), MaxItems: integer(MaxAssertions), Items: &schemaValue{Ref: "#/$defs/assertion"}},
+					"checkpoints":          {Type: "array", MaxItems: integer(MaxCheckpoints), Items: &schemaValue{Ref: "#/$defs/checkpoint"}},
 					"events":               {Type: "array", MinItems: integer(1), MaxItems: integer(MaxEvents), Items: &schemaValue{Ref: "#/$defs/event"}},
 				},
 				OneOf: []schemaValue{
@@ -146,6 +147,13 @@ func buildSchema(contract Contract) jsonSchema {
 					{Required: []string{"events"}, Not: &schemaValue{AnyOf: []schemaValue{{Required: []string{"role"}}, {Required: []string{"repeat"}}}}},
 				},
 			},
+			"checkpoint": {Type: "object", AdditionalProperties: false, Required: []string{"name", "afterEvent", "window", "assertions"}, Properties: map[string]schemaValue{
+				"name":       {Type: "string", MinLength: integer(1), MaxLength: integer(MaxCaseNameLength)},
+				"afterEvent": {Type: "integer", Minimum: integer(1), Maximum: integer(MaxEvents)},
+				"window":     duration("> 0", MaxCaseWindow.String()),
+				"assertions": {Type: "array", MinItems: integer(1), MaxItems: integer(MaxAssertions), Items: &schemaValue{Ref: "#/$defs/assertion"}},
+			}},
+
 			"event": {
 				Type: "object", AdditionalProperties: false, Required: []string{"role", "status"},
 				Properties: map[string]schemaValue{

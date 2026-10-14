@@ -22,8 +22,12 @@ type observationSnapshot struct {
 }
 
 func (r *Runner) observeCase(ctx context.Context, run domain.Run, item compiler.CasePlan, started, injectedAt time.Time, pipelineMode string) (caseResult, error) {
+	return r.observe(ctx, run, item, started, injectedAt, pipelineMode, false)
+}
+
+func (r *Runner) observe(ctx context.Context, run domain.Run, item compiler.CasePlan, started, injectedAt time.Time, pipelineMode string, checkpoint bool) (caseResult, error) {
 	window := item.ObservationWindow
-	if r.opts.ObservationWindow > 0 {
+	if !checkpoint && r.opts.ObservationWindow > 0 {
 		window = r.opts.ObservationWindow
 	}
 	if window <= 0 {
@@ -34,8 +38,9 @@ func (r *Runner) observeCase(ctx context.Context, run domain.Run, item compiler.
 		deadline = r.opts.Now().Add(window)
 	}
 	shadow := pipelineMode != "phase_b_dispatch"
-	fullWindow := requiresFullWindow(item.Assertions)
+	fullWindow := checkpoint || requiresFullWindow(item.Assertions)
 	var last observationSnapshot
+	var violation *observationSnapshot
 	for {
 		snapshot, err := r.readSnapshot(ctx, run, item, started, deadline)
 		if err != nil {
@@ -45,6 +50,15 @@ func (r *Runner) observeCase(ctx context.Context, run domain.Run, item compiler.
 		assertions, err := evaluateAssertions(item.Assertions, snapshot, shadow)
 		if err != nil {
 			return caseResult{Name: item.Name, Code: item.Code}, err
+		}
+		if checkpoint && violation == nil {
+			for _, assertion := range assertions {
+				if assertion.Expected == 0 && assertion.Verdict == domain.VerdictFail {
+					copy := snapshot
+					violation = &copy
+					break
+				}
+			}
 		}
 		now := r.opts.Now()
 		atDeadline := !now.Before(deadline)
@@ -83,8 +97,19 @@ func (r *Runner) observeCase(ctx context.Context, run domain.Run, item compiler.
 	if err != nil {
 		return caseResult{Name: item.Name, Code: item.Code}, err
 	}
+	if violation != nil {
+		assertions, _ := evaluateAssertions(item.Assertions, *violation, shadow)
+		return buildCaseResult(item, *violation, assertions, domain.VerdictFail, "a zero-count assertion was violated during the checkpoint interval", injectedAt, r.opts.Now().UTC()), nil
+	}
 	if !last.SourceReady || !last.AuditReady {
 		return buildCaseResult(item, last, assertions, domain.VerdictInconclusive, "source history or correlation-audit eligibility was not proven by the deadline", injectedAt, r.opts.Now().UTC()), nil
+	}
+	if checkpoint {
+		for _, assertion := range assertions {
+			if assertion.Verdict == domain.VerdictSkipped {
+				return buildCaseResult(item, last, assertions, domain.VerdictInconclusive, "checkpoint requires every assertion to be supported and scored", injectedAt, r.opts.Now().UTC()), nil
+			}
+		}
 	}
 	if assertionsPass(assertions) {
 		return buildCaseResult(item, last, assertions, domain.VerdictPass, "declared assertions matched the final bounded observation", injectedAt, r.opts.Now().UTC()), nil

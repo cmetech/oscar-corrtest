@@ -21,6 +21,7 @@ const (
 	MaxLabels             = 64
 	MaxEvents             = 100
 	MaxAssertions         = 32
+	MaxCheckpoints        = 16
 	MaxNotifierNames      = 16
 	MaxExpectedCount      = 100
 )
@@ -114,6 +115,11 @@ func PublicContract() Contract {
 		field("case.labels", "Case", "labels", "object of strings", Optional, nil, "up to 64 safe, non-reserved labels", "No case labels are added.", "", "Applied to firing source stimuli.", "labels: {site: lab-a}", "Reserved labels cannot be overridden."),
 		field("case.role", "Case", "role", "string", Conditional, nil, "non-empty; at most 100 characters", "", "Required with repeat; forbidden with events.", "Defines the repeated logical source role.", "role: interface_down", "A role cannot be combined with explicit events."),
 		field("case.repeat", "Case", "repeat", "integer", Conditional, nil, "1–100 with role", "Zero or omitted with events.", "Required with role; forbidden with events.", "Expands to deterministic firing events.", "repeat: 5", "Repeat requires a role."),
+		field("case.checkpoints", "Case", "checkpoints", "array", Optional, nil, "up to 16 ordered checkpoints", "No intermediate observations.", "", "Pauses after a sent event and observes the accepted prefix for a full bounded interval.", "checkpoints: [{name: before-threshold, afterEvent: 4, window: 1s, assertions: [{kind: audit-count, outcome: parent_emitted, equals: 0}]}]", "Checkpoint windows must fit before the next scheduled event."),
+		field("checkpoint.name", "Checkpoint", "name", "string", Required, nil, "unique per case; at most 120 characters", "", "", "Names retained intermediate evidence.", "name: before-threshold", "Duplicate names are invalid."),
+		field("checkpoint.afterEvent", "Checkpoint", "afterEvent", "integer", Required, nil, "1-based event ordinal; strictly increasing", "", "", "Observes only inputs through this event.", "afterEvent: 4", "Cannot precede the first or follow the last input."),
+		field("checkpoint.window", "Checkpoint", "window", "Go duration", Required, nil, "positive; at most 2 minutes; within case/scenario budgets", "", "", "Requires a full observation interval before the next stimulus.", "window: 1s", "Zero, overlapping or unbounded windows are invalid."),
+		field("checkpoint.assertions", "Checkpoint", "assertions", "array", Required, nil, "1–32 existing count assertions", "", "", "All checkpoint assertions must be scored; skipped evidence is inconclusive.", "assertions: [{kind: audit-count, outcome: parent_emitted, equals: 0}]", "Unsupported evidence cannot pass."),
 		field("case.events", "Case", "events", "array", Conditional, nil, "1–100 events", "", "Mutually exclusive with role and repeat.", "Supplies deterministic firing and resolution events.", "events: [{role: parent, status: firing}]", "Events cannot be mixed with role/repeat."),
 		field("case.suppressForNotifiers", "Case", "suppressForNotifiers", "array of strings", Conditional, nil, "up to 16 unique notifier names", "No notifier suppression is configured.", "parent_child only; disjoint from tagForNotifiers.", "Compiles child suppression notifier handling.", "suppressForNotifiers: [email]", "Notifiers are only valid for parent_child."),
 		field("case.tagForNotifiers", "Case", "tagForNotifiers", "array of strings", Conditional, nil, "up to 16 unique notifier names", "No notifier tags are configured.", "parent_child only; disjoint from suppressForNotifiers.", "Compiles child tagging notifier handling.", "tagForNotifiers: [pagerduty]", "Notifiers are only valid for parent_child."),

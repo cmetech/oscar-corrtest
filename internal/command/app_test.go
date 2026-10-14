@@ -159,7 +159,8 @@ func TestRunsListShowAndBackupCommands(t *testing.T) {
 	now := time.Date(2026, 8, 19, 20, 0, 0, 0, time.UTC)
 	run := domain.Run{
 		ID: "crt_00000000000000000000000000", ShortToken: "00000000", Status: domain.RunCompleted,
-		Verdict: domain.VerdictFail, CleanupStatus: domain.CleanupClean, HarnessVersion: "test", CreatedAt: now, UpdatedAt: now,
+		CanonicalReportJSON: []byte(`{"checkpoints":[{"code":"P01","name":"before-threshold","afterEvent":4,"verdict":"PASS"}]}`),
+		Verdict:             domain.VerdictFail, CleanupStatus: domain.CleanupClean, HarnessVersion: "test", CreatedAt: now, UpdatedAt: now,
 	}
 	tests := []struct {
 		name string
@@ -168,6 +169,7 @@ func TestRunsListShowAndBackupCommands(t *testing.T) {
 	}{
 		{"list", []string{"runs", "list", "--verdict", "FAIL", "--output", "json"}, run.ID},
 		{"show", []string{"runs", "show", "--output", "json", run.ID}, `"status":"COMPLETED"`},
+		{"show checkpoints", []string{"runs", "show", run.ID}, "Checkpoint P01/before-threshold after input 4: PASS"},
 		{"backup", []string{"backup", "--output", "/tmp/corrtest-backup.db"}, "Backup written"},
 	}
 	for _, test := range tests {

@@ -37,13 +37,9 @@ func Encode(document Scenario) ([]byte, error) {
 			repeat := item.Repeat
 			converted.Repeat = &repeat
 		}
-		for _, assertion := range item.Assertions {
-			encoded := wireAssertion{Kind: assertion.Kind, Equals: assertion.Equals}
-			if assertion.Outcome != "" {
-				outcome := assertion.Outcome
-				encoded.Outcome = &outcome
-			}
-			converted.Assertions = append(converted.Assertions, encoded)
+		converted.Assertions = encodeAssertions(item.Assertions)
+		for _, checkpoint := range item.Checkpoints {
+			converted.Checkpoints = append(converted.Checkpoints, wireCheckpoint{Name: checkpoint.Name, AfterEvent: checkpoint.AfterEvent, Window: checkpoint.Window.String(), Assertions: encodeAssertions(checkpoint.Assertions)})
 		}
 		for _, event := range item.Events {
 			delay := ""
@@ -87,6 +83,19 @@ func cloneStringMap(input map[string]string) map[string]string {
 	result := make(map[string]string, len(input))
 	for key, value := range input {
 		result[key] = value
+	}
+	return result
+}
+
+func encodeAssertions(assertions []Assertion) []wireAssertion {
+	var result []wireAssertion
+	for _, assertion := range assertions {
+		encoded := wireAssertion{Kind: assertion.Kind, Equals: assertion.Equals}
+		if assertion.Outcome != "" {
+			outcome := assertion.Outcome
+			encoded.Outcome = &outcome
+		}
+		result = append(result, encoded)
 	}
 	return result
 }
