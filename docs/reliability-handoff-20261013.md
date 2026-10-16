@@ -77,3 +77,7 @@ A future CorrTest feed adapter must first bind saved requests to proved normaliz
 ## Finite Threshold oracle qualification
 
 A [finite real-Redis oracle test](qualification/20261015/threshold-redis/README.md) passed against an isolated Redis using the root-supplied current backend Lua path/hash and redis-cli argv, including first-trigger, duplicate, separate-group and fixed-bucket observations. Exact key/container cleanup and unchanged source hashes were verified. Local host qualification passed 927 tests/subtests with one explicit actual-Redis skip. Default multi-value model refusal remains intact. History/recovery stays modeled, and this adds no deployed E2E or UAT acceptance.
+
+## Persistence model correction
+
+The [first-timer local model correction](qualification/20261015/persistence-model/README.md) now cancels by rule/group, preserves its first ideal elapsed trigger after a later clear, and respects an explicit original source start. Six failing counterexamples were reproduced; full local suite passed 938 tests/subtests with one explicit actual-Redis skip. Deadline equality uses a documented model-only timer-first tie rule. No new Persistence HTTP fixture or actual timer/Redis/WAL qualification is implied; deployed timing, recovery and E2E remain unproved.

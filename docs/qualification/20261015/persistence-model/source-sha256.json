@@ -1,0 +1,6 @@
+{
+  "internal/testoscar/model.go": "bb854df5e2cf6da35da9877958d38453f2e380194ec88ad68d7845f8e282c807",
+  "internal/testoscar/model_test.go": "991d406e6810739bd7967ed2b84207c19225547f2d2093e022900ae9c539d5e3",
+  "../oscar/oscar-correlator/src/app/patterns/persistence.py": "6ab7d3891e611ad7014f29f50db119234c9a3da6ab04b2f1b0299a9381169f05",
+  "../oscar/oscar-correlator/src/app/core/timer_subsystem.py": "9006f3efde248d5f4b34409320afdab8f0fbbc9cca81b28d85ba3f08afe02e2a"
+}

@@ -245,22 +245,7 @@ func (m *Model) triggerIndex(rule compiler.RulePlan) int {
 	case "threshold":
 		return m.thresholdExactSetTriggerIndex(rule, events)
 	case "persistence":
-		match, seconds := stringMap(rule.MatchCriteria["match"]), asInt(rule.MatchCriteria["unresolved_for_seconds"])
-		for _, index := range events {
-			item := m.alerts[index]
-			if item.plan.Status == "resolved" || !m.matches(item, match) {
-				continue
-			}
-			resolved := false
-			for _, later := range events {
-				if later > index && m.alerts[later].fingerprint == item.fingerprint && m.alerts[later].plan.Status == "resolved" {
-					resolved = true
-				}
-			}
-			if !resolved && !m.now.Before(item.at.Add(time.Duration(seconds)*time.Second)) {
-				return index
-			}
-		}
+		return m.persistenceTriggerIndex(rule, events)
 	case "absence":
 		match, seconds := stringMap(rule.MatchCriteria["expected_match"]), asInt(rule.MatchCriteria["absent_for_seconds"])
 		last, lastIndex := time.Time{}, -1
@@ -274,6 +259,61 @@ func (m *Model) triggerIndex(rule compiler.RulePlan) int {
 		}
 	}
 	return -1
+}
+
+// persistenceTriggerIndex models only the first ideal timer firing. Timers run
+// before arrivals at an equal deadline; actual scheduler races, clamping,
+// backlog, TTL, cooldown and post-trigger rearming are not qualified here.
+func (m *Model) persistenceTriggerIndex(rule compiler.RulePlan, events []int) int {
+	match := stringMap(rule.MatchCriteria["match"])
+	duration := time.Duration(asInt(rule.MatchCriteria["unresolved_for_seconds"])) * time.Second
+	if duration <= 0 {
+		return -1
+	}
+	pending := map[string]int{}
+	deadline := func(index int) time.Time {
+		alert := m.alerts[index]
+		start := alert.plan.StartsAt
+		if start.IsZero() {
+			start = alert.at
+		}
+		due := start.Add(duration)
+		// A timer cannot execute before its input arrives.
+		if due.Before(alert.at) {
+			return alert.at
+		}
+		return due
+	}
+	firstDue := func(until time.Time) int {
+		first := -1
+		for _, index := range pending {
+			due := deadline(index)
+			if !due.After(until) && (first < 0 || due.Before(deadline(first)) || (due.Equal(deadline(first)) && index < first)) {
+				first = index
+			}
+		}
+		return first
+	}
+	for _, index := range events {
+		alert := m.alerts[index]
+		if fired := firstDue(alert.at); fired >= 0 {
+			return fired
+		}
+		if !m.matches(alert, match) {
+			continue
+		}
+		group := map[string]string{}
+		for _, label := range rule.GroupBy {
+			group[label] = alert.plan.Labels[label]
+		}
+		key := labelFingerprint(group)
+		if alert.plan.Status == "resolved" {
+			delete(pending, key)
+		} else if _, exists := pending[key]; !exists {
+			pending[key] = index
+		}
+	}
+	return firstDue(m.now)
 }
 
 // thresholdExactSetTriggerIndex is an idealized exact-set approximation, NOT

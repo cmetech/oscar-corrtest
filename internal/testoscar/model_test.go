@@ -251,3 +251,77 @@ func TestThresholdExactSetApproximationPartitionsEligibleValues(t *testing.T) {
 		})
 	}
 }
+
+// First-timer semantics only: no scheduler, Redis, WAL or physical recovery proof.
+func TestSemanticModelPersistenceUsesGroupTimerCancellation(t *testing.T) {
+	type input struct {
+		status, source, site string
+		second               int
+	}
+	for _, test := range []struct {
+		name    string
+		inputs  []input
+		observe int
+		want    int
+	}{
+		{"not before deadline", []input{{"firing", "A", "x", 0}}, 9, -1},
+		{"unresolved at deadline", []input{{"firing", "A", "x", 0}}, 10, 0},
+		{"different fingerprint same group cancels", []input{{"firing", "A", "x", 0}, {"resolved", "B", "x", 5}}, 20, -1},
+		{"other group cannot cancel", []input{{"firing", "A", "x", 0}, {"resolved", "A", "y", 5}}, 10, 0},
+		{"repeat cannot postpone first timer", []input{{"firing", "A", "x", 0}, {"firing", "B", "x", 8}}, 10, 0},
+		{"ideal timer wins exact deadline tie", []input{{"firing", "A", "x", 0}, {"resolved", "A", "x", 10}}, 10, 0},
+		{"late clear retains elapsed trigger", []input{{"firing", "A", "x", 0}, {"resolved", "A", "x", 11}}, 12, 0},
+		{"cancel then fresh firing has new deadline", []input{{"firing", "A", "x", 0}, {"resolved", "B", "x", 5}, {"firing", "C", "x", 6}}, 15, -1},
+		{"fresh firing after cancel can trigger", []input{{"firing", "A", "x", 0}, {"resolved", "B", "x", 5}, {"firing", "C", "x", 6}}, 16, 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			base := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+			m := NewModel(base)
+			ctx := context.Background()
+			rule := compiler.RulePlan{Name: "rule", Pattern: "persistence", GroupBy: []string{"site"}, MatchCriteria: map[string]any{"match": map[string]string{"alertname": "SOURCE"}, "unresolved_for_seconds": 10}, EmitAlertName: "PARENT", EmitLabels: map[string]string{"alertname": "PARENT"}}
+			if _, err := m.CreateRule(ctx, rule); err != nil {
+				t.Fatal(err)
+			}
+			for _, event := range test.inputs {
+				if err := m.Sleep(ctx, base.Add(time.Duration(event.second)*time.Second).Sub(m.Now())); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := m.Inject(ctx, compiler.AlertPlan{Name: "SOURCE", Status: event.status, Labels: map[string]string{"alertname": "SOURCE", "source": event.source, "site": event.site, "oscar_test_rule_name": "rule"}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := m.Sleep(ctx, base.Add(time.Duration(test.observe)*time.Second).Sub(m.Now())); err != nil {
+				t.Fatal(err)
+			}
+			if got := m.triggerIndex(rule); got != test.want {
+				t.Fatalf("trigger index=%d want=%d", got, test.want)
+			}
+			rows, err := m.FindHistory(ctx, oscar.HistoryQuery{AlertName: "PARENT"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (len(rows) == 1) != (test.want >= 0) {
+				t.Fatalf("model parent=%v", rows)
+			}
+		})
+	}
+}
+
+func TestSemanticModelPersistenceDeadlineUsesOriginalStart(t *testing.T) {
+	base := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	m := NewModel(base)
+	ctx := context.Background()
+	rule := compiler.RulePlan{Name: "rule", Pattern: "persistence", GroupBy: []string{"site"}, MatchCriteria: map[string]any{"match": map[string]string{"alertname": "SOURCE"}, "unresolved_for_seconds": 10}, EmitAlertName: "PARENT", EmitLabels: map[string]string{"alertname": "PARENT"}}
+	if _, err := m.CreateRule(ctx, rule); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Inject(ctx, compiler.AlertPlan{Name: "SOURCE", Status: "firing", StartsAt: base.Add(-5 * time.Second), Labels: map[string]string{"alertname": "SOURCE", "site": "x", "oscar_test_rule_name": "rule"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Sleep(ctx, 5*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.triggerIndex(rule); got != 0 {
+		t.Fatalf("event-time deadline was replaced by arrival time: %d", got)
+	}
+}
