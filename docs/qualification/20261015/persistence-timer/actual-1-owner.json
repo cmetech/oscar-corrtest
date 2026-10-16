@@ -1,0 +1,26 @@
+{
+  "name": "oscar-corrtest-persistence-56b8720853c3",
+  "image": "sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499",
+  "runner_before": "45bee2279e16915dcf1abdfe98e8c21c1f11095085a2573e6465d2f03ee52ee5",
+  "source_sha256": "08fc0f78b805d14d31333197473db818912339c001957b5c1178689f49c38a8d",
+  "container": "69999931849ba19131240a7260d3e43efe7dda547ae2f21e7f66b023815acdcb",
+  "redis_run_id": "d8130ab8dec2dbb3bf2af7471803911069d5328b",
+  "port": "34673",
+  "command": [
+    "/Users/coreyellis/.pyenv/versions/3.13.13/bin/python3.13",
+    "-B",
+    "/Users/coreyellis/code/github.com/cmetech/oscar_app/.worktrees/correlation-reliability-20260919/oscar-corrtest/docs/qualification/20261015/persistence-timer/run.py",
+    "--source",
+    "/Users/coreyellis/code/github.com/cmetech/oscar_app/.worktrees/correlation-reliability-20260919/oscar/oscar-correlator/src",
+    "--source-sha256",
+    "08fc0f78b805d14d31333197473db818912339c001957b5c1178689f49c38a8d",
+    "--isolated-redis-run-id",
+    "d8130ab8dec2dbb3bf2af7471803911069d5328b",
+    "--output",
+    "/Users/coreyellis/code/github.com/cmetech/oscar_app/.worktrees/correlation-reliability-20260919/oscar-corrtest/docs/qualification/20261015/persistence-timer/actual-1"
+  ],
+  "returncode": 1,
+  "container_absent": true,
+  "runner_after": "45bee2279e16915dcf1abdfe98e8c21c1f11095085a2573e6465d2f03ee52ee5",
+  "runner_parity": true
+}

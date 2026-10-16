@@ -1,0 +1,11 @@
+{
+  "final_timer_rows": 0,
+  "files_removed": [
+    {
+      "name": "timers.sqlite",
+      "size": 16384,
+      "sha256": "41c3262ffb9b5937cc39a61ba5553c38f447f78c547216b039974248592f72d7"
+    }
+  ],
+  "all_absent": true
+}

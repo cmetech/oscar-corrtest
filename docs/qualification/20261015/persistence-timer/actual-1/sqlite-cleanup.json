@@ -1,0 +1,21 @@
+{
+  "final_timer_rows": 0,
+  "files_removed": [
+    {
+      "name": "timers.sqlite",
+      "size": 16384,
+      "sha256": "27eacc50894dbe9db2204ecc07ac2dbf9fd67b4340a6207cabc6ffc648b1857d"
+    },
+    {
+      "name": "timers.sqlite-wal",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "timers.sqlite-shm",
+      "size": 32768,
+      "sha256": "35217b5673dd57a81a1b8d9ddf127dd6d937c52fba7f27d201d0dab1ac39466e"
+    }
+  ],
+  "all_absent": true
+}

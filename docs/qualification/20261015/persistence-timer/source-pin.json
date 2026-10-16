@@ -1,0 +1,6 @@
+{
+  "source": "oscar-correlator/src",
+  "backend_commit": "c1179f1909c9bc16cf9a84ce3751bd1473ea6ec3",
+  "algorithm": "sorted app/**/*.py and app/**/*.lua: relative UTF-8 path + NUL + binary SHA256(content), SHA256 aggregate",
+  "sha256": "08fc0f78b805d14d31333197473db818912339c001957b5c1178689f49c38a8d"
+}

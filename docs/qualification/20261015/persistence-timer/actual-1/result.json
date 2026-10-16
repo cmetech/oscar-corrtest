@@ -1,0 +1,295 @@
+{
+  "cancelled_absent_after_replay": true,
+  "cancelled_absent_before_replay": true,
+  "deadline_ms": 1792116719353,
+  "decisions": [
+    {
+      "decision": {
+        "added_labels": {
+          "oscar_correlation_pattern": "persistence"
+        },
+        "alert_fingerprint": "f55574e9b2cfb6da5446a787_positive",
+        "child_fingerprints": [
+          "f55574e9b2cfb6da5446a787_positive"
+        ],
+        "created_at_ms": 1792116719835,
+        "current_count": 1,
+        "distinct_count": 1,
+        "emit_spec": {
+          "alertname": "unused_dispatch_disabled"
+        },
+        "group_hash": "cc076859347b",
+        "group_values": {
+          "site": "f55574e9b2cfb6da5446a787_positive"
+        },
+        "max_synthetic_per_minute": 100,
+        "outcome": "parent_emitted",
+        "parent_fingerprint": null,
+        "pattern": "persistence",
+        "reason": "persistence_threshold_reached unresolved_for=30",
+        "rule_id": 269747382497999,
+        "rule_name": "corrtest_persistence_f55574e9b2cfb6da5446a787",
+        "suppressed_notifiers": null,
+        "triggered": true,
+        "window_id": "269747382497999:cc076859347b:1792116689353",
+        "window_start_ms": 1792116689353
+      },
+      "elapsed_seconds": 30.483755707973614,
+      "observed_ms": 1792116719837
+    }
+  ],
+  "dispatch_enabled": false,
+  "duration_seconds": 30,
+  "elapsed_seconds": 35.15670266596135,
+  "error": "AttributeError: 'Redis' object has no attribute 'aclose'",
+  "evaluations": [
+    {
+      "decision": {
+        "added_labels": {
+          "oscar_correlation_pattern": "persistence"
+        },
+        "alert_fingerprint": "f55574e9b2cfb6da5446a787_positive",
+        "child_fingerprints": [
+          "f55574e9b2cfb6da5446a787_positive"
+        ],
+        "created_at_ms": 1792116689353,
+        "current_count": 1,
+        "distinct_count": null,
+        "emit_spec": {
+          "alertname": "unused_dispatch_disabled"
+        },
+        "group_hash": "cc076859347b",
+        "max_synthetic_per_minute": 100,
+        "outcome": "enriched",
+        "parent_fingerprint": null,
+        "pattern": "persistence",
+        "reason": "persistence_first_seen scheduled_at=1792116719353",
+        "rule_id": 269747382497999,
+        "rule_name": "corrtest_persistence_f55574e9b2cfb6da5446a787",
+        "suppressed_notifiers": null,
+        "triggered": false,
+        "window_id": "269747382497999:cc076859347b:1792116689353",
+        "window_start_ms": 1792116689353
+      },
+      "input": {
+        "fingerprint": "f55574e9b2cfb6da5446a787_positive",
+        "labels": {
+          "alertname": "corrtest_f55574e9b2cfb6da5446a787",
+          "site": "f55574e9b2cfb6da5446a787_positive"
+        },
+        "starts_at_ms": 1792116689353,
+        "status": "firing"
+      }
+    },
+    {
+      "decision": {
+        "added_labels": {
+          "oscar_correlation_pattern": "persistence"
+        },
+        "alert_fingerprint": "f55574e9b2cfb6da5446a787_cancelled",
+        "child_fingerprints": [
+          "f55574e9b2cfb6da5446a787_cancelled"
+        ],
+        "created_at_ms": 1792116689353,
+        "current_count": 1,
+        "distinct_count": null,
+        "emit_spec": {
+          "alertname": "unused_dispatch_disabled"
+        },
+        "group_hash": "7f37e074f92a",
+        "max_synthetic_per_minute": 100,
+        "outcome": "enriched",
+        "parent_fingerprint": null,
+        "pattern": "persistence",
+        "reason": "persistence_first_seen scheduled_at=1792116719353",
+        "rule_id": 269747382497999,
+        "rule_name": "corrtest_persistence_f55574e9b2cfb6da5446a787",
+        "suppressed_notifiers": null,
+        "triggered": false,
+        "window_id": "269747382497999:7f37e074f92a:1792116689353",
+        "window_start_ms": 1792116689353
+      },
+      "input": {
+        "fingerprint": "f55574e9b2cfb6da5446a787_cancelled",
+        "labels": {
+          "alertname": "corrtest_f55574e9b2cfb6da5446a787",
+          "site": "f55574e9b2cfb6da5446a787_cancelled"
+        },
+        "starts_at_ms": 1792116689353,
+        "status": "firing"
+      }
+    },
+    {
+      "decision": {
+        "added_labels": {
+          "oscar_correlation_pattern": "persistence"
+        },
+        "alert_fingerprint": "f55574e9b2cfb6da5446a787_repeat",
+        "child_fingerprints": [
+          "f55574e9b2cfb6da5446a787_repeat"
+        ],
+        "created_at_ms": 1792116690369,
+        "current_count": null,
+        "distinct_count": null,
+        "emit_spec": {
+          "alertname": "unused_dispatch_disabled"
+        },
+        "group_hash": "cc076859347b",
+        "max_synthetic_per_minute": 100,
+        "outcome": "enriched",
+        "parent_fingerprint": null,
+        "pattern": "persistence",
+        "reason": "persistence_already_tracking",
+        "rule_id": 269747382497999,
+        "rule_name": "corrtest_persistence_f55574e9b2cfb6da5446a787",
+        "suppressed_notifiers": null,
+        "triggered": false,
+        "window_id": "269747382497999:cc076859347b:1792116690369",
+        "window_start_ms": 1792116690369
+      },
+      "input": {
+        "fingerprint": "f55574e9b2cfb6da5446a787_repeat",
+        "labels": {
+          "alertname": "corrtest_f55574e9b2cfb6da5446a787",
+          "site": "f55574e9b2cfb6da5446a787_positive"
+        },
+        "starts_at_ms": 1792116690369,
+        "status": "firing"
+      }
+    },
+    {
+      "decision": {
+        "added_labels": {
+          "oscar_correlation_pattern": "persistence"
+        },
+        "alert_fingerprint": "f55574e9b2cfb6da5446a787_different",
+        "child_fingerprints": [],
+        "created_at_ms": 1792116689353,
+        "current_count": null,
+        "distinct_count": null,
+        "emit_spec": {
+          "alertname": "unused_dispatch_disabled"
+        },
+        "group_hash": "7f37e074f92a",
+        "max_synthetic_per_minute": 100,
+        "outcome": "enriched",
+        "parent_fingerprint": null,
+        "pattern": "persistence",
+        "reason": "persistence_resolved_cancelled",
+        "rule_id": 269747382497999,
+        "rule_name": "corrtest_persistence_f55574e9b2cfb6da5446a787",
+        "suppressed_notifiers": null,
+        "triggered": false,
+        "window_id": "269747382497999:7f37e074f92a:1792116689353",
+        "window_start_ms": 1792116689353
+      },
+      "input": {
+        "fingerprint": "f55574e9b2cfb6da5446a787_different",
+        "labels": {
+          "alertname": "corrtest_f55574e9b2cfb6da5446a787",
+          "site": "f55574e9b2cfb6da5446a787_cancelled"
+        },
+        "starts_at_ms": 1792116689353,
+        "status": "resolved"
+      }
+    },
+    {
+      "decision": {
+        "added_labels": {
+          "oscar_correlation_pattern": "persistence"
+        },
+        "alert_fingerprint": "f55574e9b2cfb6da5446a787_positive",
+        "child_fingerprints": [],
+        "created_at_ms": 1792116689353,
+        "current_count": null,
+        "distinct_count": null,
+        "emit_spec": {
+          "alertname": "unused_dispatch_disabled"
+        },
+        "group_hash": "ac1db2e06fe4",
+        "max_synthetic_per_minute": 100,
+        "outcome": "enriched",
+        "parent_fingerprint": null,
+        "pattern": "persistence",
+        "reason": "persistence_resolved_cancelled",
+        "rule_id": 269747382497999,
+        "rule_name": "corrtest_persistence_f55574e9b2cfb6da5446a787",
+        "suppressed_notifiers": null,
+        "triggered": false,
+        "window_id": "269747382497999:ac1db2e06fe4:1792116689353",
+        "window_start_ms": 1792116689353
+      },
+      "input": {
+        "fingerprint": "f55574e9b2cfb6da5446a787_positive",
+        "labels": {
+          "alertname": "corrtest_f55574e9b2cfb6da5446a787",
+          "site": "f55574e9b2cfb6da5446a787_other"
+        },
+        "starts_at_ms": 1792116689353,
+        "status": "resolved"
+      }
+    }
+  ],
+  "final_timer_members": 0,
+  "final_timer_rows": 0,
+  "first_seen_ms": 1792116689353,
+  "observation_end_ms": 1792116724510,
+  "original_timer_row": [
+    "82fe8afa1c233ca3",
+    1792116719353,
+    269747382497999,
+    "cc076859347b",
+    "f55574e9b2cfb6da5446a787_positive",
+    "persistence_check",
+    "{\"first_seen_ms\": 1792116689353, \"unresolved_for_seconds\": 30, \"group_values\": {\"site\": \"f55574e9b2cfb6da5446a787_positive\"}}"
+  ],
+  "owned_keys": [
+    "oscar:correlator:persistence:269747382497999:cc076859347b",
+    "oscar:correlator:persistence_fired:269747382497999:cc076859347b",
+    "oscar:correlator:persistence:269747382497999:7f37e074f92a",
+    "oscar:correlator:persistence_fired:269747382497999:7f37e074f92a",
+    "oscar:correlator:persistence:269747382497999:ac1db2e06fe4",
+    "oscar:correlator:persistence_fired:269747382497999:ac1db2e06fe4"
+  ],
+  "owned_timer_ids": [
+    "82fe8afa1c233ca3",
+    "820a05eb76318f8a",
+    "805dbd88b8fa94f0"
+  ],
+  "physical_clear": "NOT_PROVEN",
+  "positive_fingerprint": "f55574e9b2cfb6da5446a787_positive",
+  "positive_group": "cc076859347b",
+  "receiver": "NOT_TESTED",
+  "redis_run_id": "d8130ab8dec2dbb3bf2af7471803911069d5328b",
+  "redis_version": "7.4.11",
+  "replay_identity_preserved": true,
+  "replayed": 1,
+  "rule": {
+    "correlation_policy": null,
+    "emit_spec": {
+      "alertname": "unused_dispatch_disabled"
+    },
+    "enabled": true,
+    "for_notifiers": null,
+    "group_by_labels": [
+      "site"
+    ],
+    "id": 269747382497999,
+    "match_criteria": {
+      "match": {
+        "alertname": "corrtest_f55574e9b2cfb6da5446a787"
+      },
+      "unresolved_for_seconds": 30
+    },
+    "max_synthetic_per_minute": 100,
+    "name": "corrtest_persistence_f55574e9b2cfb6da5446a787",
+    "pattern": "persistence",
+    "priority": 100,
+    "window_seconds": 60
+  },
+  "scope": "actual Persistence/TimerSubsystem/Redis/SQLite with fixture audit capture",
+  "source_sha256": "08fc0f78b805d14d31333197473db818912339c001957b5c1178689f49c38a8d",
+  "sqlite_journal_mode": "wal",
+  "status": "FAIL",
+  "uat": "NOT_ACCEPTED"
+}

@@ -1,0 +1,16 @@
+{
+  "keys": [
+    "oscar:correlator:persistence:274696300158264:6134e5f498ed",
+    "oscar:correlator:persistence_fired:274696300158264:6134e5f498ed",
+    "oscar:correlator:persistence:274696300158264:d408c78d3156",
+    "oscar:correlator:persistence_fired:274696300158264:d408c78d3156",
+    "oscar:correlator:persistence:274696300158264:adf85ff73ec9",
+    "oscar:correlator:persistence_fired:274696300158264:adf85ff73ec9"
+  ],
+  "timer_ids": [
+    "02400f2a10c6bf62",
+    "043000f5e2c89157",
+    "57d71f7d2a4f2ecb"
+  ],
+  "redis_run_id": "91db14162257503069c293698c24715b644fd584"
+}
