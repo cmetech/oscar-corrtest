@@ -257,6 +257,24 @@ decision occurred **30.698 seconds after the original source start**, against
 the original 30-second deadline. This is a split-process observation of one
 committed timer, not a continuous observation or a timing distribution.
 
+## Fixed scheduling source rerun
+
+[Actual attempt3](actual-3/result.json) passes against backend commit`68a8d83bf`,
+source`1d3b9e40fc4de1415245fe34fcaa682bf0fb66aee49890516f613205c858757c`.
+This source adds durable first claim and coordinated clear/fire. The unchanged
+fixture observed35.135s, one trigger after the original30s deadline, canceled
+work absent, one original timer replay and empty finaltimerstores. Source and
+runner parity passed; both exact owned containers and empty SQLite artifacts
+were removed. The cached images were reused without build or pull.
+
+The original `source-pin.json`, actual2 and kill3 evidence remain historical.
+Use [actual3's source pin](actual-3/source-pin.json) for the fixed runtime; do not
+reinterpret earlier logs as evidence for the new bytes. The opt-in historical
+actual-store contract test still intentionally requires its original source pin.
+This rerun is the orderly timer scenario; the backend's separate first-schedule
+process fixture proves before-claim and after-commit SIGKILL boundaries. No
+power-loss, parent-delivery, sustained-capacity or UAT claim follows.
+
 ## Explicit limits
 
 This cut can qualify actual first-trigger timer scheduling, pre-deadline group

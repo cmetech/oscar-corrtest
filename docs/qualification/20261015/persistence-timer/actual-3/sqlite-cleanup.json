@@ -1,0 +1,11 @@
+{
+  "final_timer_rows": 0,
+  "files": {
+    "timers.sqlite": {
+      "sha256": "41c3262ffb9b5937cc39a61ba5553c38f447f78c547216b039974248592f72d7",
+      "bytes": 16384
+    }
+  },
+  "read_mode": "immutable after controller removal and no WAL/SHM",
+  "all_absent": true
+}

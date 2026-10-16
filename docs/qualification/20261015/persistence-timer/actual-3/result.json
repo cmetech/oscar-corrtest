@@ -1,0 +1,302 @@
+{
+  "cancelled_absent_after_replay": true,
+  "cancelled_absent_before_replay": true,
+  "cleanup": true,
+  "cleanup_errors": [],
+  "deadline_ms": 1792119708419,
+  "decisions": [
+    {
+      "decision": {
+        "added_labels": {
+          "oscar_correlation_pattern": "persistence"
+        },
+        "alert_fingerprint": "eaab4b13c4b144972059dacc_positive",
+        "child_fingerprints": [
+          "eaab4b13c4b144972059dacc_positive"
+        ],
+        "created_at_ms": 1792119709195,
+        "current_count": 1,
+        "distinct_count": 1,
+        "emit_spec": {
+          "alertname": "unused_dispatch_disabled"
+        },
+        "group_hash": "fbae43db1401",
+        "group_values": {
+          "site": "eaab4b13c4b144972059dacc_positive"
+        },
+        "max_synthetic_per_minute": 100,
+        "outcome": "parent_emitted",
+        "parent_fingerprint": null,
+        "pattern": "persistence",
+        "reason": "persistence_threshold_reached unresolved_for=30",
+        "rule_id": 258021419893937,
+        "rule_name": "corrtest_persistence_eaab4b13c4b144972059dacc",
+        "suppressed_notifiers": null,
+        "triggered": true,
+        "window_id": "258021419893937:fbae43db1401:1792119678419",
+        "window_start_ms": 1792119678419
+      },
+      "elapsed_seconds": 30.776666303980164,
+      "observed_ms": 1792119709195
+    }
+  ],
+  "dispatch_enabled": false,
+  "duration_seconds": 30,
+  "elapsed_seconds": 35.134983691968955,
+  "evaluations": [
+    {
+      "decision": {
+        "added_labels": {
+          "oscar_correlation_pattern": "persistence"
+        },
+        "alert_fingerprint": "eaab4b13c4b144972059dacc_positive",
+        "child_fingerprints": [
+          "eaab4b13c4b144972059dacc_positive"
+        ],
+        "created_at_ms": 1792119678419,
+        "current_count": 1,
+        "distinct_count": null,
+        "emit_spec": {
+          "alertname": "unused_dispatch_disabled"
+        },
+        "group_hash": "fbae43db1401",
+        "max_synthetic_per_minute": 100,
+        "outcome": "enriched",
+        "parent_fingerprint": null,
+        "pattern": "persistence",
+        "reason": "persistence_first_seen scheduled_at=1792119708419",
+        "rule_id": 258021419893937,
+        "rule_name": "corrtest_persistence_eaab4b13c4b144972059dacc",
+        "suppressed_notifiers": null,
+        "triggered": false,
+        "window_id": "258021419893937:fbae43db1401:1792119678419",
+        "window_start_ms": 1792119678419
+      },
+      "input": {
+        "fingerprint": "eaab4b13c4b144972059dacc_positive",
+        "labels": {
+          "alertname": "corrtest_eaab4b13c4b144972059dacc",
+          "site": "eaab4b13c4b144972059dacc_positive"
+        },
+        "starts_at_ms": 1792119678419,
+        "status": "firing"
+      }
+    },
+    {
+      "decision": {
+        "added_labels": {
+          "oscar_correlation_pattern": "persistence"
+        },
+        "alert_fingerprint": "eaab4b13c4b144972059dacc_cancelled",
+        "child_fingerprints": [
+          "eaab4b13c4b144972059dacc_cancelled"
+        ],
+        "created_at_ms": 1792119678419,
+        "current_count": 1,
+        "distinct_count": null,
+        "emit_spec": {
+          "alertname": "unused_dispatch_disabled"
+        },
+        "group_hash": "3d4c5d700b7b",
+        "max_synthetic_per_minute": 100,
+        "outcome": "enriched",
+        "parent_fingerprint": null,
+        "pattern": "persistence",
+        "reason": "persistence_first_seen scheduled_at=1792119708419",
+        "rule_id": 258021419893937,
+        "rule_name": "corrtest_persistence_eaab4b13c4b144972059dacc",
+        "suppressed_notifiers": null,
+        "triggered": false,
+        "window_id": "258021419893937:3d4c5d700b7b:1792119678419",
+        "window_start_ms": 1792119678419
+      },
+      "input": {
+        "fingerprint": "eaab4b13c4b144972059dacc_cancelled",
+        "labels": {
+          "alertname": "corrtest_eaab4b13c4b144972059dacc",
+          "site": "eaab4b13c4b144972059dacc_cancelled"
+        },
+        "starts_at_ms": 1792119678419,
+        "status": "firing"
+      }
+    },
+    {
+      "decision": {
+        "added_labels": {
+          "oscar_correlation_pattern": "persistence"
+        },
+        "alert_fingerprint": "eaab4b13c4b144972059dacc_repeat",
+        "child_fingerprints": [
+          "eaab4b13c4b144972059dacc_repeat"
+        ],
+        "created_at_ms": 1792119679433,
+        "current_count": null,
+        "distinct_count": null,
+        "emit_spec": {
+          "alertname": "unused_dispatch_disabled"
+        },
+        "group_hash": "fbae43db1401",
+        "max_synthetic_per_minute": 100,
+        "outcome": "enriched",
+        "parent_fingerprint": null,
+        "pattern": "persistence",
+        "reason": "persistence_already_tracking",
+        "rule_id": 258021419893937,
+        "rule_name": "corrtest_persistence_eaab4b13c4b144972059dacc",
+        "suppressed_notifiers": null,
+        "triggered": false,
+        "window_id": "258021419893937:fbae43db1401:1792119679433",
+        "window_start_ms": 1792119679433
+      },
+      "input": {
+        "fingerprint": "eaab4b13c4b144972059dacc_repeat",
+        "labels": {
+          "alertname": "corrtest_eaab4b13c4b144972059dacc",
+          "site": "eaab4b13c4b144972059dacc_positive"
+        },
+        "starts_at_ms": 1792119679433,
+        "status": "firing"
+      }
+    },
+    {
+      "decision": {
+        "added_labels": {
+          "oscar_correlation_pattern": "persistence"
+        },
+        "alert_fingerprint": "eaab4b13c4b144972059dacc_different",
+        "child_fingerprints": [],
+        "created_at_ms": 1792119678419,
+        "current_count": null,
+        "distinct_count": null,
+        "emit_spec": {
+          "alertname": "unused_dispatch_disabled"
+        },
+        "group_hash": "3d4c5d700b7b",
+        "max_synthetic_per_minute": 100,
+        "outcome": "enriched",
+        "parent_fingerprint": null,
+        "pattern": "persistence",
+        "reason": "persistence_resolved_cancelled",
+        "rule_id": 258021419893937,
+        "rule_name": "corrtest_persistence_eaab4b13c4b144972059dacc",
+        "suppressed_notifiers": null,
+        "triggered": false,
+        "window_id": "258021419893937:3d4c5d700b7b:1792119678419",
+        "window_start_ms": 1792119678419
+      },
+      "input": {
+        "fingerprint": "eaab4b13c4b144972059dacc_different",
+        "labels": {
+          "alertname": "corrtest_eaab4b13c4b144972059dacc",
+          "site": "eaab4b13c4b144972059dacc_cancelled"
+        },
+        "starts_at_ms": 1792119678419,
+        "status": "resolved"
+      }
+    },
+    {
+      "decision": {
+        "added_labels": {
+          "oscar_correlation_pattern": "persistence"
+        },
+        "alert_fingerprint": "eaab4b13c4b144972059dacc_positive",
+        "child_fingerprints": [],
+        "created_at_ms": 1792119678419,
+        "current_count": null,
+        "distinct_count": null,
+        "emit_spec": {
+          "alertname": "unused_dispatch_disabled"
+        },
+        "group_hash": "65f7541f055e",
+        "max_synthetic_per_minute": 100,
+        "outcome": "enriched",
+        "parent_fingerprint": null,
+        "pattern": "persistence",
+        "reason": "persistence_resolved_cancelled",
+        "rule_id": 258021419893937,
+        "rule_name": "corrtest_persistence_eaab4b13c4b144972059dacc",
+        "suppressed_notifiers": null,
+        "triggered": false,
+        "window_id": "258021419893937:65f7541f055e:1792119678419",
+        "window_start_ms": 1792119678419
+      },
+      "input": {
+        "fingerprint": "eaab4b13c4b144972059dacc_positive",
+        "labels": {
+          "alertname": "corrtest_eaab4b13c4b144972059dacc",
+          "site": "eaab4b13c4b144972059dacc_other"
+        },
+        "starts_at_ms": 1792119678419,
+        "status": "resolved"
+      }
+    }
+  ],
+  "final_timer_members": 0,
+  "final_timer_rows": 0,
+  "first_seen_ms": 1792119678419,
+  "observation_end_ms": 1792119713554,
+  "original_timer_row": [
+    "0c8fe91cc050ee29",
+    1792119708419,
+    258021419893937,
+    "fbae43db1401",
+    "eaab4b13c4b144972059dacc_positive",
+    "persistence_check",
+    "{\"first_seen_ms\": 1792119678419, \"unresolved_for_seconds\": 30, \"group_values\": {\"site\": \"eaab4b13c4b144972059dacc_positive\"}}"
+  ],
+  "owned_keys": [
+    "oscar:correlator:persistence:258021419893937:fbae43db1401",
+    "oscar:correlator:persistence_fired:258021419893937:fbae43db1401",
+    "oscar:correlator:persistence:258021419893937:3d4c5d700b7b",
+    "oscar:correlator:persistence_fired:258021419893937:3d4c5d700b7b",
+    "oscar:correlator:persistence:258021419893937:65f7541f055e",
+    "oscar:correlator:persistence_fired:258021419893937:65f7541f055e"
+  ],
+  "owned_timer_ids": [
+    "0c8fe91cc050ee29",
+    "fbaf1f595ce5b861",
+    "bbc81eb6a43fa885"
+  ],
+  "physical_clear": "NOT_PROVEN",
+  "positive_fingerprint": "eaab4b13c4b144972059dacc_positive",
+  "positive_group": "fbae43db1401",
+  "receiver": "NOT_TESTED",
+  "redis_run_id": "511918e78b3637fbdf568da1f74953a0c6b93e60",
+  "redis_version": "7.4.11",
+  "replay_identity_preserved": true,
+  "replayed": 1,
+  "rule": {
+    "correlation_policy": null,
+    "emit_spec": {
+      "alertname": "unused_dispatch_disabled"
+    },
+    "enabled": true,
+    "for_notifiers": null,
+    "group_by_labels": [
+      "site"
+    ],
+    "id": 258021419893937,
+    "match_criteria": {
+      "match": {
+        "alertname": "corrtest_eaab4b13c4b144972059dacc"
+      },
+      "unresolved_for_seconds": 30
+    },
+    "max_synthetic_per_minute": 100,
+    "name": "corrtest_persistence_eaab4b13c4b144972059dacc",
+    "pattern": "persistence",
+    "priority": 100,
+    "window_seconds": 60
+  },
+  "runtime": {
+    "aiosqlite": "0.22.1",
+    "python": "3.13.15 (main, Sep 19 2026, 01:13:02) [GCC 14.2.0]",
+    "redis": "8.1.0"
+  },
+  "scope": "actual Persistence/TimerSubsystem/Redis/SQLite with fixture audit capture",
+  "source_parity": true,
+  "source_sha256": "1d3b9e40fc4de1415245fe34fcaa682bf0fb66aee49890516f613205c858757c",
+  "sqlite_journal_mode": "wal",
+  "status": "PASS",
+  "uat": "NOT_ACCEPTED"
+}
