@@ -1,0 +1,34 @@
+{
+  "image_id": "sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499",
+  "lua_sha256": "f1a8e17088ec76a9ff2721dce5c9e1a94de646f73f6cbaf85c5f9588f1cec9f8",
+  "source_before": {
+    "internal/runner/threshold_redis_test.go": "457b9799dbb0bc2b4ec9acbbef37fd03e99a9e808fad63aa41fa6acaf83b1755",
+    "internal/runner/flood_http_test.go": "9111f2fb8818af3dee592efb9afb1552dff52bc233b3a625f54fa0fd286a42dd"
+  },
+  "container_name": "oscar-corrtest-threshold-1c03e203e2cc",
+  "ownership_label": "oscar.corrtest-threshold",
+  "capacity_qualified": false,
+  "uat_accepted": 0,
+  "container_id": "bbd204f8b499d4c3a5e13bac5403418227d0709714577c67784ad95a63943a60",
+  "redis_version": "Redis server v=7.4.11 sha=00000000:0 malloc=jemalloc-5.3.0 bits=64 build=dc395baf3ab4da8b",
+  "command": [
+    "go",
+    "test",
+    "./internal/runner",
+    "-run",
+    "^TestThresholdRedisOracleThroughRealHTTPClient$",
+    "-count=1",
+    "-v"
+  ],
+  "returncode": 0,
+  "pass_marker": true,
+  "key_cleanup_marker": true,
+  "skipped": false,
+  "remove_returncode": 0,
+  "owned_containers_remaining": [],
+  "source_after": {
+    "internal/runner/threshold_redis_test.go": "457b9799dbb0bc2b4ec9acbbef37fd03e99a9e808fad63aa41fa6acaf83b1755",
+    "internal/runner/flood_http_test.go": "9111f2fb8818af3dee592efb9afb1552dff52bc233b3a625f54fa0fd286a42dd"
+  },
+  "lua_after_sha256": "f1a8e17088ec76a9ff2721dce5c9e1a94de646f73f6cbaf85c5f9588f1cec9f8"
+}

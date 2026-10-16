@@ -24,21 +24,24 @@ import (
 )
 
 // Test-only Flood/sequence/co-occurrence/cross-source wire responder, plus the
-// singleton-value Threshold control (no positive HLL oracle). The independent Model determines
-// matched trigger decisions. Captured JSON supplies episode History state;
+// singleton-value Threshold control. An explicit Redis oracle can supply Threshold
+// decisions; otherwise the independent Model determines matched triggers. Captured
+// JSON supplies modeled episode History state;
 // neither branch reads assertions, expected verdicts or case polarity.
 type correlationWireFixture struct {
-	mu             sync.Mutex
-	model          *testoscar.Model
-	mode           string
-	rules          map[int]compiler.RulePlan
-	history        map[string]oscar.HistoryRecord
-	auditToHistory map[string]string
-	auditToName    map[string]string
-	auditIDs       map[string]int
-	stimuli        []oscar.AlertRequest
-	cleanup        []oscar.AlertRequest
-	deleted        map[int]bool
+	thresholdOracle  func(compiler.RulePlan, oscar.AlertRequest, time.Time) (thresholdObservation, error)
+	thresholdResults map[string]thresholdObservation
+	mu               sync.Mutex
+	model            *testoscar.Model
+	mode             string
+	rules            map[int]compiler.RulePlan
+	history          map[string]oscar.HistoryRecord
+	auditToHistory   map[string]string
+	auditToName      map[string]string
+	auditIDs         map[string]int
+	stimuli          []oscar.AlertRequest
+	cleanup          []oscar.AlertRequest
+	deleted          map[int]bool
 }
 
 func newCorrelationWireFixture(mode string) *correlationWireFixture {
@@ -117,7 +120,7 @@ func (f *correlationWireFixture) respond(request testoscar.Request) testoscar.Re
 		// This responder cannot grant Threshold positive qualification using an
 		// exact-set approximation. Only one nonempty distinct value is supported.
 		for _, rule := range f.rules {
-			if rule.Pattern != "threshold" || rule.Name != alert.Labels["oscar_test_rule_name"] {
+			if f.thresholdOracle != nil || rule.Pattern != "threshold" || rule.Name != alert.Labels["oscar_test_rule_name"] {
 				continue
 			}
 			distinct, _ := rule.MatchCriteria["distinct_label"].(string)
@@ -144,6 +147,20 @@ func (f *correlationWireFixture) respond(request testoscar.Request) testoscar.Re
 			starts, err = time.Parse(time.RFC3339Nano, alert.StartsAt)
 			if err != nil {
 				return bad(err)
+			}
+		}
+		if f.thresholdOracle != nil && alert.Status == "firing" {
+			for _, rule := range f.rules {
+				if rule.Pattern == "threshold" && rule.Name == alert.Labels["oscar_test_rule_name"] {
+					observed, err := f.thresholdOracle(rule, alert, starts)
+					if err != nil {
+						return bad(err)
+					}
+					if f.thresholdResults == nil {
+						f.thresholdResults = map[string]thresholdObservation{}
+					}
+					f.thresholdResults[alert.Fingerprint] = observed
+				}
 			}
 		}
 		input := compiler.AlertPlan{Name: alert.Labels["alertname"], Status: alert.Status, Labels: alert.Labels, Annotations: alert.Annotations, StartsAt: starts}
@@ -280,6 +297,17 @@ func (f *correlationWireFixture) respond(request testoscar.Request) testoscar.Re
 			// outcomes for rejected tags/pairs or recovery inputs.
 			if (row.Pattern == "sequence" || row.Pattern == "co_occurrence" || row.Pattern == "cross_source" || row.Pattern == "threshold") && row.Outcome == "no_trigger" {
 				row.Outcome = "enriched"
+			}
+			if row.Pattern == "threshold" && f.thresholdOracle != nil {
+				observed, found := f.thresholdResults[key]
+				if !found {
+					return bad(fmt.Errorf("Threshold oracle evidence missing"))
+				}
+				row.Outcome = "enriched"
+				if observed.Trigger == 1 {
+					row.Outcome = "parent_emitted"
+				}
+				row.Reason = fmt.Sprintf("observed Redis Threshold trigger=%d count=%d distinct=%d", observed.Trigger, observed.Count, observed.Distinct)
 			}
 			if f.mode == "threshold raw-count trigger" && matchedRule.Pattern == "threshold" && len(f.stimuli) >= 3 && f.stimuli[2].Fingerprint == key {
 				row.Outcome = "parent_emitted"
