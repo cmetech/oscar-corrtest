@@ -1,0 +1,83 @@
+{
+  "cancelled_absent_after_replay": true,
+  "checkpoint_sha256": "c81cb0bb9f48d9f6448bcff3dceecbbf60e9636a0abf0d675cf5d561de4af2eb",
+  "cleanup": true,
+  "cleanup_errors": [],
+  "deadline_ms": 1792118070291,
+  "decisions": [
+    {
+      "decision": {
+        "added_labels": {
+          "oscar_correlation_pattern": "persistence"
+        },
+        "alert_fingerprint": "036f583b939735ccdd71eb73_positive",
+        "child_fingerprints": [
+          "036f583b939735ccdd71eb73_positive"
+        ],
+        "created_at_ms": 1792118070989,
+        "current_count": 1,
+        "distinct_count": 1,
+        "emit_spec": {
+          "alertname": "unused_dispatch_disabled"
+        },
+        "group_hash": "35b5f799860a",
+        "group_values": {
+          "site": "036f583b939735ccdd71eb73_positive"
+        },
+        "max_synthetic_per_minute": 100,
+        "outcome": "parent_emitted",
+        "parent_fingerprint": null,
+        "pattern": "persistence",
+        "reason": "persistence_threshold_reached unresolved_for=30",
+        "rule_id": 3776756552599,
+        "rule_name": "corrtest_persistence_036f583b939735ccdd71eb73",
+        "suppressed_notifiers": null,
+        "triggered": true,
+        "window_id": "3776756552599:35b5f799860a:1792118040291",
+        "window_start_ms": 1792118040291
+      },
+      "observed_ms": 1792118070989,
+      "resume_elapsed_seconds": 27.946293935994618
+    }
+  ],
+  "dispatch_enabled": false,
+  "final_timer_members": 0,
+  "final_timer_rows": 0,
+  "first_seen_ms": 1792118040291,
+  "observation_end_ms": 1792118075457,
+  "observation_gap_ms": 1716,
+  "observation_mode": "split_process",
+  "original_timer_row": [
+    "1cf4143c06323e29",
+    1792118070291,
+    3776756552599,
+    "35b5f799860a",
+    "036f583b939735ccdd71eb73_positive",
+    "persistence_check",
+    "{\"first_seen_ms\": 1792118040291, \"unresolved_for_seconds\": 30, \"group_values\": {\"site\": \"036f583b939735ccdd71eb73_positive\"}}"
+  ],
+  "physical_clear": "NOT_PROVEN",
+  "preflight_original_rows": true,
+  "preopen_sqlite_sha256": {
+    "timers.sqlite": "352a9bb23c329c5a9bf235baf56917358b5b64b03f1a11d261fadae9c3cdb721",
+    "timers.sqlite-shm": "03d38a3a2e272e99c47c7d61eb4c853484ce4347043161a30cdddd4c35288ffe",
+    "timers.sqlite-wal": "a3eec8ba2a2065990dc896366ffcc22a6192245b87e5292e41279d7b870f6d79"
+  },
+  "prepared_at_ms": 1792118041327,
+  "receiver": "NOT_TESTED",
+  "redis_run_id": "f90885eb7bcfb8eefaf68f5533711b62b04afd53",
+  "replay_identity_preserved": true,
+  "replayed": 1,
+  "resume_elapsed_seconds": 32.414596265007276,
+  "resume_started_ms": 1792118043043,
+  "runtime": {
+    "aiosqlite": "0.22.1",
+    "python": "3.13.15 (main, Sep 19 2026, 01:13:02) [GCC 14.2.0]",
+    "redis": "8.1.0"
+  },
+  "scope": "existing committed Persistence timer reopen; external root manifest must prove SIGKILL",
+  "source_parity": true,
+  "source_sha256": "08fc0f78b805d14d31333197473db818912339c001957b5c1178689f49c38a8d",
+  "status": "PASS",
+  "uat": "NOT_ACCEPTED"
+}

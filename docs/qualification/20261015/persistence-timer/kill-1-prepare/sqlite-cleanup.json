@@ -1,0 +1,22 @@
+{
+  "final_timer_rows": 1,
+  "retained_rows": [
+    [
+      "cbce3d24b5bdcf00",
+      1792117794495,
+      162019718612724,
+      "d7c5e05bd482",
+      "935b27c646f4669f0ca660ab_positive",
+      "persistence_check",
+      "{\"first_seen_ms\": 1792117764495, \"unresolved_for_seconds\": 30, \"group_values\": {\"site\": \"935b27c646f4669f0ca660ab_positive\"}}"
+    ]
+  ],
+  "files_removed": [
+    {
+      "name": "timers.sqlite",
+      "size": 16384,
+      "sha256": "0264b29e4c47b9c9cb8063bf25317831f53e4791203a02f90e6a5da79656daaa"
+    }
+  ],
+  "all_absent": true
+}

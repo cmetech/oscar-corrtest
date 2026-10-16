@@ -90,6 +90,28 @@ async def finish_evidence(result, operations, admitted, source_check):
         result["source_parity_error"] = type(exc).__name__ + ": " + str(exc)
 
 
+def write_kill_checkpoint(output, result, prepared_at_ms, elapsed, pid):
+    require(not result["decisions"] and result["cancelled_absent_before_replay"] is True,
+            "cannot prepare after timer decision or without committed cancellation")
+    require(0 < elapsed < 10 and result["first_seen_ms"] < prepared_at_ms < result["deadline_ms"] - 20000,
+            "insufficient bounded kill margin")
+    checkpoint = {name: result[name] for name in (
+        "source_sha256", "redis_run_id", "runtime", "first_seen_ms", "deadline_ms", "duration_seconds",
+        "sqlite_journal_mode", "cancelled_absent_before_replay", "decisions", "positive_group",
+        "positive_fingerprint", "owned_keys", "owned_timer_ids", "rule", "original_timer_row", "evaluations")}
+    checkpoint.update(schema=1, kind="persistence-before-process-kill", prepared_at_ms=prepared_at_ms,
+                      prepared_elapsed_seconds=elapsed, pid=pid)
+    target = output / "checkpoint.json"
+    require(not target.exists(), "checkpoint already exists")
+    temporary = output / "checkpoint.pending"
+    with temporary.open("xb") as stream:
+        stream.write((json.dumps(checkpoint, indent=2, sort_keys=True) + "\n").encode())
+        stream.flush()
+        os.fsync(stream.fileno())
+    # This ready marker is complete before root hashes it. No power-loss claim.
+    temporary.rename(target)
+
+
 async def qualify(args, result):
     require(args.source.is_absolute(), "absolute backend src path required")
     source = args.source.resolve()
@@ -205,6 +227,16 @@ async def qualify(args, result):
             await store.fetch(timer_ids[1]) is None and await client._r.zscore(TIMER_ZSET, timer_ids[1]) is None
             and await client.get_str(keys[2]) is None)
         require(result["cancelled_absent_before_replay"], "clear did not cancel both stores/anchor")
+        if getattr(args, "prepare_kill", False):
+            require(source_digest(source) == args.source_sha256, "source changed before kill checkpoint")
+            write_kill_checkpoint(args.output, result, int(time.time() * 1000), time.monotonic() - started, os.getpid())
+            # Root must SIGKILL while SQLite is OPEN and the real poller is alive.
+            # A missed kill window fails and follows normal exact-owned cleanup.
+            while time.monotonic() - started < 10:
+                require(timers._task is not None and not timers._task.done(), "poller stopped before external kill")
+                require(not result["decisions"], "timer unexpectedly decided before external kill")
+                await asyncio.sleep(0.1)
+            raise RuntimeError("external SIGKILL did not arrive within bounded preparation window")
         await timers.stop()
         await store.close()
         # Orderly reopen, not process-kill or power-loss recovery.
@@ -260,6 +292,7 @@ def main():
     parser.add_argument("--source-sha256", required=True)
     parser.add_argument("--isolated-redis-run-id", required=True, help="root-owned dedicated Redis INFO server run_id")
     parser.add_argument("--output", type=Path, required=True, help="new evidence directory; never overwritten")
+    parser.add_argument("--prepare-kill", action="store_true", help="checkpoint then await root SIGKILL before timer deadline")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
     result = {"status": "FAIL", "source_sha256": args.source_sha256, "dispatch_enabled": False,

@@ -1,0 +1,22 @@
+{
+  "name": "oscar-corrtest-persistence-1b822a746b23",
+  "image": "sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499",
+  "controller_image": "sha256:e3a34f7d4a024c6f991a8a6477770ab0a5ae2ad809f80d544e78e908ff63d4c3",
+  "fixture_before": {
+    "run.py": "1b816410f4c19427bac9538fe7c1f9c90b9002b2ed8ebab9162e6120256f9540",
+    "resume.py": "07a2306f4b50e9e748a5c124808a4791c5b2bc61d8813216073006db14d9e644"
+  },
+  "source_sha256": "08fc0f78b805d14d31333197473db818912339c001957b5c1178689f49c38a8d",
+  "owned_containers": [
+    "9245445bd07360e870310e35c9870d1dab967bfe1423ce3f586635dbd776c6fa"
+  ],
+  "removed": [
+    "9245445bd07360e870310e35c9870d1dab967bfe1423ce3f586635dbd776c6fa"
+  ],
+  "commands": [],
+  "fixture_after": {
+    "run.py": "1b816410f4c19427bac9538fe7c1f9c90b9002b2ed8ebab9162e6120256f9540",
+    "resume.py": "07a2306f4b50e9e748a5c124808a4791c5b2bc61d8813216073006db14d9e644"
+  },
+  "fixture_parity": true
+}

@@ -1,0 +1,15 @@
+{
+  "final_timer_rows": 0,
+  "read_mode": "immutable read-only after verified process removal and absence of WAL/SHM",
+  "cleanup_check_notes": [
+    "Initial independent absence assertion was case-sensitive; corrected to match actual lowercase Docker no such object response.",
+    "Host SQLite mode=ro returned unable to open database file; immutable read-only succeeded after verifying no WAL/SHM and all controllers absent."
+  ],
+  "files": {
+    "timers.sqlite": {
+      "sha256": "a49000aea9d1bd5db25e975ea06c909f62dd8efe2bced3b3229317416ad3a6a3",
+      "size": 16384
+    }
+  },
+  "all_absent": true
+}

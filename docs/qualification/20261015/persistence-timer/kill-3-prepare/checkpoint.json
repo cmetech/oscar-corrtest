@@ -1,0 +1,255 @@
+{
+  "cancelled_absent_before_replay": true,
+  "deadline_ms": 1792118070291,
+  "decisions": [],
+  "duration_seconds": 30,
+  "evaluations": [
+    {
+      "decision": {
+        "added_labels": {
+          "oscar_correlation_pattern": "persistence"
+        },
+        "alert_fingerprint": "036f583b939735ccdd71eb73_positive",
+        "child_fingerprints": [
+          "036f583b939735ccdd71eb73_positive"
+        ],
+        "created_at_ms": 1792118040291,
+        "current_count": 1,
+        "distinct_count": null,
+        "emit_spec": {
+          "alertname": "unused_dispatch_disabled"
+        },
+        "group_hash": "35b5f799860a",
+        "max_synthetic_per_minute": 100,
+        "outcome": "enriched",
+        "parent_fingerprint": null,
+        "pattern": "persistence",
+        "reason": "persistence_first_seen scheduled_at=1792118070291",
+        "rule_id": 3776756552599,
+        "rule_name": "corrtest_persistence_036f583b939735ccdd71eb73",
+        "suppressed_notifiers": null,
+        "triggered": false,
+        "window_id": "3776756552599:35b5f799860a:1792118040291",
+        "window_start_ms": 1792118040291
+      },
+      "input": {
+        "fingerprint": "036f583b939735ccdd71eb73_positive",
+        "labels": {
+          "alertname": "corrtest_036f583b939735ccdd71eb73",
+          "site": "036f583b939735ccdd71eb73_positive"
+        },
+        "starts_at_ms": 1792118040291,
+        "status": "firing"
+      }
+    },
+    {
+      "decision": {
+        "added_labels": {
+          "oscar_correlation_pattern": "persistence"
+        },
+        "alert_fingerprint": "036f583b939735ccdd71eb73_cancelled",
+        "child_fingerprints": [
+          "036f583b939735ccdd71eb73_cancelled"
+        ],
+        "created_at_ms": 1792118040291,
+        "current_count": 1,
+        "distinct_count": null,
+        "emit_spec": {
+          "alertname": "unused_dispatch_disabled"
+        },
+        "group_hash": "3e32854595bd",
+        "max_synthetic_per_minute": 100,
+        "outcome": "enriched",
+        "parent_fingerprint": null,
+        "pattern": "persistence",
+        "reason": "persistence_first_seen scheduled_at=1792118070291",
+        "rule_id": 3776756552599,
+        "rule_name": "corrtest_persistence_036f583b939735ccdd71eb73",
+        "suppressed_notifiers": null,
+        "triggered": false,
+        "window_id": "3776756552599:3e32854595bd:1792118040291",
+        "window_start_ms": 1792118040291
+      },
+      "input": {
+        "fingerprint": "036f583b939735ccdd71eb73_cancelled",
+        "labels": {
+          "alertname": "corrtest_036f583b939735ccdd71eb73",
+          "site": "036f583b939735ccdd71eb73_cancelled"
+        },
+        "starts_at_ms": 1792118040291,
+        "status": "firing"
+      }
+    },
+    {
+      "decision": {
+        "added_labels": {
+          "oscar_correlation_pattern": "persistence"
+        },
+        "alert_fingerprint": "036f583b939735ccdd71eb73_repeat",
+        "child_fingerprints": [
+          "036f583b939735ccdd71eb73_repeat"
+        ],
+        "created_at_ms": 1792118041304,
+        "current_count": null,
+        "distinct_count": null,
+        "emit_spec": {
+          "alertname": "unused_dispatch_disabled"
+        },
+        "group_hash": "35b5f799860a",
+        "max_synthetic_per_minute": 100,
+        "outcome": "enriched",
+        "parent_fingerprint": null,
+        "pattern": "persistence",
+        "reason": "persistence_already_tracking",
+        "rule_id": 3776756552599,
+        "rule_name": "corrtest_persistence_036f583b939735ccdd71eb73",
+        "suppressed_notifiers": null,
+        "triggered": false,
+        "window_id": "3776756552599:35b5f799860a:1792118041304",
+        "window_start_ms": 1792118041304
+      },
+      "input": {
+        "fingerprint": "036f583b939735ccdd71eb73_repeat",
+        "labels": {
+          "alertname": "corrtest_036f583b939735ccdd71eb73",
+          "site": "036f583b939735ccdd71eb73_positive"
+        },
+        "starts_at_ms": 1792118041304,
+        "status": "firing"
+      }
+    },
+    {
+      "decision": {
+        "added_labels": {
+          "oscar_correlation_pattern": "persistence"
+        },
+        "alert_fingerprint": "036f583b939735ccdd71eb73_different",
+        "child_fingerprints": [],
+        "created_at_ms": 1792118040291,
+        "current_count": null,
+        "distinct_count": null,
+        "emit_spec": {
+          "alertname": "unused_dispatch_disabled"
+        },
+        "group_hash": "3e32854595bd",
+        "max_synthetic_per_minute": 100,
+        "outcome": "enriched",
+        "parent_fingerprint": null,
+        "pattern": "persistence",
+        "reason": "persistence_resolved_cancelled",
+        "rule_id": 3776756552599,
+        "rule_name": "corrtest_persistence_036f583b939735ccdd71eb73",
+        "suppressed_notifiers": null,
+        "triggered": false,
+        "window_id": "3776756552599:3e32854595bd:1792118040291",
+        "window_start_ms": 1792118040291
+      },
+      "input": {
+        "fingerprint": "036f583b939735ccdd71eb73_different",
+        "labels": {
+          "alertname": "corrtest_036f583b939735ccdd71eb73",
+          "site": "036f583b939735ccdd71eb73_cancelled"
+        },
+        "starts_at_ms": 1792118040291,
+        "status": "resolved"
+      }
+    },
+    {
+      "decision": {
+        "added_labels": {
+          "oscar_correlation_pattern": "persistence"
+        },
+        "alert_fingerprint": "036f583b939735ccdd71eb73_positive",
+        "child_fingerprints": [],
+        "created_at_ms": 1792118040291,
+        "current_count": null,
+        "distinct_count": null,
+        "emit_spec": {
+          "alertname": "unused_dispatch_disabled"
+        },
+        "group_hash": "c5076d7379ab",
+        "max_synthetic_per_minute": 100,
+        "outcome": "enriched",
+        "parent_fingerprint": null,
+        "pattern": "persistence",
+        "reason": "persistence_resolved_cancelled",
+        "rule_id": 3776756552599,
+        "rule_name": "corrtest_persistence_036f583b939735ccdd71eb73",
+        "suppressed_notifiers": null,
+        "triggered": false,
+        "window_id": "3776756552599:c5076d7379ab:1792118040291",
+        "window_start_ms": 1792118040291
+      },
+      "input": {
+        "fingerprint": "036f583b939735ccdd71eb73_positive",
+        "labels": {
+          "alertname": "corrtest_036f583b939735ccdd71eb73",
+          "site": "036f583b939735ccdd71eb73_other"
+        },
+        "starts_at_ms": 1792118040291,
+        "status": "resolved"
+      }
+    }
+  ],
+  "first_seen_ms": 1792118040291,
+  "kind": "persistence-before-process-kill",
+  "original_timer_row": [
+    "1cf4143c06323e29",
+    1792118070291,
+    3776756552599,
+    "35b5f799860a",
+    "036f583b939735ccdd71eb73_positive",
+    "persistence_check",
+    "{\"first_seen_ms\": 1792118040291, \"unresolved_for_seconds\": 30, \"group_values\": {\"site\": \"036f583b939735ccdd71eb73_positive\"}}"
+  ],
+  "owned_keys": [
+    "oscar:correlator:persistence:3776756552599:35b5f799860a",
+    "oscar:correlator:persistence_fired:3776756552599:35b5f799860a",
+    "oscar:correlator:persistence:3776756552599:3e32854595bd",
+    "oscar:correlator:persistence_fired:3776756552599:3e32854595bd",
+    "oscar:correlator:persistence:3776756552599:c5076d7379ab",
+    "oscar:correlator:persistence_fired:3776756552599:c5076d7379ab"
+  ],
+  "owned_timer_ids": [
+    "1cf4143c06323e29",
+    "b120189618e849b3",
+    "1a1dbdde9151adef"
+  ],
+  "pid": 1,
+  "positive_fingerprint": "036f583b939735ccdd71eb73_positive",
+  "positive_group": "35b5f799860a",
+  "prepared_at_ms": 1792118041327,
+  "prepared_elapsed_seconds": 1.035304689023178,
+  "redis_run_id": "f90885eb7bcfb8eefaf68f5533711b62b04afd53",
+  "rule": {
+    "correlation_policy": null,
+    "emit_spec": {
+      "alertname": "unused_dispatch_disabled"
+    },
+    "enabled": true,
+    "for_notifiers": null,
+    "group_by_labels": [
+      "site"
+    ],
+    "id": 3776756552599,
+    "match_criteria": {
+      "match": {
+        "alertname": "corrtest_036f583b939735ccdd71eb73"
+      },
+      "unresolved_for_seconds": 30
+    },
+    "max_synthetic_per_minute": 100,
+    "name": "corrtest_persistence_036f583b939735ccdd71eb73",
+    "pattern": "persistence",
+    "priority": 100,
+    "window_seconds": 60
+  },
+  "runtime": {
+    "aiosqlite": "0.22.1",
+    "python": "3.13.15 (main, Sep 19 2026, 01:13:02) [GCC 14.2.0]",
+    "redis": "8.1.0"
+  },
+  "schema": 1,
+  "source_sha256": "08fc0f78b805d14d31333197473db818912339c001957b5c1178689f49c38a8d",
+  "sqlite_journal_mode": "wal"
+}

@@ -1,0 +1,39 @@
+{
+  "checkpoint_sha256": "5af9774f5999ead84e5de61a54e6f5418b18aa42405342d2213480235c9275d8",
+  "cleanup": true,
+  "cleanup_errors": [],
+  "deadline_ms": 1792117794495,
+  "dispatch_enabled": false,
+  "error": "ValueError: existing SQLite must contain only the original committed timer; no authority to seed/replace",
+  "first_seen_ms": 1792117764495,
+  "observation_mode": "split_process",
+  "original_timer_row": [
+    "cbce3d24b5bdcf00",
+    1792117794495,
+    162019718612724,
+    "d7c5e05bd482",
+    "935b27c646f4669f0ca660ab_positive",
+    "persistence_check",
+    "{\"first_seen_ms\": 1792117764495, \"unresolved_for_seconds\": 30, \"group_values\": {\"site\": \"935b27c646f4669f0ca660ab_positive\"}}"
+  ],
+  "physical_clear": "NOT_PROVEN",
+  "preflight_original_rows": true,
+  "preopen_sqlite_sha256": {
+    "timers.sqlite": "352a9bb23c329c5a9bf235baf56917358b5b64b03f1a11d261fadae9c3cdb721",
+    "timers.sqlite-shm": "1576ec106ee1a1536d44b88f5d7bc64cf61a3e7de05b00c6476558cbd2e443a1",
+    "timers.sqlite-wal": "fa3211d17cd59babf65723b9678a2741eeeac33500ba96c2ed8283466fd53ccc"
+  },
+  "prepared_at_ms": 1792117765538,
+  "receiver": "NOT_TESTED",
+  "redis_run_id": "e5bb8b404dec9a3d669b5177b1553964a6483946",
+  "runtime": {
+    "aiosqlite": "0.22.1",
+    "python": "3.13.15 (main, Sep 19 2026, 01:13:02) [GCC 14.2.0]",
+    "redis": "8.1.0"
+  },
+  "scope": "existing committed Persistence timer reopen; external root manifest must prove SIGKILL",
+  "source_parity": true,
+  "source_sha256": "08fc0f78b805d14d31333197473db818912339c001957b5c1178689f49c38a8d",
+  "status": "FAIL",
+  "uat": "NOT_ACCEPTED"
+}
