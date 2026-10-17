@@ -1,0 +1,8 @@
+{
+  "internal/persistence/sqlite/existing_feed_repository.go": "791ff43e69d4b8f2c25591ef13ebb27d4488ffd003e44cd741e8d4e91e5b2258",
+  "internal/persistence/sqlite/existing_feed_repository_test.go": "a6168726732c8f11710ac500176f99f09c7faa540d08081527a2e6edca8611b6",
+  "internal/persistence/sqlite/existing_feed_outcome_test.go": "db794fff426bd1137abd206890d5e788c354a49f6f5c32a6f062e76545140ebd",
+  "internal/persistence/sqlite/migrations/0004_existing_feed.sql": "b497da9e3886366f86b746e78d40f34bd9f3e9569451e2466b9405972d2e1a5c",
+  "internal/persistence/sqlite/migrations_test.go": "b6152a85d60e075d603b7cf4db0dce06ff6553b5e986a589bde09f5bf92173a6",
+  "internal/persistence/sqlite/backup_test.go": "307300082fd732da00074cb9834480bf6594ff33a5c92a783acef9bac5367ab8"
+}

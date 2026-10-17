@@ -17,7 +17,7 @@ func TestInitialMigrationCreatesLedgerSchema(t *testing.T) {
 
 	want := []string{
 		"schema_migrations", "targets", "scenarios", "runs", "run_cases", "run_events",
-		"alert_attempts", "assertions", "resources", "artifacts",
+		"alert_attempts", "assertions", "resources", "artifacts", "existing_feeds", "existing_feed_attempts",
 	}
 	for _, table := range want {
 		var count int
@@ -32,7 +32,7 @@ func TestInitialMigrationCreatesLedgerSchema(t *testing.T) {
 	if err := database.db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&migrations); err != nil {
 		t.Fatal(err)
 	}
-	if migrations != 3 {
+	if migrations != 4 {
 		t.Fatalf("migration count=%d", migrations)
 	}
 }

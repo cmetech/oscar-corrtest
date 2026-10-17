@@ -1,0 +1,31 @@
+# Durable SQLite existing-feed prerequisite
+
+The existing SQLite database can now retain the complete finite owned-feed manifest, reserve a request before transport, and retain one outcome without allowing replay. This replaces none of the user CLI or generic Runner paths yet. The independently qualified file-journal cohort driver still uses its original journal; this slice has only local SQLite/HTTP/process-loss verification.
+
+## Recording contract
+
+`RegisterExistingFeed` accepts the existing full `ExistingFeedManifestSpec` only while its run is queued, in preflight or setting up. It calls the same pinned profile/Mapping validator. The stored JSON includes snapshot source, SHA-256 and exact base64 bytes, top-level profile hash, cohort and receiver identity, normalization Host/User-Agent and whole-second start. A run/profile has one immutable registration. The exact receiver-origin string/cohort/profile tuple cannot be registered under another run in this database. This is a retained local uniqueness guard, not remote idempotency or endpoint equivalence detection.
+
+`RecordExistingFeedAttempt` is the callback for `ExistingFeedLabInput.SendRecorded`. One immediate WAL transaction validates the supplied complete evidence against `manifest.Prepare(index)`, inserts its unique index, appends the full `alert.attempting` timeline event and marks the run's cleanup UNKNOWN. The transaction must commit before returning success to transport. Any failure rolls back the entire transaction and prevents that callback's HTTP send. Only an INJECTING run can reserve a request. Indexes are the fixed 0–5 sequence; existing, skipped or out-of-range indexes are refused. Every earlier attempt must have a valid recorded forwarded result before a later index can be reserved.
+
+`CompleteExistingFeedAttempt` writes one bounded outcome against the recorded request's body hash. Forwarded/rejected classifications must agree with HTTP 200, the response status and absence of a transport error. Indeterminate outcomes remain retained and block advancement. Duplicate outcomes, foreign hashes, conflicting status/body/error and oversized responses fail closed. The result is the real adapter's reported classification; the repository does not independently prove remote forwarding or reconstruct an acknowledgment header that was not supplied in `InjectionResult`.
+
+`ListExistingFeedAttempts` revalidates the canonical frozen manifest, exact prepared request/expected identity, contiguous indexes, response binding and canonical result bytes. Partial or conflicting data is an error. A missing result remains a visible nil result (UNKNOWN), never an unsent request. No mutation API resets, deletes or replaces attempts. Reopening the database cannot replay a recorded index; recovery retains UNKNOWN through the existing durable input-responsibility event. A valid forwarded result also leaves cleanup UNKNOWN because neither profile has a qualified source-clear contract.
+
+Migration 0004 adds `existing_feeds` and `existing_feed_attempts`, with run foreign keys, per-run/profile/index uniqueness and exact origin/cohort/profile uniqueness. Existing SQLite WAL, synchronous FULL, immediate transactions and private database permissions remain unchanged. Two existing schema/backup controls now expect four migrations.
+
+## Scope and external prerequisites
+
+Ownership and the actual immutable receiver registry/Mapping installation remain external trusted lab preconditions. Caller-supplied snapshot hashes do not prove either. The repository permits only the already qualified Splunk and middleware firing fixtures and preserves their normal labels; it adds no reserved run labels, source clear, automatic retry or arbitrary-profile URL path.
+
+Only the new repository methods enforce this contract. Generic finalization/reconciliation code must not be assumed to understand existing feeds until explicitly wired. The next integration must freeze a finite owned-lab plan, retain receiver/observer bindings, verify actual Native labels/start/fingerprint and matching History without reserved-label filtering, and preserve UNKNOWN/DIRTY without invoking generic source-resolution cleanup. Database/result integrity depends on retaining the private database and its filesystem; these tests establish process-loss behavior, not power-loss or distributed exactly-once guarantees.
+
+Generic `DeleteTerminalRun` currently encounters the new RESTRICT foreign key for any registered feed and rolls its transaction back. This intentional fail-closed limit preserves the retained cohort no-reuse binding. Future retention support needs an explicit durable binding/tombstone policy; simply cascading these rows would permit replay under a new run.
+
+## Verification checkpoint
+
+Initial behavioral RED failed against unimplemented repository methods; [retained evidence](qualification/20261017/existing-feed-sqlite/logs.json) records it. The first focused implementation run passed. The initial complete SQLite package run then failed the existing backup control's hard-coded three-migration expectation; updating that expectation to four corrected the test. No backup implementation changed.
+
+The final SQLite package passed 61 tests/subtests. The focused existing-feed controls passed 33 tests/subtests under `-race`. The full suite passed **1056 tests/subtests across 27 packages**, with zero failures. The explicit owned-cohort and actual-Redis tests skipped; two command packages had no tests. `git diff --check` passed.
+
+Controls use real local HTTP and SQLite: the handler sees the committed complete UNKNOWN record before POST processing; recorder failure sends nothing; two independent database pools commit only one competing reservation; close/reopen refuses replay; actual child-process kill after recorded POST but before response retains UNKNOWN and refuses a new POST. Additional controls cover evidence/body/identity/Mapping/origin tampering, out-of-order indexes, reused cohort binding, unknown/rejected outcomes, result conflicts, corrupt journal reads and atomic rollback when timeline insertion fails. No backend source, Docker, live lab or external service was touched by this slice. [Independent review](qualification/20261017/existing-feed-sqlite/review.md) found no blocker; no CLI/Runner completion is claimed.
