@@ -460,6 +460,14 @@ func (c *Client) doBytes(ctx context.Context, method, path string, endpoint *url
 }
 
 func (c *Client) doBytesWithHeaders(ctx context.Context, method, path string, endpoint *url.URL, encoded []byte, transport *http.Client) (int, []byte, http.Header, error) {
+	return c.doPreparedBytesWithHeaders(ctx, method, path, endpoint, encoded, transport, nil)
+}
+
+type preparedRequestHeaders struct {
+	host, userAgent string
+}
+
+func (c *Client) doPreparedBytesWithHeaders(ctx context.Context, method, path string, endpoint *url.URL, encoded []byte, transport *http.Client, prepared *preparedRequestHeaders) (int, []byte, http.Header, error) {
 	var body io.Reader
 	if encoded != nil {
 		body = bytes.NewReader(encoded)
@@ -478,6 +486,12 @@ func (c *Client) doBytesWithHeaders(ctx context.Context, method, path string, en
 	}
 	if c.credential != "" {
 		request.Header.Set("X-API-Key", c.credential)
+	}
+	if prepared != nil {
+		request.Host = prepared.host
+		request.Header.Set("User-Agent", prepared.userAgent)
+		// Prepared non-idempotent POST bodies must not be replayed by the transport.
+		request.GetBody = nil
 	}
 	response, err := transport.Do(request)
 	if err != nil {

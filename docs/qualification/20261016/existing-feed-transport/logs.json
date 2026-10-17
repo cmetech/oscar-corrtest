@@ -1,0 +1,22 @@
+{
+  "red.log.gz": {
+    "raw_sha256": "bca7afedbed4064cb8091857d1400158afd9c4bfa3ce525b08d95f3ca14e0a60",
+    "gzip_sha256": "88ea5372bbec5dc8c560ef88ec9b9dce0c3a11a946f394f13acfee9461a71159",
+    "raw_bytes": 5167
+  },
+  "green.log.gz": {
+    "raw_sha256": "c52f93bc729db22eca8736609378082da93765000995693c3eca1451ede059bc",
+    "gzip_sha256": "3a2b3792c7b55242e0ef837b2c5619c42e08590bb04e607561bd0c2a8de7dd04",
+    "raw_bytes": 61
+  },
+  "suite.jsonl.gz": {
+    "raw_sha256": "3da632593e1b2e72e8f7562c794edd1339c345d327628e3a651bf4076ae06cad",
+    "gzip_sha256": "ff7533456139cdc5c27473a55f414104cbecbfe822c12117fa503fc3cf3e2753",
+    "raw_bytes": 1013908
+  },
+  "race.log.gz": {
+    "raw_sha256": "bbfabe570d32b19514b1f47d8a6405d4e38ea7fa3139d756b342e39366d8dbeb",
+    "gzip_sha256": "93514e013a8d29c41ff8f0d1f2c8024e8c2d95269e7a2bafa582ef633d1cb6f1",
+    "raw_bytes": 61
+  }
+}
