@@ -539,6 +539,13 @@ func (r *Runtime) ExportRun(ctx context.Context, runID, destination string) (evi
 		}
 		attachments = append(attachments, evidence.Attachment{Name: name, Content: content, SHA256: record.SHA256, ByteSize: record.ByteSize})
 	}
+	existingFeed, err := r.existingFeedExport(ctx, run)
+	if err != nil {
+		return evidence.Result{}, err
+	}
+	if existingFeed != nil {
+		attachments = append(attachments, *existingFeed)
+	}
 	return evidence.WriteWithArtifacts(ctx, destination, run, events, attachments)
 }
 

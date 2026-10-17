@@ -167,6 +167,37 @@ func (d *Database) ListExistingFeedAttempts(ctx context.Context, runID, profile 
 	return attempts, err
 }
 
+// ExistingFeedSnapshot is one validated transactional view for evidence export.
+// Missing Result remains UNKNOWN; absence of an attempt is never synthesized.
+type ExistingFeedSnapshot struct {
+	Manifest oscar.ExistingFeedManifestSpec `json:"manifest"`
+	Attempts []ExistingFeedAttempt          `json:"attempts"`
+}
+
+func (d *Database) ReadExistingFeedSnapshot(ctx context.Context, runID, profile string) (ExistingFeedSnapshot, error) {
+	var snapshot ExistingFeedSnapshot
+	if err := d.Ready(); err != nil {
+		return snapshot, err
+	}
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return snapshot, err
+	}
+	defer tx.Rollback()
+	manifest, attempts, err := readExistingFeed(ctx, tx, runID, profile)
+	if err != nil {
+		return snapshot, err
+	}
+	prepared, _, err := manifest.Prepare(0)
+	if err != nil {
+		return snapshot, err
+	}
+	if attempts == nil {
+		attempts = []ExistingFeedAttempt{}
+	}
+	return ExistingFeedSnapshot{Manifest: prepared.Manifest, Attempts: attempts}, nil
+}
+
 func readExistingFeed(ctx context.Context, tx *sql.Tx, runID, profile string) (oscar.ExistingFeedManifest, []ExistingFeedAttempt, error) {
 	var raw, cohort, origin string
 	var zero oscar.ExistingFeedManifest
