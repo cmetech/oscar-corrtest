@@ -1,0 +1,18 @@
+name: corrtest-operational-v1-flood
+pattern: flood
+window_seconds: 60
+group_by_labels:
+  - qualification_run
+  - site
+match_criteria:
+  match:
+    alertname: CorrTestOperationalFlood
+  min_count: 5
+correlation_policy: null
+emit_spec:
+  alertname: CorrTestOperationalFloodParent
+for_notifiers: null
+priority: 100
+max_synthetic_per_minute: 10
+enabled: true
+description: Fixed owned ordinary initial-Flood audit qualification v1

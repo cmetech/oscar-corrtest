@@ -1,0 +1,7 @@
+schema_version: 1
+id: corrtest_operational
+version: "0.1.0"
+requires_oscar: ">=26.3.0,<27.0.0"
+requires_tasks:
+  common: []
+  local: []

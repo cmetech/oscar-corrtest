@@ -1,0 +1,60 @@
+{
+  "apiVersion": "corrtest.oscar/flood-scenario-v1",
+  "id": "flood-installed-v1",
+  "coverage": "ordinary-initial-flood-audit",
+  "profile": "corrtest_operational_v1",
+  "rule": "corrtest-operational-v1-flood",
+  "labels": {
+    "alertname": "CorrTestOperationalFlood",
+    "qualification_pack": "corrtest_operational_v1",
+    "severity": "warning"
+  },
+  "identity": {
+    "run": "fresh-unpredictable-per-run",
+    "source_id": "unique-per-input",
+    "start": "one-captured-initial-start-per-run"
+  },
+  "groups": [
+    {
+      "site": "positive",
+      "count": 5,
+      "expected_enriched": 4,
+      "expected_parent_emitted": 1
+    },
+    {
+      "site": "negative",
+      "count": 4,
+      "expected_enriched": 4,
+      "expected_parent_emitted": 0
+    },
+    {
+      "site": "isolated-a",
+      "count": 3,
+      "expected_enriched": 3,
+      "expected_parent_emitted": 0
+    },
+    {
+      "site": "isolated-b",
+      "count": 3,
+      "expected_enriched": 3,
+      "expected_parent_emitted": 0
+    }
+  ],
+  "budgets": {
+    "validity_seconds": 600,
+    "execution_seconds": 180,
+    "window_seconds": 60,
+    "observation_lag_seconds": 30,
+    "poll_seconds": 1
+  },
+  "cleanup": "DIRTY-until-owned-target-teardown",
+  "unsupported": [
+    "dispatch",
+    "clear",
+    "refire",
+    "restart",
+    "faults",
+    "enhanced-admission",
+    "other-patterns"
+  ]
+}

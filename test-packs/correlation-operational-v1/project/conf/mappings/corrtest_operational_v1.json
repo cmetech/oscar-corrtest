@@ -1,0 +1,77 @@
+[
+  {
+    "name": "corrtest_operational_v1",
+    "mapping_namespace_name": "webhook_profiles",
+    "description": "finite ordinary initial-flood audit inputs; explicit identity and times; no dispatch or clear authority.",
+    "element": [
+      {
+        "key": "profile~schema_version",
+        "value": "1"
+      },
+      {
+        "key": "profile~enabled",
+        "value": "true"
+      },
+      {
+        "key": "profile~required",
+        "value": "labels.alertname,labels.qualification_pack,labels.qualification_run,labels.site,labels.source_id,labels.severity,event_timestamp,ends_at"
+      },
+      {
+        "key": "select~work.alertname",
+        "value": "body:/labels/alertname"
+      },
+      {
+        "key": "when~alertname",
+        "value": "{\"order\":0,\"condition\":\"work.alertname regex \\\\S\",\"action\":{\"command\":\"select\",\"target\":\"labels.alertname\",\"value\":\"field:work.alertname\"}}"
+      },
+      {
+        "key": "select~work.qualification_pack",
+        "value": "body:/labels/qualification_pack"
+      },
+      {
+        "key": "when~qualification_pack",
+        "value": "{\"order\":1,\"condition\":\"work.qualification_pack regex \\\\S\",\"action\":{\"command\":\"select\",\"target\":\"labels.qualification_pack\",\"value\":\"field:work.qualification_pack\"}}"
+      },
+      {
+        "key": "select~work.qualification_run",
+        "value": "body:/labels/qualification_run"
+      },
+      {
+        "key": "when~qualification_run",
+        "value": "{\"order\":2,\"condition\":\"work.qualification_run regex \\\\S\",\"action\":{\"command\":\"select\",\"target\":\"labels.qualification_run\",\"value\":\"field:work.qualification_run\"}}"
+      },
+      {
+        "key": "select~work.site",
+        "value": "body:/labels/site"
+      },
+      {
+        "key": "when~site",
+        "value": "{\"order\":3,\"condition\":\"work.site regex \\\\S\",\"action\":{\"command\":\"select\",\"target\":\"labels.site\",\"value\":\"field:work.site\"}}"
+      },
+      {
+        "key": "select~work.source_id",
+        "value": "body:/labels/source_id"
+      },
+      {
+        "key": "when~source_id",
+        "value": "{\"order\":4,\"condition\":\"work.source_id regex \\\\S\",\"action\":{\"command\":\"select\",\"target\":\"labels.source_id\",\"value\":\"field:work.source_id\"}}"
+      },
+      {
+        "key": "select~work.severity",
+        "value": "body:/labels/severity"
+      },
+      {
+        "key": "when~severity",
+        "value": "{\"order\":5,\"condition\":\"work.severity regex \\\\S\",\"action\":{\"command\":\"select\",\"target\":\"labels.severity\",\"value\":\"field:work.severity\"}}"
+      },
+      {
+        "key": "parse_time~event_timestamp",
+        "value": "body:/startsAt|rfc3339"
+      },
+      {
+        "key": "parse_time~ends_at",
+        "value": "body:/endsAt|rfc3339"
+      }
+    ]
+  }
+]
