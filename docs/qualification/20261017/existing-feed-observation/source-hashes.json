@@ -1,0 +1,6 @@
+{
+  "internal/oscar/existing_feed_history.go": "c8a91466519e4ac73f744c15417a5547af62a360889bd525cbb7edfea2c28a0c",
+  "internal/oscar/existing_feed_history_test.go": "90358361d1a7d65a2f86869f9834d04f44f9bc9a86eb12ba74569d46fdff58d2",
+  "internal/oscar/existing_feed_native.go": "6001399f98a0fdd647a26a2ec1b531595e189ce3095b8399e9c13bc88ba9ace0",
+  "internal/oscar/existing_feed_native_test.go": "fef5923c37043544499a87f716190224b07cf407454e0685987f97197aacfd96"
+}
