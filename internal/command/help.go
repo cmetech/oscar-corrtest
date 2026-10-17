@@ -21,6 +21,25 @@ type helpTopic struct {
 }
 
 var helpTopics = map[string]helpTopic{
+	"owned-existing-feed": {
+		usage:       "oscar-corrtest owned-existing-feed <plan|run> --manifest <file> [options]",
+		description: "Use six fixed firing fixtures in an externally owned immutable lab.",
+		commands:    []helpItem{{"plan", "Validate and display the finite plan without network I/O."}, {"run", "Record, send once and verify Native/History identity."}},
+		notes:       []string{"PASS covers identity only, not correlation/window, delivery receipt or task completion. No physical clear or replay is provided. Exit 4 retains DIRTY/UNKNOWN responsibility."},
+	},
+	"owned-existing-feed plan": {
+		usage:       "oscar-corrtest owned-existing-feed plan --manifest <file> [options]",
+		description: "Validate the pinned profile/Mapping, external ownership reference and observer origins without opening runtime or contacting targets.",
+		options:     []helpItem{{"--manifest <file>", "Strict finite owned-lab plan JSON (at most 2 MiB)."}, {"--output <format>", "human or json."}},
+		examples:    []string{"oscar-corrtest owned-existing-feed plan --manifest owned-lab.json"},
+	},
+	"owned-existing-feed run": {
+		usage:       "oscar-corrtest owned-existing-feed run --manifest <file> [options]",
+		description: "Send six recorded firing fixtures through real adapters in an externally owned immutable lab; verify original Native and public History identity.",
+		options:     []helpItem{{"--manifest <file>", "Strict finite owned-lab plan JSON (at most 2 MiB)."}, {"--output <format>", "human or json."}, {"--config <path>", "Configuration file path."}, {"--data-dir <path>", "Retained private state directory; never reset it to retry a cohort."}},
+		examples:    []string{"oscar-corrtest owned-existing-feed run --manifest owned-lab.json --output json"},
+		notes:       []string{"External ownership and immutable receiver registry/Mapping installation are trusted preconditions, not proved by caller hashes. No input retries or source clear. Exit 4 retains DIRTY/UNKNOWN responsibility even after identity PASS."},
+	},
 	"": {
 		usage:       "oscar-corrtest <command> [options]",
 		description: "Build, run, and preserve evidence for OSCAR alarm-correlation tests.",
@@ -32,6 +51,7 @@ var helpTopics = map[string]helpTopic{
 			{"scenario", "List, validate, and import test scenarios."},
 			{"plan", "Preview rules, alerts, timing, and mutation budget."},
 			{"run", "Execute a correlation scenario against OSCAR."},
+			{"owned-existing-feed", "Plan or run a finite owned-lab Native/History identity check."},
 			{"runs", "List, inspect, and delete preserved runs."},
 			{"cleanup", "Retry cleanup for a run."},
 			{"retention", "Preview or apply local run retention."},

@@ -554,6 +554,9 @@ func (r *Runtime) RetryCleanup(ctx context.Context, runID string) (domain.Run, e
 	if err != nil {
 		return domain.Run{}, err
 	}
+	if run.InputPath() == "owned-existing-feed" {
+		return run, fmt.Errorf("owned existing-feed requires external reconciliation; generic cleanup cannot discharge source responsibility")
+	}
 	if (run.Status != domain.RunCompleted && run.Status != domain.RunInterrupted) || (run.CleanupStatus != domain.CleanupDirty && run.CleanupStatus != domain.CleanupUnknown) {
 		return run, fmt.Errorf("run is not eligible for cleanup retry")
 	}

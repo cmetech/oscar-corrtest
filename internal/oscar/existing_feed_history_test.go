@@ -22,13 +22,13 @@ func TestExistingFeedHistoryKeepsNativeAndOscarIdentityDistinct(t *testing.T) {
 				labels["am_fingerprint"], labels["oscar_fingerprint"] = native.Fingerprint, strings.Repeat("a", 64)
 				labels["ordinary_enrichment"] = "allowed"
 				severity := native.Labels["severity"]
-				return HistoryRecord{ID: "101", AlertName: native.Labels["alertname"], StartsAt: native.StartsAt, Fingerprint: labels["oscar_fingerprint"], Status: "firing", Labels: labels, Severity: &severity}
+				return HistoryRecord{ID: "00000000-0000-4000-8000-000000000101", AlertName: native.Labels["alertname"], StartsAt: native.StartsAt, Fingerprint: labels["oscar_fingerprint"], Status: "firing", Labels: labels, Severity: &severity}
 			}
 			valid := makeHistory()
 			if err := manifest.VerifyHistory(0, native, []HistoryRecord{valid}); err != nil {
 				t.Fatal(err)
 			}
-			for _, fault := range []string{"missing", "ambiguous", "native-label", "native-start", "native-fingerprint", "history-start", "history-id", "history-name", "history-status", "history-fingerprint", "am-fingerprint", "oscar-fingerprint", "label", "severity", "conflicting-severity", "wrong-index"} {
+			for _, fault := range []string{"missing", "ambiguous", "native-label", "native-start", "native-fingerprint", "history-start", "history-id", "history-invalid-id", "history-name", "history-status", "history-fingerprint", "am-fingerprint", "oscar-fingerprint", "label", "severity", "conflicting-severity", "wrong-index"} {
 				t.Run(fault, func(t *testing.T) {
 					row := makeHistory()
 					n := native
@@ -48,6 +48,8 @@ func TestExistingFeedHistoryKeepsNativeAndOscarIdentityDistinct(t *testing.T) {
 						n.Fingerprint = "foreign"
 					case "history-start":
 						rows[0].StartsAt = rows[0].StartsAt.Add(time.Second)
+					case "history-invalid-id":
+						rows[0].ID = "101"
 					case "history-id":
 						rows[0].ID = ""
 					case "history-name":

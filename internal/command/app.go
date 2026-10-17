@@ -85,6 +85,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 	}
 
 	switch args[0] {
+	case "owned-existing-feed":
+		return a.runOwnedExistingFeed(ctx, args[1:])
 	case "version":
 		fmt.Fprintf(a.stdout, "oscar-corrtest %s commit=%s built=%s\n", a.info.Version, a.info.Commit, a.info.BuildDate)
 		return 0

@@ -1,0 +1,42 @@
+{
+  "runner-red.log.gz": {
+    "sha256": "4e0f4917299ce9aa9106be265c2ea50e9997257bb9e7c1fb63f01edf76a98cb7",
+    "uncompressed_sha256": "d27c1ce85470f5d0a89382a5b42f3eaf8fefe8fa1ee7e58b312e0e91c5d0919d"
+  },
+  "cli-red.log.gz": {
+    "sha256": "5cfa622d378f67b8b57329e8a6ea3bfe9fc4718e46eb01054eef0269c64095e3",
+    "uncompressed_sha256": "ab415b3e77bbcf8274de05d7f1e781999feffb7f689727b6123d7a6d8c64c344"
+  },
+  "history-shape-red.log.gz": {
+    "sha256": "5f05090493c1bd2981e910bdd523a217a9e9c584d5bbfa6b0c92d3aa599b4caf",
+    "uncompressed_sha256": "fe95fe55027043edd182fc4f6c234c51ce7a737067330b6c89062149705a7549"
+  },
+  "native-retention-red.log.gz": {
+    "sha256": "124fe97179e10a73886fba2843b2e3d88e0e97fa75c66b2ecb3acd7903cef286",
+    "uncompressed_sha256": "e73ae07116e3c2e29adff7f352a3f9aa0adeef3a8cebc89fff67f2803c5a451e"
+  },
+  "composition-green.log.gz": {
+    "sha256": "6a19b1d6831ef0542f2517b4c16c73ed4322d0c6d53b35beb70471c8237042db",
+    "uncompressed_sha256": "f28cfc2c8854c6dd2252f4b82a2d08e9d75674f65eb9b6d99033a2548454bcb3"
+  },
+  "composition-full.jsonl.gz": {
+    "sha256": "e0a7ef03d87d3607416ad51f1e58a7f2eaf70b1e84d380f6d61a774951ea322e",
+    "uncompressed_sha256": "b1d7f04985204bb4168ca4b92dddc0e0c78a19b300a828dcec33ab7557f17150"
+  },
+  "composition-race.jsonl.gz": {
+    "sha256": "3261f9cf0faaef568aa3f9b2c36fff50756fdd3e7f1aa42d8d8120229d6e63aa",
+    "uncompressed_sha256": "3d217889257bd7ecb540ce418a39359d21385d856602c96dc73f4143d9c95d8f"
+  },
+  "history-id-red.log.gz": {
+    "sha256": "a8a3c94a3f5d6a453d57263393b273a8223020970ddf233fd29b4391e1ccbc89",
+    "uncompressed_sha256": "bcf9d9d037b8aa746a4ef8cc2f40efe69cef30f782a7413b1e47f96f220007b0"
+  },
+  "composition-full-reviewed.jsonl.gz": {
+    "sha256": "ba8bf9c7e0c21c2b4c9cb1be1f204c204aa2ee8f4f003f67e41f782da56fffbf",
+    "uncompressed_sha256": "baeaeb266147ec35e8e74a8b0d1eec076a089718134aeee7123b1b3e39adc554"
+  },
+  "composition-race-reviewed.jsonl.gz": {
+    "sha256": "42d0d3173fc39991d145d4de917c925a3e6afdf52c2e3c2daef86cdea2ccf04b",
+    "uncompressed_sha256": "ab5fde2ed9801f654963440d3b9f310eef86190851fdffab267ad1d92bcacc28"
+  }
+}

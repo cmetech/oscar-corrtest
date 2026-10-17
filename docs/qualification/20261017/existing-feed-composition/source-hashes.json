@@ -1,0 +1,15 @@
+{
+  "internal/command/app.go": "2b868ada75834e16bd0fd928794d856a02895f672a02037dc1668749d8f7ab52",
+  "internal/command/help.go": "5bd82488e821fa65cf91c207ae6d4e1fe64db2ee97f2b3fef79e9ca7fdf89341",
+  "internal/command/existing_feed_commands.go": "3a9cb59bbf2798df19a3e3fe9645fd017050282ef954b60e349f230b9c30e9f2",
+  "internal/command/existing_feed_commands_test.go": "f3010d9565bb93b9aca27f45a1982f099a8c29c68f84b6239c5755119985977b",
+  "internal/oscar/existing_feed_history_reader.go": "3f4c34a43766b12d8e168dc3dcdaa0c5ae7b38ef938cc54bd2ca4b6df1a4aaa0",
+  "internal/oscar/existing_feed_history_reader_test.go": "2e32af0f9c2f7083f61a7d016cd546db3dade42f79d41f42d78c1a19510a025a",
+  "internal/runner/existing_feed.go": "d4a58e0f8d217fa13c7bc8fb784357cc205efb71698628eb6cbc0fa162b881c4",
+  "internal/runner/existing_feed_test.go": "72bee47b69f3666fd8b90190e202f5d13644ddc9bfda4559af933973eb6b2135",
+  "internal/runtime/runtime.go": "edb87d5bacc44e0d1a286feceb75486a9d7e691cc58238af7ef62c888403f6c4",
+  "internal/runtime/existing_feed.go": "5ccbd8662556137ef5306b5b607dd942f6f8d308301dda875a71d65e2a664424",
+  "internal/runtime/existing_feed_test.go": "14f278718320fd619efa1a85d062e7bd152b472f8f710bfb48d2c4c1d06892d2",
+  "internal/oscar/existing_feed_history.go": "0c40ae452e35fda1ddfd7a74875ff419579eb74a01ae324165dbf9aa880bab2d",
+  "internal/oscar/existing_feed_history_test.go": "d7930de9beb92e28f42660d30f7ecc7341ee2b3cc5b1b1b8a5b6f1120b2196f6"
+}

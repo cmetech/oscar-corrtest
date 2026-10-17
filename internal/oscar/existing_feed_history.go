@@ -1,6 +1,12 @@
 package oscar
 
-import "fmt"
+import (
+	"fmt"
+	"regexp"
+)
+
+// Shipped AlertHistoryDetailResponse.ID is a serialized UUID4.
+var existingFeedHistoryID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
 // VerifyHistory checks one scoped firing History row against an independently
 // verified original Native episode. It does not prove delivery receipt/task success.
@@ -12,7 +18,7 @@ func (m ExistingFeedManifest) VerifyHistory(index int, native ExistingFeedNative
 		return fmt.Errorf("existing-feed History identity missing or ambiguous")
 	}
 	row := rows[0]
-	if row.ID == "" || row.Fingerprint == "" || row.AlertName != native.Labels["alertname"] || row.Status != "firing" || !row.StartsAt.Equal(native.StartsAt) || row.Labels["am_fingerprint"] != native.Fingerprint || row.Labels["oscar_fingerprint"] != row.Fingerprint {
+	if !existingFeedHistoryID.MatchString(row.ID) || row.Fingerprint == "" || row.AlertName != native.Labels["alertname"] || row.Status != "firing" || !row.StartsAt.Equal(native.StartsAt) || row.Labels["am_fingerprint"] != native.Fingerprint || row.Labels["oscar_fingerprint"] != row.Fingerprint {
 		return fmt.Errorf("existing-feed History differs from original Native episode")
 	}
 	for name, value := range native.Labels {
