@@ -1,0 +1,8 @@
+--- FAIL: TestOwnedExistingFeedRunsShowHumanCoverage (0.00s)
+    --- FAIL: TestOwnedExistingFeedRunsShowHumanCoverage/DIRTY (0.00s)
+        existing_feed_commands_test.go:49: stdout="Run: owned-run\nStatus: COMPLETED\nVerdict: PASS\nCleanup: DIRTY\nCoverage: OSCAR Alert Engine ingress; receiver admission and Native Alertmanager bypassed. PASS covers declared downstream assertions, not reliability E2E acceptance. No-match audits do not prove receiver health, selector revision, selected-row isolation or notification delivery.\n" missing "original Native and public History identity only"
+    --- FAIL: TestOwnedExistingFeedRunsShowHumanCoverage/UNKNOWN (0.00s)
+        existing_feed_commands_test.go:49: stdout="Run: owned-run\nStatus: COMPLETED\nVerdict: PASS\nCleanup: UNKNOWN\nCoverage: OSCAR Alert Engine ingress; receiver admission and Native Alertmanager bypassed. PASS covers declared downstream assertions, not reliability E2E acceptance. No-match audits do not prove receiver health, selector revision, selected-row isolation or notification delivery.\n" missing "original Native and public History identity only"
+FAIL
+FAIL	github.com/cmetech/oscar-corrtest/internal/command	0.362s
+FAIL

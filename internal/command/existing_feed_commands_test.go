@@ -28,6 +28,36 @@ type ownedFeedCommandRuntime struct {
 	calls int
 }
 
+func TestOwnedExistingFeedRunsShowHumanCoverage(t *testing.T) {
+	for _, cleanup := range []domain.CleanupStatus{domain.CleanupDirty, domain.CleanupUnknown} {
+		t.Run(string(cleanup), func(t *testing.T) {
+			run := domain.Run{ID: "owned-run", Status: domain.RunCompleted, Verdict: domain.VerdictPass, CleanupStatus: cleanup,
+				CompiledPlanJSON: []byte(`{"inputPath":"owned-existing-feed"}`)}
+			if cleanup == domain.CleanupDirty {
+				run.CanonicalReportJSON = []byte(`{"coverage":{"inputPath":"owned-existing-feed"}}`)
+			} else {
+				run.Verdict = domain.VerdictError
+			}
+			var stdout, stderr bytes.Buffer
+			runtime := &fakeRuntime{runs: []domain.Run{run}}
+			app := NewConfigured(&stdout, &stderr, version.Info{}, nil,
+				func(context.Context, config.Settings) (ApplicationRuntime, error) { return runtime, nil }, testGetenv)
+			if code := app.Run(context.Background(), []string{"runs", "show", run.ID}); code != 0 {
+				t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+			}
+			for _, expected := range []string{"Cleanup: " + string(cleanup), "original Native and public History identity only",
+				"correlation/window, delivery receipt and semantic task proof remain unproved", "No source clear or retry"} {
+				if !strings.Contains(stdout.String(), expected) {
+					t.Fatalf("stdout=%q missing %q", stdout.String(), expected)
+				}
+			}
+			if strings.Contains(stdout.String(), "Native Alertmanager bypassed") || !runtime.closed {
+				t.Fatalf("misleading coverage or unclosed runtime: %q closed=%v", stdout.String(), runtime.closed)
+			}
+		})
+	}
+}
+
 func (f *ownedFeedCommandRuntime) ExecuteOwnedExistingFeed(_ context.Context, p runner.OwnedExistingFeedPlan) (domain.Run, error) {
 	f.calls++
 	f.plan = p

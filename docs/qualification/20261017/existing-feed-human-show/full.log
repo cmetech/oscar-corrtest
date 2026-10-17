@@ -1,0 +1,29 @@
+?   	github.com/cmetech/oscar-corrtest/cmd/generate-scenario-schema	[no test files]
+ok  	github.com/cmetech/oscar-corrtest/cmd/oscar-corrtest	0.294s
+?   	github.com/cmetech/oscar-corrtest/cmd/package-zip	[no test files]
+ok  	github.com/cmetech/oscar-corrtest/internal/applog	0.451s
+ok  	github.com/cmetech/oscar-corrtest/internal/artifact	0.928s
+ok  	github.com/cmetech/oscar-corrtest/internal/authoring	1.657s
+ok  	github.com/cmetech/oscar-corrtest/internal/command	1.160s
+ok  	github.com/cmetech/oscar-corrtest/internal/compiler	2.004s
+ok  	github.com/cmetech/oscar-corrtest/internal/config	0.749s
+ok  	github.com/cmetech/oscar-corrtest/internal/docs	2.139s
+ok  	github.com/cmetech/oscar-corrtest/internal/domain	1.465s
+ok  	github.com/cmetech/oscar-corrtest/internal/envfile	0.613s
+ok  	github.com/cmetech/oscar-corrtest/internal/evidence	1.372s
+ok  	github.com/cmetech/oscar-corrtest/internal/history	1.850s
+ok  	github.com/cmetech/oscar-corrtest/internal/integration	3.493s
+ok  	github.com/cmetech/oscar-corrtest/internal/operations	2.839s
+ok  	github.com/cmetech/oscar-corrtest/internal/oscar	2.910s
+ok  	github.com/cmetech/oscar-corrtest/internal/persistence/sqlite	3.052s
+ok  	github.com/cmetech/oscar-corrtest/internal/platformpaths	3.027s
+ok  	github.com/cmetech/oscar-corrtest/internal/releasearchive	3.182s
+ok  	github.com/cmetech/oscar-corrtest/internal/report	2.456s
+ok  	github.com/cmetech/oscar-corrtest/internal/runner	11.956s
+ok  	github.com/cmetech/oscar-corrtest/internal/runtime	5.376s
+ok  	github.com/cmetech/oscar-corrtest/internal/scenario	4.497s
+ok  	github.com/cmetech/oscar-corrtest/internal/service	4.357s
+ok  	github.com/cmetech/oscar-corrtest/internal/testoscar	3.795s
+ok  	github.com/cmetech/oscar-corrtest/internal/version	4.170s
+ok  	github.com/cmetech/oscar-corrtest/internal/web	4.700s
+ok  	github.com/cmetech/oscar-corrtest/scripts	3.974s
