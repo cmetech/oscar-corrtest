@@ -4,6 +4,8 @@
 No target access, installer, generated rule substitution, or execution authority.
 """
 import argparse
+import gzip
+import io
 import hashlib
 import json
 import os
@@ -14,6 +16,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import tarfile
 import zipfile
 
 ID = 'corrtest_operational'
@@ -23,7 +26,7 @@ RULE = 'corrtest-operational-v1-flood'
 ARCHIVE = f'{ID}-{VERSION}.tar.gz'
 MAX_BYTES = 1_048_576
 SOURCE_FILES = frozenset({'project/pack.source.yml', f'project/conf/mappings/{PROFILE}.json', 'correlation/flood.yml', 'scenarios/flood-installed.json', 'README.md'})
-ARTIFACTS = sorted([ARCHIVE, ARCHIVE + '.sha256', 'correlation-rules.zip', 'flood-installed.json', 'hash-vectors.json', 'README.md'])
+ARTIFACTS = sorted([ARCHIVE, ARCHIVE + '.sha256', 'correlation-rules.zip', 'flood-installed.json', 'hash-vectors.json', 'README.md', 'install_operational.py', 'build_operational.py'])
 DIGEST = re.compile(r'[0-9a-f]{64}\Z')
 
 # Imported backend Python sources are recorded, including transitive imports.
@@ -207,6 +210,7 @@ def build(source, backend, output):
         raise ValueError('output must not already exist')
     if inventory(source) != SOURCE_FILES:
         raise ValueError('unexpected source inventory')
+    scripts = {name: read(Path(__file__).parent / name) for name in ('build_operational.py', 'install_operational.py')}
     # Exactly five bounded inputs. Validators and pack writer only receive this
     # private copy, so subsequent authored-file edits cannot split their views.
     with tempfile.TemporaryDirectory(prefix='corrtest-operational-input-') as temporary:
@@ -215,10 +219,10 @@ def build(source, backend, output):
             destination = snapshot / name
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(read(source / name))
-        return _build_snapshot(snapshot, backend, output)
+        return _build_snapshot(snapshot, backend, output, scripts)
 
 
-def _build_snapshot(source, backend, output):
+def _build_snapshot(source, backend, output, scripts):
     source, backend, output = Path(source), Path(backend).resolve(), Path(output)
     if output.exists() or output.is_symlink():
         raise ValueError('output must not already exist')
@@ -268,6 +272,8 @@ def _build_snapshot(source, backend, output):
             archive.writestr(item, rule['yaml'].encode('utf-8'))
         (staging / 'flood-installed.json').write_bytes(canonical(scenario))
         (staging / 'README.md').write_bytes(read(source / 'README.md'))
+        for name, raw in scripts.items():
+            (staging / name).write_bytes(raw)
         vector_values = [{}, {'z': 0, 'a': ['<>&', 'é', '\n', True, None]}, authored, row]
         vectors = [{'value': value, 'utf8_hex': canonical(value).hex(), 'sha256': digest(canonical(value))} for value in vector_values]
         (staging / 'hash-vectors.json').write_bytes(canonical({'format': 'corrtest-canonical-json-v1', 'vectors': vectors}))
@@ -325,12 +331,43 @@ def verify(directory):
     return manifest
 
 
+def release(directory, output):
+    """One deterministic regular-file distribution; never overwrite a release."""
+    directory, output = Path(directory), Path(output)
+    manifest = verify(directory)
+    names = sorted(ARTIFACTS + ['manifest.json', 'manifest.sha256'])
+    blobs = {name: read(directory / name) for name in names}
+    raw = canonical(manifest)
+    if blobs['manifest.json'] != raw or blobs['manifest.sha256'] != (digest(raw) + '\n').encode('ascii'):
+        raise ValueError('release manifest changed')
+    for item in manifest['files']:
+        blob = blobs[item['path']]
+        if len(blob) != item['size'] or digest(blob) != item['sha256']:
+            raise ValueError('release artifact changed')
+    target = io.BytesIO()
+    with gzip.GzipFile(filename='', mode='wb', fileobj=target, mtime=0) as compressed:
+        with tarfile.open(fileobj=compressed, mode='w', format=tarfile.USTAR_FORMAT) as archive:
+            for name in names:
+                item = tarfile.TarInfo('correlation-operational-v1/' + name)
+                item.size, item.mode, item.mtime = len(blobs[name]), 0o644, 0
+                archive.addfile(item, io.BytesIO(blobs[name]))
+    try:
+        with output.open('xb') as stream:
+            stream.write(target.getvalue())
+    except FileExistsError as error:
+        raise ValueError('release must not already exist') from error
+    return digest(target.getvalue())
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--backend', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--release', type=Path)
     args = parser.parse_args()
     build(Path(__file__).parent / 'correlation-operational-v1', args.backend, args.output)
+    if args.release:
+        print(release(args.output, args.release) + '  ' + str(args.release))
     print(str(args.output / 'manifest.json'))
 
 
