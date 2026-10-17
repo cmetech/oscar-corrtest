@@ -1,0 +1,32 @@
+{
+  "red.log.gz": {
+    "raw_sha256": "00bf5de0c066eb9c7785a08ed78fd8d1924ff348ca9be4d3d6edf2bf572b01c4",
+    "gzip_sha256": "486836b521ffaa87640530844599f01fea8d25eb49944f19dae2a042ad1f0aaa",
+    "raw_bytes": 1044
+  },
+  "red-behavior.log.gz": {
+    "raw_sha256": "5acacb383e5b524533dee2f0fb80c56ad372c3257d639c3f010f690ab81db7be",
+    "gzip_sha256": "5094edcd3d839911f50a3d11161adddc7e9d3d217bec436e71a03f65d204fe49",
+    "raw_bytes": 837
+  },
+  "red-validation.log.gz": {
+    "raw_sha256": "8ddee38b80592c686a75bb51bd553a3af8c5956ea8d9bb10ff7f727f03554005",
+    "gzip_sha256": "f13d39725a92edb0f5ddd7d03846a0545be8a7ddbdd7909309dd0c7fac2e8da4",
+    "raw_bytes": 3627
+  },
+  "host-red.log.gz": {
+    "raw_sha256": "505bcf88aee2f7736b3b192f64db2fc097e5bad36097e0ca1d18a7b2d8811167",
+    "gzip_sha256": "489ad6b76cf457664bb8ac4643ae10a912df48bee6ec607c1fab60c38da074f8",
+    "raw_bytes": 421
+  },
+  "green.log.gz": {
+    "raw_sha256": "bb608401d35a9d4260064924a3bcbd12fac26c19ccce8bd12f880adab25c9b06",
+    "gzip_sha256": "07580bcc90495c8da8065381deb731c22c9a6396aa1e3e4693959e73df70b7ff",
+    "raw_bytes": 61
+  },
+  "suite.jsonl.gz": {
+    "raw_sha256": "a718db3049326cc61ef47cffb620b8993ec90a2fe11ed84c9fa03b8d05ceffb8",
+    "gzip_sha256": "4f72803c27a7fe9ac61c6d249c21e3039c7c375b15544d48a305dc5986db4fec",
+    "raw_bytes": 978243
+  }
+}

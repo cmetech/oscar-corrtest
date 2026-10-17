@@ -1,0 +1,219 @@
+{
+  "schema_version": 1,
+  "mappings": {
+    "EXT_CUSTOM_ALERTS": {
+      "stages": {
+        "element": [
+          {
+            "key": "add~added",
+            "value": "static"
+          },
+          {
+            "key": "lookup~owner",
+            "value": "owners:{{environment}}"
+          },
+          {
+            "key": "jsonselect~site",
+            "value": "details:/site"
+          },
+          {
+            "key": "if~site==atlanta~jsonselect:priority:details:/priority",
+            "value": "extract"
+          },
+          {
+            "key": "replace~old",
+            "value": "renamed"
+          },
+          {
+            "key": "substr~prefix",
+            "value": "renamed|0|3"
+          },
+          {
+            "key": "split~word",
+            "value": "words|,|1"
+          },
+          {
+            "key": "eval~doubled",
+            "value": "int({{count}})*2"
+          },
+          {
+            "key": "merge~merge_me",
+            "value": "prefix,word"
+          },
+          {
+            "key": "merge_remove~merged",
+            "value": "added"
+          },
+          {
+            "key": "update~update_me",
+            "value": "{{prefix}}"
+          },
+          {
+            "key": "extract~digits",
+            "value": "renamed:([0-9]+)"
+          },
+          {
+            "key": "regreplace~renamed",
+            "value": "[0-9]+:::XYZ"
+          },
+          {
+            "key": "cut~cut_text",
+            "value": "renamed:-[A-Z]+:cut_part"
+          },
+          {
+            "key": "hash~digest",
+            "value": "prefix,word"
+          },
+          {
+            "key": "remove~remove_me",
+            "value": "remove"
+          },
+          {
+            "key": "remove~details",
+            "value": "remove"
+          }
+        ],
+        "metadata": [
+          {
+            "key": "team",
+            "value": "noc"
+          }
+        ]
+      },
+      "alternate": {
+        "element": [
+          {
+            "key": "add~severity",
+            "value": "warning"
+          },
+          {
+            "key": "add~category",
+            "value": "alternate"
+          }
+        ],
+        "metadata": []
+      },
+      "owners": {
+        "element": [
+          {
+            "key": "production",
+            "value": "network"
+          }
+        ],
+        "metadata": []
+      },
+      "malformed": {
+        "element": [
+          {
+            "key": "substr~bad",
+            "value": "invalid"
+          },
+          {
+            "key": "split~bad",
+            "value": "words|,|invalid"
+          },
+          {
+            "key": "eval~bad",
+            "value": "1/0"
+          },
+          {
+            "key": "lookup~bad",
+            "value": "invalid"
+          },
+          {
+            "key": "extract~bad",
+            "value": "words:["
+          },
+          {
+            "key": "regreplace~words",
+            "value": "invalid"
+          },
+          {
+            "key": "cut~bad",
+            "value": "invalid"
+          },
+          {
+            "key": "jsonselect~bad",
+            "value": "details:/site"
+          },
+          {
+            "key": "add~survives",
+            "value": "yes"
+          }
+        ],
+        "metadata": []
+      },
+      "fail_open": {
+        "element": [
+          {
+            "key": "split~bad",
+            "value": "words||0"
+          },
+          {
+            "key": "update~after",
+            "value": "{{after}} survived"
+          }
+        ],
+        "metadata": []
+      },
+      "keep": {
+        "element": [
+          {
+            "key": "keep~^(alertname|keep_this)$",
+            "value": "keep"
+          }
+        ],
+        "metadata": []
+      },
+      "literal_add": {
+        "element": [
+          {
+            "key": "add~upper",
+            "value": "added"
+          },
+          {
+            "key": "add~empty",
+            "value": ""
+          },
+          {
+            "key": "add~literal",
+            "value": "{{source}}"
+          }
+        ]
+      },
+      "metadata_only": {
+        "element": [],
+        "metadata": [
+          {
+            "key": "team",
+            "value": "metadata"
+          }
+        ]
+      },
+      "conditional_lookup": {
+        "element": [
+          {
+            "key": "if~environment==production~lookup:owner:owners:production",
+            "value": "Lookup"
+          }
+        ]
+      },
+      "merge_edges": {
+        "element": [
+          {
+            "key": "merge~empty",
+            "value": "{{source}}"
+          },
+          {
+            "key": "merge~null_value",
+            "value": "{{source}}"
+          },
+          {
+            "key": "update~missing_template",
+            "value": "prefix {{missing}}"
+          }
+        ]
+      }
+    }
+  }
+}

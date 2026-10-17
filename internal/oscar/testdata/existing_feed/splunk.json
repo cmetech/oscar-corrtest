@@ -1,0 +1,223 @@
+{
+  "version": 1,
+  "baseline": [
+    {
+      "key": " BASELINE_0!",
+      "value": "{\" Pri_ority \": \"P1\", \"Bridge Required\": \"no\", \"Teams_Needed\": \"Team A\", \"Application\": \"billing\"}"
+    },
+    {
+      "key": " BASELINE_1!",
+      "value": "{\" Pri_ority \": \"P2\", \"Bridge Required\": \"no\", \"Teams_Needed\": \"Team A\", \"Application\": \"billing\"}"
+    },
+    {
+      "key": " BASELINE_2!",
+      "value": "{\" Pri_ority \": \"P3\", \"Bridge Required\": \"no\", \"Teams_Needed\": \"Team A\", \"Application\": \"billing\"}"
+    },
+    {
+      "key": " BASELINE_3!",
+      "value": "{\" Pri_ority \": \"P4\", \"Bridge Required\": \"no\", \"Teams_Needed\": \"Team A\", \"Application\": \"billing\"}"
+    },
+    {
+      "key": " BASELINE_4!",
+      "value": "{\" Pri_ority \": \"P5\", \"Bridge Required\": \"no\", \"Teams_Needed\": \"Team A\", \"Application\": \"billing\"}"
+    },
+    {
+      "key": " BASELINE_5!",
+      "value": "{\" Pri_ority \": \"CRITICAL\", \"Bridge Required\": \"no\", \"Teams_Needed\": \"Team A\", \"Application\": \"billing\"}"
+    },
+    {
+      "key": " BASELINE_6!",
+      "value": "{\" Pri_ority \": \"major\", \"Bridge Required\": \"no\", \"Teams_Needed\": \"Team A\", \"Application\": \"billing\"}"
+    },
+    {
+      "key": " BASELINE_7!",
+      "value": "{\" Pri_ority \": \"Minor\", \"Bridge Required\": \"no\", \"Teams_Needed\": \"Team A\", \"Application\": \"billing\"}"
+    },
+    {
+      "key": " BASELINE_8!",
+      "value": "{\" Pri_ority \": \"WARNING\", \"Bridge Required\": \"no\", \"Teams_Needed\": \"Team A\", \"Application\": \"billing\"}"
+    },
+    {
+      "key": " BASELINE_9!",
+      "value": "{\" Pri_ority \": \"info\", \"Bridge Required\": \"no\", \"Teams_Needed\": \"Team A\", \"Application\": \"billing\"}"
+    },
+    {
+      "key": " BASELINE_10!",
+      "value": "{\" Pri_ority \": \"P2 SOS\", \"Bridge Required\": \"yes please\", \"Teams_Needed\": \"Team A\", \"Application\": \"billing\"}"
+    },
+    {
+      "key": " BASELINE_11!",
+      "value": "{\" Pri_ority \": \"P4 Bridge SOS\", \"Bridge Required\": \"no\", \"Teams_Needed\": \"Team A\", \"Application\": \"billing\"}"
+    },
+    {
+      "key": " BASELINE_12!",
+      "value": "{\" Pri_ority \": \"P1 warning\", \"Bridge Required\": \"no\", \"Teams_Needed\": \"Team A\", \"Application\": \"billing\"}"
+    },
+    {
+      "key": " BASELINE_13!",
+      "value": "{\" Pri_ority \": \"minor P1 major\", \"Bridge Required\": \"no\", \"Teams_Needed\": \"Team A\", \"Application\": \"billing\"}"
+    },
+    {
+      "key": " BASELINE_14!",
+      "value": "{\" Pri_ority \": \"P5 P2\", \"Bridge Required\": \"no\", \"Teams_Needed\": \"Team A\", \"Application\": \"billing\"}"
+    },
+    {
+      "key": " BASELINE_15!",
+      "value": "{\" Pri_ority \": \"UNCLASSIFIED\", \"Bridge Required\": \"no\", \"Teams_Needed\": \"Team A\", \"Application\": \"billing\"}"
+    },
+    {
+      "key": " BASELINE_16!",
+      "value": "{\" Pri_ority \": \"-\", \"Bridge Required\": \"no\", \"Teams_Needed\": \"Team A\", \"Application\": \"billing\"}"
+    },
+    {
+      "key": " BASELINE_17!",
+      "value": "{\" Pri_ority \": \"\", \"Bridge Required\": \"no\", \"Teams_Needed\": \"Team A\", \"Application\": \"billing\"}"
+    },
+    {
+      "key": " BASELINE_18!",
+      "value": "{\" Pri_ority \": \"P2SOS\", \"Bridge Required\": \"no\", \"Teams_Needed\": \"Team A\", \"Application\": \"billing\"}"
+    },
+    {
+      "key": "malformed",
+      "value": "{bad"
+    },
+    {
+      "key": "array",
+      "value": "[]"
+    },
+    {
+      "key": "null",
+      "value": "null"
+    },
+    {
+      "key": "empty",
+      "value": "{}"
+    },
+    {
+      "key": "decoded",
+      "value": {
+        "PRIORITY": "P3",
+        "Bridge Required": "YES",
+        "Teams Needed": "Ops"
+      }
+    },
+    {
+      "key": "sos",
+      "value": {
+        "priority": "P2 SOS"
+      }
+    },
+    {
+      "key": "bridge-substring",
+      "value": {
+        "priority": "P5 drawbridge SOS"
+      }
+    },
+    {
+      "key": "falsey-fields",
+      "value": {
+        "priority": "P4",
+        "teams_needed": "",
+        "application": null
+      }
+    },
+    {
+      "key": "typed-priority-number",
+      "value": "{\"priority\": 2, \"bridge_required\": \"no\", \"teams_needed\": \"Ops\", \"application\": \"billing\"}"
+    },
+    {
+      "key": "typed-priority-boolean",
+      "value": "{\"priority\": true, \"bridge_required\": \"no\", \"teams_needed\": \"Ops\", \"application\": \"billing\"}"
+    },
+    {
+      "key": "typed-priority-object",
+      "value": "{\"priority\": {\"code\": \"P1\"}, \"bridge_required\": \"no\", \"teams_needed\": \"Ops\", \"application\": \"billing\"}"
+    },
+    {
+      "key": "typed-priority-list",
+      "value": "{\"priority\": [\"P1\"], \"bridge_required\": \"no\", \"teams_needed\": \"Ops\", \"application\": \"billing\"}"
+    },
+    {
+      "key": "typed-priority-zero",
+      "value": "{\"priority\": 0, \"bridge_required\": \"no\", \"teams_needed\": \"Ops\", \"application\": \"billing\"}"
+    },
+    {
+      "key": "typed-priority-false",
+      "value": "{\"priority\": false, \"bridge_required\": \"no\", \"teams_needed\": \"Ops\", \"application\": \"billing\"}"
+    },
+    {
+      "key": "typed-priority-null",
+      "value": "{\"priority\": null, \"bridge_required\": \"no\", \"teams_needed\": \"Ops\", \"application\": \"billing\"}"
+    },
+    {
+      "key": "typed-priority-empty_object",
+      "value": "{\"priority\": {}, \"bridge_required\": \"no\", \"teams_needed\": \"Ops\", \"application\": \"billing\"}"
+    },
+    {
+      "key": "typed-priority-empty_list",
+      "value": "{\"priority\": [], \"bridge_required\": \"no\", \"teams_needed\": \"Ops\", \"application\": \"billing\"}"
+    },
+    {
+      "key": "typed-priority-empty_string",
+      "value": "{\"priority\": \"\", \"bridge_required\": \"no\", \"teams_needed\": \"Ops\", \"application\": \"billing\"}"
+    },
+    {
+      "key": "typed-bridge_required-number",
+      "value": "{\"priority\": \"P2 SOS Bridge\", \"bridge_required\": 2, \"teams_needed\": \"Ops\", \"application\": \"billing\"}"
+    },
+    {
+      "key": "typed-bridge_required-boolean",
+      "value": "{\"priority\": \"P2 SOS Bridge\", \"bridge_required\": true, \"teams_needed\": \"Ops\", \"application\": \"billing\"}"
+    },
+    {
+      "key": "typed-bridge_required-object",
+      "value": "{\"priority\": \"P2 SOS Bridge\", \"bridge_required\": {\"code\": \"P1\"}, \"teams_needed\": \"Ops\", \"application\": \"billing\"}"
+    },
+    {
+      "key": "typed-bridge_required-list",
+      "value": "{\"priority\": \"P2 SOS Bridge\", \"bridge_required\": [\"P1\"], \"teams_needed\": \"Ops\", \"application\": \"billing\"}"
+    },
+    {
+      "key": "typed-bridge_required-zero",
+      "value": "{\"priority\": \"P2 SOS Bridge\", \"bridge_required\": 0, \"teams_needed\": \"Ops\", \"application\": \"billing\"}"
+    },
+    {
+      "key": "typed-bridge_required-false",
+      "value": "{\"priority\": \"P2 SOS Bridge\", \"bridge_required\": false, \"teams_needed\": \"Ops\", \"application\": \"billing\"}"
+    },
+    {
+      "key": "typed-bridge_required-null",
+      "value": "{\"priority\": \"P2 SOS Bridge\", \"bridge_required\": null, \"teams_needed\": \"Ops\", \"application\": \"billing\"}"
+    },
+    {
+      "key": "typed-bridge_required-empty_object",
+      "value": "{\"priority\": \"P2 SOS Bridge\", \"bridge_required\": {}, \"teams_needed\": \"Ops\", \"application\": \"billing\"}"
+    },
+    {
+      "key": "typed-bridge_required-empty_list",
+      "value": "{\"priority\": \"P2 SOS Bridge\", \"bridge_required\": [], \"teams_needed\": \"Ops\", \"application\": \"billing\"}"
+    },
+    {
+      "key": "typed-bridge_required-empty_string",
+      "value": "{\"priority\": \"P2 SOS Bridge\", \"bridge_required\": \"\", \"teams_needed\": \"Ops\", \"application\": \"billing\"}"
+    },
+    {
+      "key": "malformed-bridge-preserves-existing",
+      "value": "{\"priority\": \"P2 SOS\", \"bridge_required\": 2, \"teams_needed\": \"Replace\", \"application\": \"Replace\"}"
+    }
+  ],
+  "webhook_alerts": [
+    {
+      "key": "add~mapped",
+      "value": "true"
+    },
+    {
+      "key": "add~summary_copy",
+      "value": "{{ summary }}"
+    },
+    {
+      "key": "if~severity==major~add:mapped_major:yes",
+      "value": "conditional marker"
+    }
+  ]
+}
