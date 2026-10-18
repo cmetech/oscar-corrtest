@@ -74,6 +74,7 @@ type Runtime struct {
 	operations *operations.Controller
 	runMu      sync.Mutex
 	activeMu   sync.Mutex
+	closing    bool
 	active     map[string]context.CancelFunc
 	runWG      sync.WaitGroup
 	rootCtx    context.Context
@@ -423,6 +424,7 @@ func (r *Runtime) Artifacts() *artifact.Store { return r.artifacts }
 func (r *Runtime) Close() error {
 	r.closeOnce.Do(func() {
 		r.activeMu.Lock()
+		r.closing = true
 		for _, cancel := range r.active {
 			cancel()
 		}
