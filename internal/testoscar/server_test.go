@@ -109,6 +109,6 @@ func TestServerDynamicResponderPreservesScriptPriorityAndRedaction(t *testing.T)
 		}
 	}
 	if calls.Load() != 1 || len(server.Requests()) != 2 {
-		t.Fatalf("dynamic calls=%d requests=%d", calls, len(server.Requests()))
+		t.Fatalf("dynamic calls=%d requests=%d", calls.Load(), len(server.Requests()))
 	}
 }
