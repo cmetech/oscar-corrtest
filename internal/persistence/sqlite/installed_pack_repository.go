@@ -263,13 +263,6 @@ func readInstalledPack(ctx context.Context, tx *sql.Tx, runID string) (Installed
 			rows.Close()
 			return s, zero, fmt.Errorf("installed attempt sequence differs")
 		}
-		if index > 0 {
-			prior := s.Attempts[index-1]
-			if prior.Result == nil || prior.Result.Class != oscar.InjectionForwarded || prior.TransportError != "" {
-				rows.Close()
-				return s, zero, fmt.Errorf("installed attempt follows uncertain input")
-			}
-		}
 		expected, _, e := m.Prepare(index)
 		if e != nil {
 			rows.Close()
@@ -296,10 +289,6 @@ func readInstalledPack(ctx context.Context, tx *sql.Tx, runID string) (Installed
 				rows.Close()
 				return s, zero, fmt.Errorf("invalid stored installed outcome")
 			}
-			if e = validateInstalledResult(result.Result, result.Error); e != nil {
-				rows.Close()
-				return s, zero, e
-			}
 			end, e := parseInstalledTime(completed.String)
 			if e != nil {
 				rows.Close()
@@ -316,15 +305,17 @@ func readInstalledPack(ctx context.Context, tx *sql.Tx, runID string) (Installed
 	if err != nil {
 		return s, zero, err
 	}
-	events, err := tx.QueryContext(ctx, `SELECT detail_json,occurred_at FROM run_events WHERE run_id=? AND type='alert.attempting' ORDER BY sequence LIMIT 16`, runID)
+	events, err := tx.QueryContext(ctx, `SELECT run_id,sequence,type,detail_json,occurred_at FROM run_events WHERE run_id=? AND type='alert.attempting' ORDER BY sequence LIMIT 16`, runID)
 	if err != nil {
 		return s, zero, err
 	}
 	defer events.Close()
 	index := 0
+	attemptEvents := []domain.RunEvent{}
 	for events.Next() {
 		var detail, occurred string
-		if err = events.Scan(&detail, &occurred); err != nil {
+		var event domain.RunEvent
+		if err = events.Scan(&event.RunID, &event.Sequence, &event.Type, &detail, &occurred); err != nil {
 			return s, zero, err
 		}
 		if index >= len(s.Attempts) {
@@ -334,6 +325,9 @@ func readInstalledPack(ctx context.Context, tx *sql.Tx, runID string) (Installed
 		if detail != string(want) || occurred != formatTime(s.Attempts[index].RecordedAt) {
 			return s, zero, fmt.Errorf("installed event evidence differs")
 		}
+		event.DetailJSON = detail
+		event.OccurredAt = s.Attempts[index].RecordedAt
+		attemptEvents = append(attemptEvents, event)
 		index++
 	}
 	if err = events.Err(); err != nil {
@@ -341,6 +335,10 @@ func readInstalledPack(ctx context.Context, tx *sql.Tx, runID string) (Installed
 	}
 	if index != len(s.Attempts) {
 		return s, zero, fmt.Errorf("missing installed attempt event")
+	}
+	m, err = ValidateInstalledPackSnapshot(s, attemptEvents)
+	if err != nil {
+		return s, zero, err
 	}
 	return s, m, nil
 }
