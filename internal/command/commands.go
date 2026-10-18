@@ -384,7 +384,9 @@ func (a *App) runRunsShow(ctx context.Context, args []string) int {
 		return a.writeJSON(run)
 	}
 	fmt.Fprintf(a.stdout, "Run: %s\nStatus: %s\nVerdict: %s\nCleanup: %s\n", run.ID, run.Status, displayEmpty(string(run.Verdict)), run.CleanupStatus)
-	if run.InputPath() == "owned-existing-feed" {
+	if run.InputPath() == "installed-test-pack" {
+		fmt.Fprintln(a.stdout, installedPackCoverage)
+	} else if run.InputPath() == "owned-existing-feed" {
 		fmt.Fprintln(a.stdout, "Coverage: original Native and public History identity only; correlation/window, delivery receipt and semantic task proof remain unproved. No source clear or retry.")
 	} else if run.InputPath() == "ordinary-webhook" {
 		fmt.Fprintln(a.stdout, "Coverage: ordinary webhook receiver with pinned profile forwarding; native callback/grouping and selected admission are not independently proved. PASS covers declared downstream assertions; physical clear and notification delivery remain unproved.")

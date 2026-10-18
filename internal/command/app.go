@@ -85,6 +85,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 	}
 
 	switch args[0] {
+	case "test-pack":
+		return a.runInstalledPack(ctx, args[1:])
 	case "owned-existing-feed":
 		return a.runOwnedExistingFeed(ctx, args[1:])
 	case "version":

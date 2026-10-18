@@ -30,6 +30,13 @@ func run(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string
 		return exitCode
 	}
 
+	// Offline installed planning must not open managed secrets, logs or runtime.
+	// Its fixed loaders operate only on the explicitly supplied artifact paths.
+	if len(args) >= 2 && args[0] == "test-pack" && args[1] == "plan" {
+		app := command.NewApplication(stdout, stderr, version.Current(), command.Dependencies{})
+		return app.Run(context.Background(), args)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

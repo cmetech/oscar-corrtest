@@ -21,6 +21,14 @@ type helpTopic struct {
 }
 
 var helpTopics = map[string]helpTopic{
+	"test-pack": {
+		usage:       "oscar-corrtest test-pack <plan|run> [options]",
+		description: "Validate an original installed kit or run its fixed fifteen-input initial Flood audit scope.",
+		commands:    []helpItem{{"plan", "Validate copied kit/installation offline without runtime, credentials or network."}, {"run", "Use original validated artifacts and stored API/receiver targets."}},
+		notes:       []string{"Ownership is operator-declared. No installation mutation, generic scenario, resume, retry or source clear. Exit4 retains DIRTY/UNKNOWN responsibility."},
+	},
+	"test-pack plan": installedPackHelp("plan"),
+	"test-pack run":  installedPackHelp("run"),
 	"owned-existing-feed": {
 		usage:       "oscar-corrtest owned-existing-feed <plan|run> --manifest <file> [options]",
 		description: "Use six fixed firing fixtures in an externally owned immutable lab.",
@@ -52,6 +60,7 @@ var helpTopics = map[string]helpTopic{
 			{"plan", "Preview rules, alerts, timing, and mutation budget."},
 			{"run", "Execute a correlation scenario against OSCAR."},
 			{"owned-existing-feed", "Plan or run a finite owned-lab Native/History identity check."},
+			{"test-pack", "Validate or run a verified installed initial Flood audit kit."},
 			{"runs", "List, inspect, and delete preserved runs."},
 			{"cleanup", "Retry cleanup for a run."},
 			{"retention", "Preview or apply local run retention."},
@@ -478,5 +487,23 @@ func writeHelpItems(output io.Writer, heading string, items []helpItem) {
 	fmt.Fprintf(output, "\n%s:\n", heading)
 	for _, item := range items {
 		fmt.Fprintf(output, "  %-*s  %s\n", width, item.name, item.description)
+	}
+}
+
+func installedPackHelp(action string) helpTopic {
+	return helpTopic{
+		usage:       "oscar-corrtest test-pack " + action + " --manifest <kit/manifest.json> --manifest-sha256 <pin> --installation <original-dir> --ownership <declaration.json> --api-base <original-base> --target <API-ID> --receiver-target <receiver-ID> [options]",
+		description: map[string]string{"plan": "Validate original kit and installation snapshots offline; no runtime, configuration, credential resolution or network. This is not scenario PASS.", "run": "Execute only the verified kit's fifteen initial Flood inputs through the original receiver; evaluate public identity and audit-only scope."}[action],
+		options: append(commonHelpOptions(), []helpItem{
+			{"--manifest <path>", "Required exact manifest.json in the verified kit directory."},
+			{"--manifest-sha256 <pin>", "Required independently trusted lowercase SHA256; no automatic pin adoption."},
+			{"--installation <directory>", "Required original completed installer journal and copied kit."},
+			{"--ownership <file>", "Required original operator declaration; regular non-symlink file at most64KiB."},
+			{"--api-base <base>", "Required exact recorded root or /ext/mw base; no fallback or canonicalization."},
+			{"--target <ID>", "Required stored API target ID; run verifies the original binding."},
+			{"--receiver-target <ID>", "Required stored receiver target ID (root or /webhookreceiver); no direct API bypass."},
+			{"--output <format>", "human or json (default human)."},
+		}...),
+		notes: []string{"Continuous exclusive target/config/process ownership is operator-declared and remains required through export; artifacts do not prove it.", "Plan accepts --config/--data-dir but never reads configuration or opens runtime. Run uses existing stored credential references and TLS policy; no credential/HTTP override flags.", "No arbitrary scenario, resume, auto retry, install mutation or source clear. Ordinary notifications require controlled lab destinations.", "Exit codes:0 PASS/SKIPPED,1 FAIL,2 INCONCLUSIVE or usage,3 execution/verification error,4 DIRTY/UNKNOWN cleanup (including audit PASS).", installedPackCoverage},
 	}
 }
