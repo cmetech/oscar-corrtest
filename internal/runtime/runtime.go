@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -563,6 +564,19 @@ func (r *Runtime) RetryCleanup(ctx context.Context, runID string) (domain.Run, e
 	}
 	if run.InputPath() == "owned-existing-feed" {
 		return run, fmt.Errorf("owned existing-feed requires external reconciliation; generic cleanup cannot discharge source responsibility")
+	}
+	var plan struct {
+		InputPath string `json:"inputPath"`
+	}
+	_ = json.Unmarshal(run.CompiledPlanJSON, &plan)
+	if run.InputPath() == "installed-test-pack" || plan.InputPath == "installed-test-pack" {
+		return run, fmt.Errorf("installed test-pack requires external reconciliation; generic cleanup cannot delete installed configuration or discharge source responsibility")
+	}
+	// Retained registration also blocks cleanup if report/plan metadata is lost.
+	if _, err := r.database.ReadInstalledPackSnapshot(ctx, run.ID); err == nil {
+		return run, fmt.Errorf("installed test-pack registration forbids generic cleanup")
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return run, fmt.Errorf("cannot verify absence of installed test-pack responsibility: %w", err)
 	}
 	if (run.Status != domain.RunCompleted && run.Status != domain.RunInterrupted) || (run.CleanupStatus != domain.CleanupDirty && run.CleanupStatus != domain.CleanupUnknown) {
 		return run, fmt.Errorf("run is not eligible for cleanup retry")
