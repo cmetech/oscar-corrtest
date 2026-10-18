@@ -24,7 +24,7 @@ Verify the release digest received through a trusted channel before extracting o
 Supply an existing API credential with pack configuration-load and correlation-rule manage/read permissions in a mode0600 regular file. Supply a separate JSON operator declaration with exactly these fields (replace the placeholders):
 
 ```json
-{"format":"corrtest-owned-target-v1","target":"https://YOUR-OWNED-TARGET","owner_reference":"YOUR-EXTERNAL-OWNER-RECORD","exclusive_through_export":true,"stable_configuration_and_processes":true,"destinations_history_or_controlled_lab":true}
+{"format":"corrtest-owned-target-v1","target":"https://YOUR-OWNED-TARGET/ext/mw","owner_reference":"YOUR-EXTERNAL-OWNER-RECORD","exclusive_through_export":true,"stable_configuration_and_processes":true,"destinations_history_or_controlled_lab":true}
 ```
 
 These booleans record an operator declaration. They are **not observed exclusion, ownership proof, or scenario PASS**. Root qualification separately retains the actual controlled target's ownership evidence. A remote installation requires equivalent operational exclusion throughout all later inputs, observation and export. Readbacks cannot detect configuration change/use/restore or independently prove immutable process identity. Audit-only correlation still allows ordinary notifications: use History or controlled lab destinations only.
@@ -32,9 +32,11 @@ These booleans record an operator declaration. They are **not observed exclusion
 From the extracted directory:
 
 ```sh
-python3 install_operational.py --kit . --manifest-sha256 EXPECTED_MANIFEST_SHA256 --target https://YOUR-OWNED-TARGET --token-file /private/api-key --ownership-file /private/owner.json --oscar-command /owned/oscar/oscar --evidence /private/new-install-attempt
-python3 install_operational.py --verify /private/new-install-attempt --manifest-sha256 EXPECTED_MANIFEST_SHA256 --target https://YOUR-OWNED-TARGET --token-file /private/api-key --ownership-file /private/owner.json
+python3 install_operational.py --kit . --manifest-sha256 EXPECTED_MANIFEST_SHA256 --target https://YOUR-OWNED-TARGET/ext/mw --token-file /private/api-key --ownership-file /private/owner.json --oscar-command /owned/oscar/oscar --evidence /private/new-install-attempt
+python3 install_operational.py --verify /private/new-install-attempt --manifest-sha256 EXPECTED_MANIFEST_SHA256 --target https://YOUR-OWNED-TARGET/ext/mw --token-file /private/api-key --ownership-file /private/owner.json
 ```
+
+Use the standard public API base `https://HOST/ext/mw`; retain that full base in the ownership declaration and original installation evidence. The later CorrTest receiver target uses `https://HOST/webhookreceiver`. Do not use direct Middleware root access to claim public authentication, and do not supply forwarded-authentication headers yourself. Root bases remain available only for explicitly controlled internal test topologies.
 
 Use `--ca-file` for the target's trusted CA. HTTPS verification and redirect refusal are default; `--allow-owned-http` is an explicit disposable-lab-only option. Credentials are never command-line token arguments. The target must initially contain no correlation rules, no same-name pack, and no same-name Mapping. Even byte-identical preexisting objects are foreign. The single allowed order is fresh existing project installation, exact Mapping preview/load/activation, then one validated created-only correlation ZIP import. Full authored rule, normalized Mapping, original load receipt, runtime-loaded ID and actual `authoritative=false` **and** `dispatch_enabled=false` are checked. The expected effective receiver revision is offline-derived; later input must use If-Match and check the real receiver acknowledgment.
 
