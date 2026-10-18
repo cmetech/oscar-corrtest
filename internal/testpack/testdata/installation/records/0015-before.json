@@ -1,0 +1,1 @@
+{"operation":"http","request":{"file_bytes":586,"file_sha256":"787c7523070886ad5ea4435ecb0f1e2bca9b7bda477408d073965af3903b6cde","method":"POST","path":"/api/v1/correlation_rules/import"},"responsibility":"UNKNOWN-until-recorded-response"}

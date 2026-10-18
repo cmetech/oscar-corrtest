@@ -4,55 +4,84 @@ package testpack
 
 import (
 	"fmt"
-	"golang.org/x/sys/unix"
 	"io"
 	"os"
 	"path/filepath"
+
+	"golang.org/x/sys/unix"
 )
 
-func snapshot(directory string) (map[string][]byte, error) {
-	// Normalize only syntax so a trailing slash or /. cannot bypass leaf NOFOLLOW.
+func openSnapshotDirectory(directory string) (*os.File, error) {
+	// Normalize syntax so a trailing slash or /. cannot bypass leaf NOFOLLOW.
 	directory = filepath.Clean(directory)
 	fd, e := unix.Open(directory, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if e != nil {
-		return nil, fmt.Errorf("kit directory: %w", e)
+		return nil, fmt.Errorf("snapshot directory: %w", e)
 	}
-	root := os.NewFile(uintptr(fd), directory)
-	defer root.Close()
-	entries, e := root.ReadDir(11)
-	if e != nil && e != io.EOF {
+	return os.NewFile(uintptr(fd), directory), nil
+}
+func snapshot(directory string) (map[string][]byte, error) {
+	root, e := openSnapshotDirectory(directory)
+	if e != nil {
 		return nil, e
 	}
-	if len(entries) != 10 {
-		return nil, fmt.Errorf("expected exactly ten entries")
-	}
+	defer root.Close()
+	return snapshotKit(root, false)
+}
+func snapshotKit(root *os.File, private bool) (map[string][]byte, error) {
 	allowed := map[string]bool{"manifest.json": true, "manifest.sha256": true}
-	for _, n := range names {
-		allowed[n] = true
+	for _, name := range names {
+		allowed[name] = true
 	}
-	for _, f := range entries {
-		if !allowed[f.Name()] {
-			return nil, fmt.Errorf("unexpected artifact")
-		}
+	if e := snapshotNames(root, allowed); e != nil {
+		return nil, e
 	}
 	blobs := map[string][]byte{}
 	for name := range allowed {
-		child, e := unix.Openat(fd, name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+		raw, e := snapshotFile(root, name, private)
 		if e != nil {
-			return nil, fmt.Errorf("artifact open: %w", e)
+			return nil, e
 		}
-		f := os.NewFile(uintptr(child), name)
-		s, e := f.Stat()
-		if e != nil || !s.Mode().IsRegular() {
-			f.Close()
-			return nil, fmt.Errorf("regular artifact required")
-		}
-		data, e := io.ReadAll(io.LimitReader(f, maxBytes+1))
-		closeErr := f.Close()
-		if e != nil || closeErr != nil || len(data) > maxBytes {
-			return nil, fmt.Errorf("artifact read bound/error")
-		}
-		blobs[name] = data
+		blobs[name] = raw
+	}
+	if e := snapshotNames(root, allowed); e != nil {
+		return nil, e
 	}
 	return blobs, nil
+}
+func snapshotNames(root *os.File, allowed map[string]bool) error {
+	if _, e := root.Seek(0, 0); e != nil {
+		return e
+	}
+	entries, e := root.ReadDir(len(allowed) + 1)
+	if e != nil && e != io.EOF {
+		return e
+	}
+	if len(entries) != len(allowed) {
+		return fmt.Errorf("snapshot entry count differs")
+	}
+	for _, f := range entries {
+		if !allowed[f.Name()] {
+			return fmt.Errorf("unexpected snapshot entry")
+		}
+	}
+	return nil
+}
+func snapshotFile(root *os.File, name string, private bool) ([]byte, error) {
+	fd, e := unix.Openat(int(root.Fd()), name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	if e != nil {
+		return nil, fmt.Errorf("snapshot file open: %w", e)
+	}
+	file := os.NewFile(uintptr(fd), name)
+	s, e := file.Stat()
+	if e != nil || !s.Mode().IsRegular() || (private && (s.Mode().Perm() != 0600 || s.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0)) {
+		file.Close()
+		return nil, fmt.Errorf("bounded regular private file required")
+	}
+	raw, e := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	closeErr := file.Close()
+	if e != nil || closeErr != nil || len(raw) > maxBytes {
+		return nil, fmt.Errorf("snapshot file bound or read error")
+	}
+	return raw, nil
 }

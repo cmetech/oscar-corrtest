@@ -1,0 +1,1 @@
+{"operation":"http","request":{"method":"GET","path":"/api/v1/correlation_rules?page=1&perPage=100&column=id&order=asc"},"responsibility":"UNKNOWN-until-recorded-response"}
