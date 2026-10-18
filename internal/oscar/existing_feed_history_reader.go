@@ -39,15 +39,32 @@ func NewExistingFeedHistoryReader(target domain.Target, options Options) (*Exist
 	return &ExistingFeedHistoryReader{client}, nil
 }
 func (reader *ExistingFeedHistoryReader) FindHistory(ctx context.Context, query HistoryQuery) ([]HistoryRecord, error) {
+	return readBoundedHistory(ctx, reader.client, query, nil)
+}
+
+// The optional raw-page sink is only used by installed History observation.
+// Existing-feed retains its original parsing and no aggregate raw-page storage.
+func readBoundedHistory(ctx context.Context, client *Client, query HistoryQuery, pages *[]json.RawMessage) ([]HistoryRecord, error) {
+	rawBytes := 0
 	values := historyQueryValues(query.AlertName, formattedTime(query.Start), formattedTime(query.End))
 	result := []HistoryRecord{}
 	seen, total := 0, -1
 	identities := map[string]bool{}
 	for page := 1; page <= maxListPages; page++ {
 		values.Set("page", strconv.Itoa(page))
-		status, raw, err := reader.client.do(ctx, http.MethodGet, historyPath, values, nil)
+		status, raw, err := client.do(ctx, http.MethodGet, historyPath, values, nil)
 		if err != nil {
 			return nil, err
+		}
+		if pages != nil {
+			if len(raw) > installedHistoryMaxBytes-rawBytes {
+				return nil, fmt.Errorf("installed History raw observation exceeds bound")
+			}
+			if err := validateInstalledHistoryPage(raw); err != nil {
+				return nil, err
+			}
+			rawBytes += len(raw)
+			*pages = append(*pages, json.RawMessage(raw))
 		}
 		var response struct {
 			Records      []historyWire `json:"records"`
