@@ -53,6 +53,13 @@ func (d *Database) RegisterExistingFeed(ctx context.Context, runID string, spec 
 	if status != domain.RunQueued && status != domain.RunPreflight && status != domain.RunSettingUp {
 		return fmt.Errorf("existing-feed registration requires a run before injection")
 	}
+	var installed int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM installed_pack_runs WHERE run_id=?`, runID).Scan(&installed); err != nil {
+		return err
+	}
+	if installed != 0 {
+		return fmt.Errorf("run already has an installed-pack contract")
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO existing_feeds(run_id,profile,cohort_id,receiver_origin,manifest_json,created_at) VALUES(?,?,?,?,?,?)`, runID, spec.Profile, spec.CohortID, spec.ReceiverOrigin, string(encoded), formatTime(at)); err != nil {
 		return fmt.Errorf("freeze unique existing-feed binding: %w", err)
 	}
