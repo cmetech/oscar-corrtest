@@ -510,3 +510,100 @@ def test_rehashed_journal_still_requires_original_cross_record_bindings(installe
         installer.verify_install(evidence, peer.bundle.manifest_sha, ORIGIN, TOKEN, ownership,
                                  transport=httpx.MockTransport(peer.handle))
     assert not peer.calls
+
+
+@pytest.mark.parametrize('suffix', ['', '/ext/mw'])
+def test_installed_public_base_keeps_full_journal_binding(installer, distribution, setup, suffix):
+    peer, ownership, evidence = setup
+    target = ORIGIN + suffix
+    ownership['target'] = target
+    observed = []
+
+    def public(request):
+        assert str(request.url).startswith(target + '/api/v1/')
+        assert request.headers['x-api-key'] == TOKEN
+        assert all(name not in request.headers for name in ('x-forwarded-prefix', 'x-internal-service', 'x-user-id', 'cookie'))
+        observed.append(str(request.url))
+        # Model the actual proxy rewrite; only this peer adds the external marker.
+        headers = dict(request.headers)
+        if suffix:
+            headers['x-forwarded-prefix'] = suffix
+        backend = httpx.Request(request.method, request.url.copy_with(path=request.url.path[len(suffix):]),
+                                headers=headers, content=request.content)
+        if suffix:
+            assert backend.headers['x-forwarded-prefix'] == '/ext/mw'
+        return peer.handle(backend)
+
+    transport = httpx.MockTransport(public)
+    completed = installer.install(distribution, peer.bundle.manifest_sha, target, TOKEN, Path('/owned/oscar'),
+                                  ownership, evidence, transport=transport)
+    assert completed['target'] == target
+    assert json.loads((evidence / 'attempt.json').read_text())['target'] == target
+    assert observed
+    installer.verify_install(evidence, peer.bundle.manifest_sha, target, TOKEN, ownership, transport=transport)
+    old_count = len(observed)
+    other = ORIGIN + ('/ext/mw' if not suffix else '')
+    with pytest.raises(installer.InstallError):
+        installer.verify_install(evidence, peer.bundle.manifest_sha, other, TOKEN, {**ownership, 'target': other}, transport=transport)
+    assert len(observed) == old_count
+
+
+@pytest.mark.parametrize('suffix', ['/ext/mw/', '/ext/mw/extra', '/ext/mw/../mw', '/ext//mw', '/%65xt/mw',
+                                    '/ext%2fmw', '/webhookreceiver', '?', '#', '/ext/mw?', '/ext/mw#',
+                                    '/ext/mw?token=x', '/ext/mw#x', '//ext/mw', '/ext/mw\\other'])
+def test_installer_refuses_ambiguous_public_bases(installer, suffix):
+    with pytest.raises(installer.InstallError):
+        installer.origin(ORIGIN + suffix)
+
+
+@pytest.mark.parametrize('status', [301, 302, 307, 308])
+def test_installer_never_follows_public_to_internal_same_origin_redirect(installer, status):
+    target = installer.origin(ORIGIN + '/ext/mw')
+    calls = []
+
+    def redirect(request):
+        calls.append(str(request.url))
+        return httpx.Response(status, headers={'Location': ORIGIN + '/api/v1/packs'})
+
+    api = installer.API(target, TOKEN, None, transport=httpx.MockTransport(redirect))
+    try:
+        with pytest.raises(installer.InstallError, match='HTTP status'):
+            api.request('GET', '/api/v1/packs')
+    finally:
+        api.client.close()
+    assert calls == [ORIGIN + '/ext/mw/api/v1/packs']
+
+
+@pytest.mark.parametrize('status_base', ['relative', 'public', 'wrong-root'])
+def test_prefixed_installer_load_status_is_bound_without_following(installer, distribution, setup, status_base):
+    peer, ownership, evidence = setup
+    target = ORIGIN + '/ext/mw'
+    ownership['target'] = target
+    observed = []
+
+    def public(request):
+        assert request.url.path.startswith('/ext/mw/api/v1/')
+        observed.append(str(request.url))
+        backend = httpx.Request(request.method, request.url.copy_with(path=request.url.path[len('/ext/mw'):]),
+                                headers=request.headers, content=request.content)
+        response = peer.handle(backend)
+        if response.status_code == 202:
+            value = response.json()
+            relative = value['status_url']
+            value['status_url'] = {'relative': relative, 'public': target + relative, 'wrong-root': ORIGIN + relative}[status_base]
+            return httpx.Response(202, json=value)
+        return response
+
+    if status_base == 'wrong-root':
+        with pytest.raises(installer.InstallError):
+            installer.install(distribution, peer.bundle.manifest_sha, target, TOKEN, Path('/owned/oscar'), ownership,
+                              evidence, transport=httpx.MockTransport(public))
+        assert not (evidence / 'completed.json').exists()
+        assert observed[-1].endswith('/configuration/loads')
+    else:
+        result = installer.install(distribution, peer.bundle.manifest_sha, target, TOKEN, Path('/owned/oscar'), ownership,
+                                   evidence, transport=httpx.MockTransport(public))
+        assert result['status'] == 'completed'
+        installer.verify_install(evidence, peer.bundle.manifest_sha, target, TOKEN, ownership,
+                                 transport=httpx.MockTransport(public))
+    assert all(url.startswith(target + '/api/v1/') for url in observed)

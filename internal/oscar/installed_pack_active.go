@@ -40,9 +40,9 @@ func NewInstalledPackActiveReader(target domain.Target, options Options) (*Insta
 	if err := (domain.TargetInput{DisplayName: "installed Flood Active", BaseURL: target.BaseURL, TLS: target.TLS, Credential: target.Credential}).Validate(); err != nil {
 		return nil, err
 	}
-	origin, err := url.Parse(target.BaseURL)
-	if err != nil || origin.Path != "" || origin.RawPath != "" || origin.ForceQuery || strings.Contains(target.BaseURL, "#") {
-		return nil, fmt.Errorf("installed Active requires an origin without path, query or fragment")
+	route, err := installedBaseURL(target.BaseURL, "/ext/mw")
+	if err != nil {
+		return nil, err
 	}
 	client, err := New(target, options)
 	if err != nil {
@@ -51,7 +51,7 @@ func NewInstalledPackActiveReader(target domain.Target, options Options) (*Insta
 	if client.credential == "" {
 		return nil, fmt.Errorf("installed Active credential is empty")
 	}
-	client.http.Transport = installedActiveReadTransport{client.http.Transport}
+	client.http.Transport = installedActiveReadTransport{base: client.http.Transport, route: route}
 	client.http.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &InstalledPackActiveReader{client: client}, nil
 }
@@ -185,10 +185,17 @@ func installedActiveRecord(raw json.RawMessage, run string) (InstalledPackActive
 	return InstalledPackActiveRecord{Fingerprint: *wire.Fingerprint, StartsAt: start, StartsAtRaw: *wire.StartsAt, Labels: labels, Raw: append(json.RawMessage(nil), raw...)}, nil
 }
 
-type installedActiveReadTransport struct{ base http.RoundTripper }
+type installedActiveReadTransport struct {
+	base  http.RoundTripper
+	route installedBase
+}
 
 func (transport installedActiveReadTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	if request.Method != http.MethodGet || request.URL.Path != installedActivePath {
+	path, err := transport.route.path(request)
+	if err != nil {
+		return nil, err
+	}
+	if request.Method != http.MethodGet || path != installedActivePath {
 		return nil, fmt.Errorf("installed Active permits only the fixed GET")
 	}
 	return transport.base.RoundTrip(request)

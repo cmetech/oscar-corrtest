@@ -80,9 +80,9 @@ func NewInstalledPackReader(target domain.Target, options Options) (*InstalledPa
 	if err := (domain.TargetInput{DisplayName: "installed Flood preflight", BaseURL: target.BaseURL, TLS: target.TLS, Credential: target.Credential}).Validate(); err != nil {
 		return nil, err
 	}
-	origin, err := url.Parse(target.BaseURL)
-	if err != nil || origin.Path != "" || origin.RawPath != "" || origin.ForceQuery || strings.Contains(target.BaseURL, "#") {
-		return nil, fmt.Errorf("installed preflight requires an origin without path, query or fragment")
+	route, err := installedBaseURL(target.BaseURL, "/ext/mw")
+	if err != nil {
+		return nil, err
 	}
 	client, err := New(target, options)
 	if err != nil {
@@ -91,7 +91,7 @@ func NewInstalledPackReader(target domain.Target, options Options) (*InstalledPa
 	if client.credential == "" {
 		return nil, fmt.Errorf("installed preflight credential is empty")
 	}
-	client.http.Transport = installedPackReadTransport{client.http.Transport}
+	client.http.Transport = installedPackReadTransport{base: client.http.Transport, route: route}
 	client.http.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &InstalledPackReader{client: client}, nil
 }
@@ -346,10 +346,16 @@ func installedPackValue(decoder *json.Decoder, depth int) (any, error) {
 	}
 }
 
-type installedPackReadTransport struct{ base http.RoundTripper }
+type installedPackReadTransport struct {
+	base  http.RoundTripper
+	route installedBase
+}
 
 func (transport installedPackReadTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	path := request.URL.Path
+	path, err := transport.route.path(request)
+	if err != nil {
+		return nil, err
+	}
 	allowed := path == "/api/v1/packs" || path == installedRulesPath || path == installedRulesPath+"/runtime" || installedRulePath.MatchString(path)
 	if strings.HasPrefix(path, installedPackPrefix+"/configuration/loads/") {
 		allowed = installedLoadID.MatchString(strings.TrimPrefix(path, installedPackPrefix+"/configuration/loads/"))

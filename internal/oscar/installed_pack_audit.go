@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -44,9 +43,9 @@ func NewInstalledPackAuditReader(target domain.Target, options Options) (*Instal
 	if err := (domain.TargetInput{DisplayName: "installed Flood audit", BaseURL: target.BaseURL, TLS: target.TLS, Credential: target.Credential}).Validate(); err != nil {
 		return nil, err
 	}
-	origin, err := url.Parse(target.BaseURL)
-	if err != nil || origin.Path != "" || origin.RawPath != "" || origin.ForceQuery || strings.Contains(target.BaseURL, "#") {
-		return nil, fmt.Errorf("installed audit requires an origin without path, query or fragment")
+	route, err := installedBaseURL(target.BaseURL, "/ext/mw")
+	if err != nil {
+		return nil, err
 	}
 	client, err := New(target, options)
 	if err != nil {
@@ -55,7 +54,7 @@ func NewInstalledPackAuditReader(target domain.Target, options Options) (*Instal
 	if client.credential == "" {
 		return nil, fmt.Errorf("installed audit credential is empty")
 	}
-	client.http.Transport = installedAuditReadTransport{client.http.Transport}
+	client.http.Transport = installedAuditReadTransport{base: client.http.Transport, route: route}
 	client.http.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &InstalledPackAuditReader{client: client}, nil
 }
@@ -204,10 +203,17 @@ func installedAuditObject(raw []byte, required ...string) (map[string]json.RawMe
 	return fields, nil
 }
 
-type installedAuditReadTransport struct{ base http.RoundTripper }
+type installedAuditReadTransport struct {
+	base  http.RoundTripper
+	route installedBase
+}
 
 func (transport installedAuditReadTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	if request.Method != http.MethodGet || request.URL.Path != correlationAuditPath {
+	path, err := transport.route.path(request)
+	if err != nil {
+		return nil, err
+	}
+	if request.Method != http.MethodGet || path != correlationAuditPath {
 		return nil, fmt.Errorf("installed audit permits only the fixed GET")
 	}
 	return transport.base.RoundTrip(request)

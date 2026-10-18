@@ -56,9 +56,8 @@ func NewInstalledPackInput(kit *testpack.Kit, runID string, startsAt time.Time, 
 	if err := (domain.TargetInput{DisplayName: "installed Flood receiver", BaseURL: target.BaseURL, TLS: target.TLS, Credential: target.Credential}).Validate(); err != nil {
 		return nil, err
 	}
-	origin, err := url.Parse(target.BaseURL)
-	if err != nil || origin.Path != "" || origin.RawPath != "" || origin.ForceQuery || strings.Contains(target.BaseURL, "#") {
-		return nil, fmt.Errorf("installed receiver requires an origin without path, query or fragment")
+	if _, err := installedBaseURL(target.BaseURL, "/webhookreceiver"); err != nil {
+		return nil, err
 	}
 	client, err := New(target, options)
 	if err != nil {
@@ -95,7 +94,11 @@ func (input *InstalledPackInput) Prepare(index int) (InstalledPackInputEvidence,
 		return InstalledPackInputEvidence{}, nil, err
 	}
 	sum := sha256.Sum256(body)
-	request := InjectionRequestEvidence{Format: "corrtest-installed-pack-request-v1", TargetID: input.client.targetID, APIProfile: input.bindings.ProfileName, Method: http.MethodPost, Endpoint: input.client.baseURL.String() + "/api/v1/webhookreceiver/webhook/" + input.bindings.ProfileName, ContentType: "application/json", BodyBytes: len(body), BodySHA256: hex.EncodeToString(sum[:]), BodyBase64: base64.StdEncoding.EncodeToString(body), ProfilePrecondition: input.client.profilePrecondition}
+	path := "/api/v1/webhookreceiver/webhook/" + input.bindings.ProfileName
+	if input.client.baseURL.Path == "/webhookreceiver" {
+		path = "/webhook/" + input.bindings.ProfileName
+	}
+	request := InjectionRequestEvidence{Format: "corrtest-installed-pack-request-v1", TargetID: input.client.targetID, APIProfile: input.bindings.ProfileName, Method: http.MethodPost, Endpoint: input.client.baseURL.String() + path, ContentType: "application/json", BodyBytes: len(body), BodySHA256: hex.EncodeToString(sum[:]), BodyBase64: base64.StdEncoding.EncodeToString(body), ProfilePrecondition: input.client.profilePrecondition}
 	return InstalledPackInputEvidence{ManifestSHA256: input.bindings.ManifestSHA256, RunID: input.runID, Index: index, Request: request, Expected: ExistingFeedIdentity{Labels: labels, StartsAt: input.startsAt}}, body, nil
 }
 

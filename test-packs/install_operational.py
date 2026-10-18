@@ -62,13 +62,14 @@ def origin(value, allow_owned_http=False):
     parsed = urlsplit(value)
     require(parsed.scheme == 'https' or (parsed.scheme == 'http' and allow_owned_http), 'HTTPS required')
     require(parsed.hostname and not parsed.username and not parsed.password and not parsed.query and not parsed.fragment
-            and parsed.path in ('', '/') and '%' not in parsed.netloc and '\\' not in value
+            and parsed.path in ('', '/', '/ext/mw') and '%' not in parsed.netloc and '%' not in parsed.path
+            and '?' not in value and '#' not in value and '\\' not in value
             and not any(c.isspace() for c in value), 'invalid target origin')
     try:
         _ = parsed.port  # Access validates malformed or out-of-range ports.
     except ValueError as error:
         raise InstallError('invalid target port') from error
-    return value.rstrip('/')
+    return value[:-1] if parsed.path == '/' else value
 
 
 def ownership_check(value, target):
