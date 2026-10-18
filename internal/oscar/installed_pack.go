@@ -126,12 +126,8 @@ func (reader *InstalledPackReader) Read(ctx context.Context, expected InstalledP
 		if status != http.StatusOK {
 			return nil, fmt.Errorf("installed preflight requires HTTP 200 at read %d", index+1)
 		}
-		value, err := installedPackObject(body)
-		if err != nil {
-			return nil, fmt.Errorf("installed preflight malformed JSON at read %d", index+1)
-		}
-		if !installedPackMatches(index, value, expected, original, authored, state) {
-			return nil, fmt.Errorf("installed preflight incomplete or changed readback at read %d", index+1)
+		if err := validateInstalledPackRead(index, body, expected, original, authored, state); err != nil {
+			return nil, err
 		}
 		raw = append(raw, append(json.RawMessage(nil), body...))
 	}

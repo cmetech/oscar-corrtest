@@ -600,7 +600,7 @@ func TestInstalledRunnerFinalizationReadsPersistedUnknown(t *testing.T) {
 	// A committed record followed by an error returned to the caller is not a
 	// permission to clear/replay; use the original persisted state, not a flag.
 	originalErr := errors.New("recorder result unavailable after durable commit")
-	report := installedRunReport{RunID: p.run.ID, InputPath: InstalledPackInputPath, Verdict: domain.VerdictInconclusive}
+	report := installedRunReport{InstalledPackRunReport: oscar.InstalledPackRunReport{RunID: p.run.ID, InputPath: InstalledPackInputPath, Verdict: domain.VerdictInconclusive}}
 	if e := r.finish(p.run.ID, &report, originalErr); !errors.Is(e, originalErr) {
 		t.Fatal(e)
 	}
@@ -627,7 +627,7 @@ func TestInstalledRunnerEvidenceBudgetRefusesWithoutPartialPublication(t *testin
 		t.Run(kind, func(t *testing.T) {
 			p := newInstalledRunnerPeer(t, "")
 			r := p.engine()
-			report := installedRunReport{RunID: p.run.ID}
+			report := installedRunReport{InstalledPackRunReport: oscar.InstalledPackRunReport{RunID: p.run.ID}}
 			raw := []byte(`{}`)
 			switch kind {
 			case "count":

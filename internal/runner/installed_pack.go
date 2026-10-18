@@ -59,44 +59,12 @@ type InstalledPackRunner struct {
 	binding       oscar.InstalledPackBinding
 }
 
-type installedPoll struct {
-	Index                   int                            `json:"index"`
-	StartedAt               time.Time                      `json:"startedAt"`
-	EndedAt                 time.Time                      `json:"endedAt"`
-	Evaluation              oscar.InstalledFloodEvaluation `json:"evaluation"`
-	Artifacts               []string                       `json:"artifacts"`
-	ElapsedSinceLastForward time.Duration                  `json:"elapsedSinceLastForwardNanos"`
-}
-
-type installedRead struct {
-	Kind      string    `json:"kind"`
-	StartedAt time.Time `json:"startedAt"`
-	EndedAt   time.Time `json:"endedAt"`
-	Artifacts []string  `json:"artifacts"`
-	Error     string    `json:"error,omitempty"`
-}
-
+type installedPoll = oscar.InstalledPackPoll
+type installedRead = oscar.InstalledPackRead
 type installedRunReport struct {
-	APIVersion       string                          `json:"apiVersion"`
-	RunID            string                          `json:"runId"`
-	InputPath        string                          `json:"inputPath"`
-	QualificationRun string                          `json:"qualificationRun"`
-	Coverage         map[string]string               `json:"coverage"`
-	Stage            string                          `json:"stage"`
-	StartedAt        time.Time                       `json:"startedAt"`
-	EndedAt          time.Time                       `json:"endedAt"`
-	Spec             *oscar.InstalledPackInputSpec   `json:"spec,omitempty"`
-	Evaluation       oscar.InstalledFloodEvaluation  `json:"evaluation"`
-	Adverse          *oscar.InstalledFloodEvaluation `json:"adverse,omitempty"`
-	Polls            []installedPoll                 `json:"polls"`
-	Artifacts        []artifact.Manifest             `json:"artifacts"`
-	Verdict          domain.Verdict                  `json:"verdict"`
-	Cleanup          domain.CleanupStatus            `json:"cleanup"`
-	Failure          string                          `json:"failure,omitempty"`
+	oscar.InstalledPackRunReport
 	observationCount int
 	observationBytes int64
-	LastForwardAt    *time.Time      `json:"lastForwardAt,omitempty"`
-	Reads            []installedRead `json:"reads"`
 }
 
 // NewInstalledPackRunner constructs fixed, origin-bound real adapters without
@@ -183,7 +151,7 @@ func (r *InstalledPackRunner) Execute(ctx context.Context, run domain.Run) (exec
 		setupCancel()
 		return err
 	}
-	report := installedRunReport{APIVersion: "corrtest.oscar/installed-run-v1", RunID: run.ID, InputPath: InstalledPackInputPath, Stage: "originals", StartedAt: r.now(), Verdict: domain.VerdictInconclusive, Coverage: map[string]string{"scenario": "ordinary initial Flood audit; 5 positive, 4 negative, 3+3 isolated", "ownership": "operator-declared dedicated lab and continuous exclusion; not machine verified", "effects": "audit-only does not prevent ordinary notifications; controlled lab destinations required", "unproved": "authoritative dispatch, provider delivery, clear, recovery, other patterns, capacity", "activeAuditBytes": "original raw rows; not original whole-page envelopes", "historyBytes": "original complete page bytes"}}
+	report := installedRunReport{InstalledPackRunReport: oscar.InstalledPackRunReport{APIVersion: "corrtest.oscar/installed-run-v1", RunID: run.ID, InputPath: InstalledPackInputPath, Stage: "originals", StartedAt: r.now(), Verdict: domain.VerdictInconclusive, Coverage: oscar.InstalledPackCoverage()}}
 	defer func() { executionErr = r.finish(run.ID, &report, executionErr) }()
 	document, _ := json.Marshal(struct {
 		RunID            string                       `json:"runId"`
