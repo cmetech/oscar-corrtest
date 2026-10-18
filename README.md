@@ -45,6 +45,10 @@ immediately. See [service management](docs/service-management.md).
 
 Configure an OSCAR target when you are ready to run tests:
 
+For a separately installed correlation test pack, use the dedicated
+[installed test-pack workflow](docs/installed-test-pack.md). The generic built-in
+commands below create their own test rules.
+
 ```bash
 export OSCAR_API_KEY='...'
 oscar-corrtest target add \

@@ -89,6 +89,9 @@ func Write(ctx context.Context, destination string, run domain.Run, events []dom
 // WriteWithArtifacts atomically creates a portable ZIP including verified
 // normalized evidence attachments.
 func WriteWithArtifacts(ctx context.Context, destination string, run domain.Run, events []domain.RunEvent, attachments []Attachment) (Result, error) {
+	if installedModeClaim(run.CompiledPlanJSON) || installedModeClaim(run.CanonicalReportJSON) {
+		return Result{}, fmt.Errorf("installed run requires semantic installed exporter")
+	}
 	if run.ID == "" || run.Status != domain.RunCompleted || !run.Verdict.Valid() {
 		return Result{}, fmt.Errorf("run is not eligible for export")
 	}
@@ -226,6 +229,35 @@ func Verify(ctx context.Context, bundlePath string) error {
 		return fmt.Errorf("open evidence bundle: %w", err)
 	}
 	defer reader.Close()
+	if len(reader.File) > installedBundleEntries {
+		return fmt.Errorf("evidence bundle contains too many files")
+	}
+	// Discover only the bounded fixed manifest before selecting installed limits.
+	// An installed discriminator still requires the complete semantic verifier.
+	installedMarkers := false
+	for _, entry := range reader.File {
+		if entry.Name == "installed-run.json" || entry.Name == "installed-index.json" {
+			installedMarkers = true
+		}
+	}
+	for _, entry := range reader.File {
+		if entry.Name == "manifest.json" && entry.UncompressedSize64 <= maxBundleEntryBytes {
+			raw, readErr := readZipEntry(ctx, entry)
+			if readErr != nil {
+				return readErr
+			}
+			var mode struct {
+				APIVersion string `json:"apiVersion"`
+			}
+			if json.Unmarshal(raw, &mode) == nil && mode.APIVersion == installedBundleVersion {
+				return verifyInstalledPack(ctx, reader)
+			}
+			break
+		}
+	}
+	if installedMarkers {
+		return fmt.Errorf("installed evidence requires installed semantic manifest")
+	}
 	if len(reader.File) > 64 {
 		return fmt.Errorf("evidence bundle contains too many files")
 	}
@@ -264,6 +296,9 @@ func Verify(ctx context.Context, bundlePath string) error {
 		payload, err := readZipEntry(ctx, file)
 		if err != nil {
 			return err
+		}
+		if (item.Path == "plan.json" || item.Path == "report.json") && installedModeClaim(payload) {
+			return fmt.Errorf("installed claim requires installed semantic evidence")
 		}
 		digest := sha256.Sum256(payload)
 		if int64(len(payload)) != item.ByteSize || hex.EncodeToString(digest[:]) != item.SHA256 {

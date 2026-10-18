@@ -515,6 +515,9 @@ func (r *Runtime) ExportRun(ctx context.Context, runID, destination string) (evi
 	if err != nil {
 		return evidence.Result{}, err
 	}
+	if result, handled, err := r.exportInstalledPack(ctx, run, destination); handled || err != nil {
+		return result, err
+	}
 	events, err := r.ListRunEvents(ctx, runID)
 	if err != nil {
 		return evidence.Result{}, err

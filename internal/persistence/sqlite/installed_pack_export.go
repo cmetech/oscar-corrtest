@@ -19,6 +19,13 @@ type InstalledPackExportSnapshot struct {
 	Artifacts []domain.Artifact
 }
 
+// HasInstalledPackRegistration detects retained mode without hydrating evidence.
+func (d *Database) HasInstalledPackRegistration(ctx context.Context, runID string) (bool, error) {
+	var present bool
+	err := d.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM installed_pack_runs WHERE run_id=?)`, runID).Scan(&present)
+	return present, err
+}
+
 // ReadInstalledPackExport captures bounded terminal metadata in one transaction.
 // The runtime must also exclude in-process execution while capturing files.
 func (d *Database) ReadInstalledPackExport(ctx context.Context, runID string) (InstalledPackExportSnapshot, error) {
