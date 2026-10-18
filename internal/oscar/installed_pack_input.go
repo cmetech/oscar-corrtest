@@ -2,14 +2,10 @@ package oscar
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -36,9 +32,8 @@ type InstalledPackInputResult struct {
 // reopening requires inspecting the original journal, never a new sender.
 type InstalledPackInput struct {
 	mu       sync.Mutex
-	bindings testpack.Bindings
+	manifest InstalledPackManifest
 	scenario testpack.Scenario
-	runID    string
 	startsAt time.Time
 	client   *Client
 	next     int
@@ -46,9 +41,12 @@ type InstalledPackInput struct {
 }
 
 func NewInstalledPackInput(kit *testpack.Kit, runID string, startsAt time.Time, target domain.Target, options Options) (*InstalledPackInput, error) {
-	_, offset := startsAt.Zone()
-	if kit == nil || kit.Bindings().ManifestSHA256 == "" || !regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(runID) || startsAt.Unix() <= 0 || startsAt.Year() > 9998 || startsAt.Nanosecond() != 0 || offset != 0 {
-		return nil, fmt.Errorf("installed input requires verified kit, fresh run identity and whole-second UTC start")
+	if kit == nil || !installedInputContractMatches(kit.Bindings(), kit.Scenario()) {
+		return nil, fmt.Errorf("installed input requires a verified fixed-contract kit")
+	}
+	manifest, err := FreezeInstalledPackInput(InstalledPackInputSpec{APIVersion: installedInputVersion, ManifestSHA256: kit.Bindings().ManifestSHA256, QualificationRun: runID, StartsAt: startsAt, ReceiverTargetID: target.ID, ReceiverBaseURL: target.BaseURL})
+	if err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(target.ID) == "" || target.Credential.Kind == "" || target.TLS.Insecure || target.OrdinaryWebhook != nil || options.HTTPClient != nil || options.InputPath != "" {
 		return nil, fmt.Errorf("installed input requires explicit receiver credential and standard verified transport")
@@ -68,38 +66,15 @@ func NewInstalledPackInput(kit *testpack.Kit, runID string, startsAt time.Time, 
 	}
 	client.profilePrecondition = `"` + kit.Bindings().ProfileEffectiveSHA256 + `"`
 	client.http.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &InstalledPackInput{bindings: kit.Bindings(), scenario: kit.Scenario(), runID: runID, startsAt: startsAt, client: client}, nil
+	return &InstalledPackInput{manifest: manifest, scenario: kit.Scenario(), startsAt: startsAt, client: client}, nil
 }
 
-// Prepare returns detached evidence and exact bytes; it performs no I/O.
+// Prepare delegates to the same pure fixed manifest used by durable readers.
 func (input *InstalledPackInput) Prepare(index int) (InstalledPackInputEvidence, []byte, error) {
-	if input.client == nil || index < 0 || index >= input.scenario.InputCount() {
-		return InstalledPackInputEvidence{}, nil, fmt.Errorf("installed input requires index 0..14")
+	if input.client == nil {
+		return InstalledPackInputEvidence{}, nil, fmt.Errorf("installed input is not configured")
 	}
-	site, position := "", index
-	for _, group := range input.scenario.Groups {
-		if position < group.Count {
-			site = group.Site
-			break
-		}
-		position -= group.Count
-	}
-	labels := map[string]string{"alertname": "CorrTestOperationalFlood", "qualification_pack": "corrtest_operational_v1", "qualification_run": input.runID, "site": site, "source_id": fmt.Sprintf("%s-%02d", input.runID, index), "severity": "warning"}
-	body, err := json.Marshal(struct {
-		Labels   map[string]string `json:"labels"`
-		StartsAt time.Time         `json:"startsAt"`
-		EndsAt   time.Time         `json:"endsAt"`
-	}{labels, input.startsAt, input.startsAt.Add(time.Duration(input.scenario.Budgets.ValiditySeconds) * time.Second)})
-	if err != nil {
-		return InstalledPackInputEvidence{}, nil, err
-	}
-	sum := sha256.Sum256(body)
-	path := "/api/v1/webhookreceiver/webhook/" + input.bindings.ProfileName
-	if input.client.baseURL.Path == "/webhookreceiver" {
-		path = "/webhook/" + input.bindings.ProfileName
-	}
-	request := InjectionRequestEvidence{Format: "corrtest-installed-pack-request-v1", TargetID: input.client.targetID, APIProfile: input.bindings.ProfileName, Method: http.MethodPost, Endpoint: input.client.baseURL.String() + path, ContentType: "application/json", BodyBytes: len(body), BodySHA256: hex.EncodeToString(sum[:]), BodyBase64: base64.StdEncoding.EncodeToString(body), ProfilePrecondition: input.client.profilePrecondition}
-	return InstalledPackInputEvidence{ManifestSHA256: input.bindings.ManifestSHA256, RunID: input.runID, Index: index, Request: request, Expected: ExistingFeedIdentity{Labels: labels, StartsAt: input.startsAt}}, body, nil
+	return input.manifest.Prepare(index)
 }
 
 // SendRecorded never retries or continues after an uncertain result, including
@@ -154,7 +129,7 @@ func (input *InstalledPackInput) SendRecorded(ctx context.Context, index int, re
 		return result, fmt.Errorf("installed receiver acknowledgment is absent or ambiguous")
 	}
 	revisions := result.ProfileRevisions
-	if len(revisions) != 1 || revisions[0] != input.bindings.ProfileEffectiveSHA256 {
+	if len(revisions) != 1 || revisions[0] != input.manifest.revision {
 		return result, fmt.Errorf("installed receiver profile acknowledgment differs")
 	}
 	result.Class = InjectionForwarded

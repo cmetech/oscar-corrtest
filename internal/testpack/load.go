@@ -76,7 +76,14 @@ func (k *Kit) Scenario() Scenario {
 	if len(k.scenario) == 0 {
 		return Scenario{}
 	}
-	return Scenario{ID: "flood-installed-v1", Coverage: "ordinary-initial-flood-audit", Cleanup: "DIRTY-until-owned-target-teardown", Groups: [4]Group{{"positive", 5, 4, 1}, {"negative", 4, 4, 0}, {"isolated-a", 3, 3, 0}, {"isolated-b", 3, 3, 0}}, Budgets: Budgets{600, 180, 60, 30, 1}}
+	_, _, scenario := FixedInstalledInputContract()
+	return scenario
+}
+
+// FixedInstalledInputContract describes only the supported request format. It
+// does not validate a kit, establish installation, or authorize sending inputs.
+func FixedInstalledInputContract() (string, string, Scenario) {
+	return profileName, effectiveSHA, Scenario{ID: "flood-installed-v1", Coverage: "ordinary-initial-flood-audit", Cleanup: "DIRTY-until-owned-target-teardown", Groups: [4]Group{{"positive", 5, 4, 1}, {"negative", 4, 4, 0}, {"isolated-a", 3, 3, 0}, {"isolated-b", 3, 3, 0}}, Budgets: Budgets{600, 180, 60, 30, 1}}
 }
 func digest(b []byte) string { v := sha256.Sum256(b); return hex.EncodeToString(v[:]) }
 
