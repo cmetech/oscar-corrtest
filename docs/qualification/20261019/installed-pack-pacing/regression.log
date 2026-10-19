@@ -1,0 +1,6 @@
+ok  	github.com/cmetech/oscar-corrtest/internal/runner	75.755s
+ok  	github.com/cmetech/oscar-corrtest/internal/runtime	1.835s
+ok  	github.com/cmetech/oscar-corrtest/internal/command	2.206s
+ok  	github.com/cmetech/oscar-corrtest/internal/oscar	2.496s
+ok  	github.com/cmetech/oscar-corrtest/internal/evidence	2.402s
+ok  	github.com/cmetech/oscar-corrtest/internal/persistence/sqlite	5.342s

@@ -59,6 +59,7 @@ type installedRunnerPeer struct {
 	api, receiver domain.Target
 	run           domain.Run
 	posts         int
+	postTimes     []time.Time
 	gets          int
 	sleeps        int
 	fault         string
@@ -83,7 +84,7 @@ func (p *installedRunnerPeer) sleep(ctx context.Context, d time.Duration) error 
 	p.sleeps++
 	p.now = p.now.Add(d)
 	p.monotonic = p.monotonic.Add(d)
-	if p.fault == "wall jump" && p.sleeps == 1 {
+	if p.fault == "wall jump" && p.posts == 15 && p.observation == 1 {
 		p.now = p.now.Add(91 * time.Second)
 	}
 	return nil
@@ -273,6 +274,11 @@ func (p *installedRunnerPeer) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		p.records = append(p.records, row)
 		p.posts++
+		p.postTimes = append(p.postTimes, p.monotonic)
+		if p.fault == "rate limited" && p.posts == 2 {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
 		if p.fault == "cancel send" {
 			p.cancel()
 			<-r.Context().Done()
@@ -287,8 +293,9 @@ func (p *installedRunnerPeer) serve(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("X-Oscar-Profile-Revision", p.kit.Bindings().ProfileEffectiveSHA256)
 		}
 		if (p.fault == "delayed final ack" || p.fault == "insufficient interval") && p.posts == 15 {
-			p.now = p.now.Add(55 * time.Second)
-			p.monotonic = p.monotonic.Add(55 * time.Second)
+			// Fourteen paced seconds plus this delay keep the final acknowledgment at 55s.
+			p.now = p.now.Add(41 * time.Second)
+			p.monotonic = p.monotonic.Add(41 * time.Second)
 		}
 		if p.fault == "late ack" {
 			p.now = p.now.Add(61 * time.Second)
@@ -694,5 +701,93 @@ func TestInstalledRunnerWallJumpCannotShortenElapsedInterval(t *testing.T) {
 	}
 	if saved.Verdict != domain.VerdictInconclusive || saved.CleanupStatus != domain.CleanupDirty || p.posts != 15 {
 		t.Fatal(saved, p.posts)
+	}
+}
+
+func TestInstalledRunnerPacesFixedInputsAfterAcknowledgment(t *testing.T) {
+	p := newInstalledRunnerPeer(t, "")
+	r := p.engine()
+	inputSleeps := 0
+	r.options.Sleep = func(ctx context.Context, delay time.Duration) error {
+		if p.posts < 15 {
+			inputSleeps++
+			snapshot, err := p.db.ReadInstalledPackSnapshot(ctx, p.run.ID)
+			if err != nil || p.posts == 0 || len(snapshot.Attempts) != p.posts || snapshot.Attempts[p.posts-1].Result == nil || snapshot.Attempts[p.posts-1].Result.Class != oscar.InjectionForwarded {
+				t.Fatal("pacing before first input or acknowledged durable outcome", snapshot, err)
+			}
+			if delay < time.Second {
+				t.Fatalf("burst pacing %v", delay)
+			}
+		}
+		return p.sleep(ctx, delay)
+	}
+	if err := r.Execute(context.Background(), p.run); err != nil {
+		t.Fatal(err)
+	}
+	if inputSleeps != 14 || len(p.postTimes) != 15 || !p.postTimes[0].Equal(p.start) {
+		t.Fatal("expected fourteen waits and an immediate first input", inputSleeps, p.postTimes)
+	}
+	for index := 1; index < len(p.postTimes); index++ {
+		if p.postTimes[index].Sub(p.postTimes[index-1]) < time.Second {
+			t.Fatal("fixed correctness inputs burst", p.postTimes)
+		}
+	}
+}
+
+func TestInstalledRunnerCancellationDuringPacingDoesNotAttemptNextInput(t *testing.T) {
+	p := newInstalledRunnerPeer(t, "")
+	r := p.engine()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r.options.Sleep = func(wait context.Context, delay time.Duration) error {
+		if p.posts == 1 {
+			cancel()
+			return wait.Err()
+		}
+		return p.sleep(wait, delay)
+	}
+	if err := r.Execute(ctx, p.run); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	snapshot, err := p.db.ReadInstalledPackSnapshot(context.Background(), p.run.ID)
+	if err != nil || p.posts != 1 || len(snapshot.Attempts) != 1 || snapshot.Attempts[0].Result.Class != oscar.InjectionForwarded {
+		t.Fatal(snapshot, err, p.posts)
+	}
+	saved, err := p.db.GetRun(context.Background(), p.run.ID)
+	if err != nil || saved.Verdict != domain.VerdictInconclusive || saved.CleanupStatus != domain.CleanupDirty {
+		t.Fatal(saved, err)
+	}
+}
+
+func TestInstalledRunnerPacingKeepsOriginalInjectionDeadline(t *testing.T) {
+	p := newInstalledRunnerPeer(t, "")
+	r := p.engine()
+	r.options.Sleep = func(ctx context.Context, delay time.Duration) error {
+		if p.posts == 1 {
+			return p.sleep(ctx, 60*time.Second)
+		}
+		return p.sleep(ctx, delay)
+	}
+	if err := r.Execute(context.Background(), p.run); err == nil {
+		t.Fatal("injection window extended")
+	}
+	snapshot, err := p.db.ReadInstalledPackSnapshot(context.Background(), p.run.ID)
+	if err != nil || p.posts != 1 || len(snapshot.Attempts) != 1 {
+		t.Fatal(snapshot, err, p.posts)
+	}
+}
+
+func TestInstalledRunnerPacedAmbiguousResponseIsNeverRetried(t *testing.T) {
+	p := newInstalledRunnerPeer(t, "rate limited")
+	if err := p.engine().Execute(context.Background(), p.run); err == nil {
+		t.Fatal("ambiguous response accepted")
+	}
+	snapshot, err := p.db.ReadInstalledPackSnapshot(context.Background(), p.run.ID)
+	if err != nil || p.posts != 2 || len(snapshot.Attempts) != 2 || p.sleeps != 1 {
+		t.Fatal(snapshot, err, p.posts, p.sleeps)
+	}
+	saved, err := p.db.GetRun(context.Background(), p.run.ID)
+	if err != nil || saved.Verdict != domain.VerdictInconclusive || saved.CleanupStatus != domain.CleanupUnknown {
+		t.Fatal(saved, err)
 	}
 }

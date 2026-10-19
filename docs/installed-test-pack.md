@@ -42,7 +42,7 @@ oscar-corrtest test-pack plan \
   --target API_TARGET_ID --receiver-target RECEIVER_TARGET_ID
 ```
 
-`plan` reads the explicitly supplied artifacts. It does not open configuration, credentials or Runtime, contact OSCAR, or establish current server readiness. To execute, use the same arguments with `test-pack run`. The runner performs live checks before sending its fifteen fixed inputs. It records each attempt before transmission and stops on an uncertain outcome without resending.
+`plan` reads the explicitly supplied artifacts. It does not open configuration, credentials or Runtime, contact OSCAR, or establish current server readiness. To execute, use the same arguments with `test-pack run`. The runner performs live checks before sending its fifteen fixed inputs. The first input is immediate; each later input waits at least one second after the previous confirmed acknowledgment, keeping this correctness check below ordinary ingress burst limits. All inputs still share the original 60-second injection deadline. Cancellation while waiting stops before another attempt is recorded. It records each attempt before transmission and stops on an uncertain outcome without resending.
 
 ## Read the result and preserve the evidence
 

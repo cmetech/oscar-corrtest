@@ -220,6 +220,12 @@ func (r *InstalledPackRunner) Execute(ctx context.Context, run domain.Run) (exec
 	report.Stage = "input"
 	var lastAckMonotonic time.Time
 	for index := 0; index < 15; index++ {
+		// This fixed correctness scenario must not burst through ordinary ingress limits.
+		if index > 0 {
+			if err = r.options.Sleep(ctx, time.Second); err != nil {
+				return err
+			}
+		}
 		recorded := false
 		result, sendErr := input.SendRecorded(ctx, index, func(e oscar.InstalledPackInputEvidence) error {
 			err := r.database.RecordInstalledPackAttempt(ctx, run.ID, e, r.now())
