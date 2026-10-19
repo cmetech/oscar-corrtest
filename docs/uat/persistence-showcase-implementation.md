@@ -1,0 +1,19 @@
+# Persistence showcase implementation dependencies
+
+The smallest safe extension keeps the existing installed Flood runner closed and reuses its recorded-send, artifact and export machinery for a separately versioned Persistence execution path. The generic Persistence compiler remains a 30-second downstream test and cannot stand in for this path.
+
+## Completed offline slice
+
+`internal/testpack/persistence_contract.go` and the bundled canonical JSON in `test-packs/correlation-persistence-v1/scenarios/` define fourteen fixed real-duration schedules. They cover both N30 gate orders, one-hour low-count negatives, pre-age recovery, unchanged-count observations and the eight duration/severity combinations. Positive recovery depends on real accepted-parent History and membership; it is not an automatic cleanup send. All values are detached, and the loader refuses a modified schedule or purported authority field.
+
+This is schedule validation only. It has no CLI execution path and cannot pass live UAT. It does not provide the producer, rule installer, classifier or lifecycle oracle. The following work is sequential where it depends on backend contracts.
+
+## Minimal remaining sequence
+
+1. **Backend producer/readiness contract:** authenticate the fixture producer and bind durable identity, source episode/start, monotonic change order, cumulative occurrence count, original severity and explicit source clear. Readiness must bind producer/scope, exact normal-selector and correlation-rule revisions, expiry and real installed runtime. Do not grant authority from a public payload label or process-wide capability map. Native callback coalescing must not lose accepted inputs; ordinary negatives must not enter the selected-only no-match NAK loop.
+2. **Finite disabled pack:** use the actual backend validator and normal Rule Engine syntax for five timing variants and isolated source-alarm grouping. Pin the full installed inventory including retained Flood. The classifier must be tested against actual MatchClause semantics; arbitrary SQL regex/OR predicates cannot be placed into MatchClause. Resolve label names against the real protected producer contract before authoring mappings.
+3. **Real observation adapter:** use authenticated original raw responses for source/parent History and Active, `/correlation_rules/episodes/{episode}/incidents` and `/incidents/{incident}/members`, plus accepted action receipts and mapping details. Define pagination/completeness and identity binding before building an oracle. Existing legacy audit observations alone do not prove accepted parents or recovery.
+4. **Runner and export composition:** extend the existing durable intent/artifact mechanisms with the closed schedule; keep unknown sends inconclusive; use actual monotonic waits and preserve the original wall-clock receipts. Gate clear on accepted parent and verified membership. The independent export verifier must recompute the same identity/receipt/severity checks from original artifacts, including missing/duplicate parents, wrong revision, label changes, incomplete pages, clock jumps and missing recovery evidence.
+5. **Live isolated qualification:** install the separate pack only after those contracts are qualified; preserve it for operator inspection. Execute the finite idle cases first, then supported bounded interruption and mixed 90/10 traffic. Neither offline schedule tests nor fixture-source success establishes genuine production feed provenance, Netcool replacement/precedence, production capacity, or acceptance of all 39 cases.
+
+Open interface dependencies have been sent to the backend owner; no guessed live endpoint or privilege grant is embedded in the offline contract. Existing continuous-work approval covers implementation once those interfaces are concrete. Ticket-provider tests and collector-health/absence remain outside scope.
