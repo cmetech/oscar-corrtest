@@ -1,0 +1,9 @@
+{
+  "test-packs/build_showcase.py": "fc53656937b5d037514c0f2a67ba2e8f145977e3c67c4a965e3c599181bbb00f",
+  "test-packs/run_showcase.py": "b38323210cb3767fe7bce94f84ea8d1beadbfc43b8d916d1d0e9ad85a56c2a0d",
+  "test-packs/test_run_showcase.py": "dbffc4c1b6cf261d193c7de9bc043fac4525d263eb8a30b128621236038ce83e",
+  "test-packs/test_showcase_pack.py": "b1d3a62ad98d5cbb40b8815dbef5df036854cd70c168caae81f3f05a97a803f9",
+  "internal/oscar/showcase_parent.go": "9bd7f93301ef16351111e337e33a28c864bd02c2e133092fb8712e5b36fb0acc",
+  "internal/oscar/showcase_parent_test.go": "197031e81f24feb98ccaf1f88c76f6bbb2078f29eb552e7c50d2a0857634363f",
+  "docs/uat/installed-showcase-v2.md": "881e28ffb4ff7778044d4971f71ef0febbd2d08e4230c2d41f1371a49cb973f3"
+}
