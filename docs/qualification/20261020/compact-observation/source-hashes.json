@@ -1,0 +1,23 @@
+{
+  "docs/installed-test-pack.md": "18b9e37647005d113370a112b44419b42b6ffad44584e4000183606cbee47678",
+  "internal/command/compact_observation_commands.go": "668e0c0c58c27094a327b533abd569a6c50dfd02c77f0a18dbc221820bd6545c",
+  "internal/command/compact_observation_commands_test.go": "b27d36eb08438ffdc561849c6268d79763366895c9e2381457d5ec2e1fac2a87",
+  "internal/command/help.go": "79f8b15ee68001a0ed548c3097c5516386e122a06d34b37a3802e08ad1dc9310",
+  "internal/command/installed_pack_commands.go": "71e51f26953dc57c06087510a33bda0145489375db23a4218cf7489be775c8f9",
+  "internal/oscar/compact_evidence.go": "e512207cebf625d9d0bd5e9ec54687f8333e296c5ca50d22f30cc43bd8e8ccf4",
+  "internal/oscar/compact_evidence_current_runtime.go": "bee4c08eff9b3f15ca612ce34b6183b083bbf3990bd574e65836a875c4d5dbca",
+  "internal/oscar/compact_evidence_current_runtime_test.go": "5862bdffd582762d07063d0452cf408b96fe1d022af56df55a03736e596f2cb3",
+  "internal/oscar/compact_evidence_test.go": "9de29e889cbf4f4117c6edf83b823db3a8f082feadbd6122edf63a53bf180429",
+  "internal/oscar/compact_evidence_validation.go": "88c6529e1b19aa2eacf0e8df7faf7764808b751c547eeaaf185821b03b3eeb86",
+  "internal/oscar/installed_pack.go": "995423a2ff971e6cceb978f81f6a6ec69c4ac891e44accf244bb1cf80b2e821e",
+  "internal/oscar/testdata/compact-evidence/README.md": "548e051930d69a41a85fea742d1a457b2f0790c19c83a2274369a4673905af6e",
+  "internal/oscar/testdata/compact-evidence/mysql-accepted.json": "dd222c3b17981596e397d4211fc5f602e9f5847ecfac15dd7ef11272f207d7f4",
+  "internal/oscar/testdata/compact-evidence/projector-response.json": "2c87bffd673d6ad627af7c832af24e8db79b9f891dc48cd871c9773cbd06a009",
+  "internal/oscar/testdata/compact-evidence/unicode-int64-python.json": "7b4deeadff09f70b8f285f7afee3048afdf2bb55a2a8ae62efc84fde244c1cf0",
+  "internal/runtime/compact_observation.go": "21d210dcb671ab3a5cc78e6d57b33a0c2cf00f112c0452143d8a62b83f8a1b18",
+  "internal/runtime/compact_observation_integration_test.go": "3dccb17f7a6b6783887457bcccec75a601ba7c7eb99d6fbdea363b9c2d5022c2",
+  "internal/runtime/compact_observation_output.go": "a54d83a363d50333ea47b4d95d481cdaafb177338e96c2d1ba9c2b65e9d2d34c",
+  "internal/runtime/compact_observation_test.go": "b0109ccdd83849df329c5c85083648815dd4361ea7be5617c3fe6193a016ec65",
+  "internal/testpack/canonical.go": "b6dc05afdc4072cf66510ec2eeb5af769bf59474702067a7d8fdcd26e1bf772a",
+  "internal/testpack/canonical_int64_test.go": "431034162dac80fe66ce36dea982e39d295f9bc89f62d88cc052fbd557fc891d"
+}

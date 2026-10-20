@@ -22,13 +22,32 @@ type helpTopic struct {
 
 var helpTopics = map[string]helpTopic{
 	"test-pack": {
-		usage:       "oscar-corrtest test-pack <plan|run> [options]",
+		usage:       "oscar-corrtest test-pack <plan|run|observe-compact> [options]",
 		description: "Validate an original installed kit or run its fixed fifteen-input initial Flood audit scope.",
-		commands:    []helpItem{{"plan", "Validate copied kit/installation offline without runtime, credentials or network."}, {"run", "Use original validated artifacts and stored API/receiver targets."}},
+		commands:    []helpItem{{"plan", "Validate copied kit/installation offline without runtime, credentials or network."}, {"run", "Use original validated artifacts and stored API/receiver targets."}, {"observe-compact", "Collect a read-only compact scope observation with original installation bindings."}},
 		notes:       []string{"Ownership is operator-declared. No installation mutation, generic scenario, resume, retry or source clear. Exit4 retains DIRTY/UNKNOWN responsibility."},
 	},
 	"test-pack plan": installedPackHelp("plan"),
 	"test-pack run":  installedPackHelp("run"),
+	"test-pack observe-compact": {
+		usage:       "oscar-corrtest test-pack observe-compact [options]",
+		description: "Collect authenticated compact evidence between original installed configuration checks.",
+		options: []helpItem{
+			{"--manifest <file>", "Original kit manifest.json."},
+			{"--manifest-sha256 <hash>", "Separately trusted release pin."},
+			{"--installation <directory>", "Original completed installation evidence."},
+			{"--ownership <file>", "Original exclusive lab ownership declaration."},
+			{"--api-base <url>", "Exact original API base."},
+			{"--target <id>", "Stored API target with verified TLS and unrestricted read authority."},
+			{"--evidence <file>", "New exclusive private observation artifact; parent directory must exist."},
+			{"--output <format>", "human or json summary, without raw response bodies."},
+			{"--config <path>", "Configuration file path."},
+			{"--data-dir <path>", "Existing CorrTest state directory."},
+		},
+		notes: []string{"Read-only observation; not scenario PASS. No alerts, rule updates, source clears or retries.",
+			"Scope comes from verified runtime readback; zero roots does not prove source-processing completeness.",
+			"Retain original kit/installation and ownership files for independent replay. Unavailable evidence exits 3."},
+	},
 	"owned-existing-feed": {
 		usage:       "oscar-corrtest owned-existing-feed <plan|run> --manifest <file> [options]",
 		description: "Use six fixed firing fixtures in an externally owned immutable lab.",

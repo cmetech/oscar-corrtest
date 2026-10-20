@@ -21,6 +21,9 @@ type installedPackRuntime interface {
 const installedPackCoverage = "Coverage: installed initial Flood audit-only with public Active/History identity; not full UAT, physical parent delivery, task completion or recovery proof. No source clear or automatic retry. Forwarded/unknown inputs retain DIRTY/UNKNOWN responsibility."
 
 func (a *App) runInstalledPack(ctx context.Context, args []string) int {
+	if len(args) > 0 && args[0] == "observe-compact" {
+		return a.observeCompact(ctx, args[1:])
+	}
 	if len(args) == 0 || (args[0] != "plan" && args[0] != "run") {
 		return a.commandUsageError("test-pack", "test-pack requires plan or run")
 	}

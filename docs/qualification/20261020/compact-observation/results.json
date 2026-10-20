@@ -1,0 +1,65 @@
+{
+  "scope": "local fixtures and Go regression only; no live UAT",
+  "source_file_count": 21,
+  "source_changed_during_final_tests": false,
+  "commands": [
+    {
+      "command": "go test -json ./... -count=1",
+      "exit_code": 0,
+      "first_event": "2026-10-20T08:26:25.667888-04:00",
+      "last_event": "2026-10-20T08:27:57.349797-04:00",
+      "counts": {
+        "packages": {
+          "skip": 2,
+          "pass": 28
+        },
+        "test_and_subtest_events": {
+          "pass": 2441,
+          "skip": 2
+        },
+        "top_level_tests": {
+          "pass": 627,
+          "skip": 2
+        }
+      },
+      "skips": [
+        {
+          "package": "github.com/cmetech/oscar-corrtest/cmd/generate-scenario-schema",
+          "test": null
+        },
+        {
+          "package": "github.com/cmetech/oscar-corrtest/cmd/package-zip",
+          "test": null
+        },
+        {
+          "package": "github.com/cmetech/oscar-corrtest/internal/oscar",
+          "test": "TestExistingFeedOwnedCohort"
+        },
+        {
+          "package": "github.com/cmetech/oscar-corrtest/internal/runner",
+          "test": "TestThresholdRedisOracleThroughRealHTTPClient"
+        }
+      ],
+      "stderr_bytes": 0
+    },
+    {
+      "command": "go test -race -json ./internal/command ./internal/runtime ./internal/oscar ./internal/testpack -run 'TestCompact|TestCanonicalJSONInt64|TestInstalledPack' -count=1",
+      "exit_code": 0,
+      "first_event": "2026-10-20T08:26:27.934521-04:00",
+      "last_event": "2026-10-20T08:26:44.674975-04:00",
+      "counts": {
+        "packages": {
+          "pass": 4
+        },
+        "test_and_subtest_events": {
+          "pass": 509
+        },
+        "top_level_tests": {
+          "pass": 65
+        }
+      },
+      "skips": [],
+      "stderr_bytes": 0
+    }
+  ]
+}

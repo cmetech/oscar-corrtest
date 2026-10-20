@@ -99,6 +99,18 @@ func NewInstalledPackReader(target domain.Target, options Options) (*InstalledPa
 // Read uses six fixed GETs, with no polling/retry or configuration mutation.
 // No partial observation is returned when any read or comparison fails.
 func (reader *InstalledPackReader) Read(ctx context.Context, expected InstalledPackExpected, original InstalledPackBinding) (*InstalledPackObservation, error) {
+	return reader.read(ctx, expected, original, false)
+}
+
+// ReadCurrentRuntime is an explicit observation-only alternative for a normally
+// restarted or newly commissioned Correlator. It keeps every original kit and
+// installation check, deriving only the two load timestamps from the last of
+// the same six authenticated reads. Callers must pin that binding for postflight.
+func (reader *InstalledPackReader) ReadCurrentRuntime(ctx context.Context, expected InstalledPackExpected, original InstalledPackBinding) (*InstalledPackObservation, error) {
+	return reader.read(ctx, expected, original, true)
+}
+
+func (reader *InstalledPackReader) read(ctx context.Context, expected InstalledPackExpected, original InstalledPackBinding, currentRuntime bool) (*InstalledPackObservation, error) {
 	expected.RuleJSON = append(json.RawMessage(nil), expected.RuleJSON...)
 	expected.MappingStateJSON = append(json.RawMessage(nil), expected.MappingStateJSON...)
 	original.Runtime.LoadedRuleIDs = append([]int(nil), original.Runtime.LoadedRuleIDs...)
@@ -125,6 +137,12 @@ func (reader *InstalledPackReader) Read(ctx context.Context, expected InstalledP
 		}
 		if status != http.StatusOK {
 			return nil, fmt.Errorf("installed preflight requires HTTP 200 at read %d", index+1)
+		}
+		if currentRuntime && index == 5 {
+			original, err = currentInstalledRuntimeBinding(original, body)
+			if err != nil {
+				return nil, err
+			}
 		}
 		if err := validateInstalledPackRead(index, body, expected, original, authored, state); err != nil {
 			return nil, err

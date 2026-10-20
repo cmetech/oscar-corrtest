@@ -21,8 +21,22 @@ func canonicalJSON(raw []byte) ([]byte, error) {
 	}
 	return encodeCanonical(v), nil
 }
-func parseJSON(raw []byte) (any, error) {
-	if len(raw) > maxBytes || !utf8.Valid(raw) {
+
+// CanonicalJSONInt64 is the compact evidence wire contract: signed 64-bit
+// integers, UTF-8 Python canonical JSON, no trailing LF, and a 4 MiB input bound.
+// Kit parsing continues to use its original safe-integer and 1 MiB bounds.
+func CanonicalJSONInt64(raw []byte) ([]byte, error) {
+	v, err := parseJSONBounded(raw, 4<<20, true)
+	if err != nil {
+		return nil, err
+	}
+	var b bytes.Buffer
+	writeCanonical(&b, v)
+	return b.Bytes(), nil
+}
+func parseJSON(raw []byte) (any, error) { return parseJSONBounded(raw, maxBytes, false) }
+func parseJSONBounded(raw []byte, limit int, fullInt64 bool) (any, error) {
+	if len(raw) > limit || !utf8.Valid(raw) {
 		return nil, fmt.Errorf("invalid or oversized UTF-8 JSON")
 	}
 	// encoding/json replaces unpaired UTF-16 escapes rather than refusing them.
@@ -67,7 +81,7 @@ func parseJSON(raw []byte) (any, error) {
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.UseNumber()
-	v, e := jsonValue(d, 0)
+	v, e := jsonValue(d, 0, fullInt64)
 	if e != nil {
 		return nil, e
 	}
@@ -76,7 +90,7 @@ func parseJSON(raw []byte) (any, error) {
 	}
 	return v, nil
 }
-func jsonValue(d *json.Decoder, depth int) (any, error) {
+func jsonValue(d *json.Decoder, depth int, fullInt64 bool) (any, error) {
 	if depth > 32 {
 		return nil, fmt.Errorf("JSON nesting exceeds bound")
 	}
@@ -101,7 +115,7 @@ func jsonValue(d *json.Decoder, depth int) (any, error) {
 				if _, ok = m[s]; ok {
 					return nil, fmt.Errorf("duplicate key")
 				}
-				v, e := jsonValue(d, depth+1)
+				v, e := jsonValue(d, depth+1, fullInt64)
 				if e != nil {
 					return nil, e
 				}
@@ -114,7 +128,7 @@ func jsonValue(d *json.Decoder, depth int) (any, error) {
 		case '[':
 			a := []any{}
 			for d.More() {
-				v, e := jsonValue(d, depth+1)
+				v, e := jsonValue(d, depth+1, fullInt64)
 				if e != nil {
 					return nil, e
 				}
@@ -131,7 +145,7 @@ func jsonValue(d *json.Decoder, depth int) (any, error) {
 			return nil, fmt.Errorf("integers only")
 		}
 		n, e := strconv.ParseInt(string(x), 10, 64)
-		if e != nil || n < -9007199254740991 || n > 9007199254740991 {
+		if e != nil || (!fullInt64 && (n < -9007199254740991 || n > 9007199254740991)) {
 			return nil, fmt.Errorf("unsafe integer")
 		}
 		return n, nil

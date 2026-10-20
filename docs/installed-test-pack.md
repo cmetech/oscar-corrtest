@@ -60,3 +60,75 @@ Successful bundle verification means the retained evidence is internally consist
 Generic cleanup refuses this mode. The independent test-estate owner must reconcile or tear down the exact owned target and retain that outcome. Do not delete installed rules or send speculative clears to make a test appear clean.
 
 Local component tests and isolated Linux execution are available. Genuine authenticated installation, separate-host execution, repeated-run behavior and full UAT remain qualification gates. Residual same-alertname History inside the queried interval can prevent the initial clean-case result. The current pack is not an acceptance result for all correlation patterns.
+
+## Read-only compact scope observation
+
+`observe-compact` collects an observation of an already commissioned compact
+Flood scope. It sends no alerts, changes no rules, and performs no cleanup.
+It is separate from the existing fifteen-input audit run.
+
+The original kit, trusted manifest pin, completed installation journal and
+ownership declaration are required. The current installed rule and mapping must
+still match those originals. The observer captures current authenticated
+Correlator load timestamps during its first configuration read and pins them
+through the final read. A completed restart before observation is supported;
+a restart or reload during observation makes the result unavailable. The
+original installation receipt is preserved unchanged.
+
+An operator must already have commissioned the optional counted root profile,
+running compact parent handoff and the Alert Engine's SELECT-only evidence
+connection. Ordinary Correlator dispatch and enhanced production admission must
+remain disabled. The stored API target must use HTTPS with a trusted CA and an
+active user's API key with unrestricted alert-read and correlation-rule-read
+permissions. The collector cannot provision those prerequisites.
+
+```sh
+oscar-corrtest test-pack observe-compact \
+  --manifest /qualification/kit/manifest.json \
+  --manifest-sha256 TRUSTED_MANIFEST_SHA256 \
+  --installation /qualification/original-installation \
+  --ownership /qualification/ownership.json \
+  --api-base https://oscar-test.example/ext/mw \
+  --target API_TARGET_ID \
+  --evidence /qualification/evidence/compact-observation.json
+```
+
+The evidence directory must already exist. The output file must be new; it is
+published privately with mode 0600. A reservation prevents concurrent collectors
+from claiming the same name. A process crash can leave its reservation or staging
+file; retain those artifacts for diagnosis and use a new observation filename.
+There is no automatic retry.
+
+The command verifies six installed configuration readbacks, derives the scope
+from authenticated compact runtime state, reads the complete scope inventory,
+then repeats the configuration checks. Rule ID, epoch, revision and consumer
+manifest identity must remain consistent. It accepts no caller-supplied epoch or
+revision.
+
+The artifact retains the exact HTTP body bytes as base64, configuration read
+intervals, compact request status and timing, original installation references,
+and the observation outcome. A successful six-read configuration capture records
+its overall interval and successful status; an interrupted capture does not
+invent individual response status or retain a partial six-read result. Failure
+artifacts are retained when possible, with a safe classification; non-200 compact
+response bodies and credentials are excluded.
+
+`observed` means the bounded observation was collected and validated. It is
+**not scenario PASS**, source-processing completeness, external notification
+delivery, recovery, or capacity evidence. A complete zero inventory is distinct
+from unavailable HTTP 503 evidence, but does not prove that all source alerts
+reached correlation. Pending actions are not verified physical parents.
+Unavailable observations exit 3 and cannot replay as successful observations.
+
+Keep the output bytes unchanged alongside the original kit, installation and
+ownership artifacts. The exported pure Go function
+`runtime.ValidateCompactObservation(raw, kit, installation)` rechecks both
+configuration captures, scope, chronology and the compact response's independent
+canonical digest. Reformatting the outer artifact is intentionally refused;
+the digest is consistency metadata, not a signature. This standalone observation
+is not a run or a `verify-bundle` ZIP.
+
+Each retained configuration body is limited to 1 MiB and each six-read capture to
+4 MiB. The compact client keeps its existing 4 MiB response limit; a larger response
+is unavailable even though the server supports 8 MiB. The whole collection has a
+45-second deadline and the compact GET has a 10-second deadline.

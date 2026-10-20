@@ -1,0 +1,87 @@
+{
+  "format": "compact-evidence-v1",
+  "observed_at": "2026-10-20T11:48:36.977113+00:00",
+  "scope": {
+    "rule_id": 17,
+    "epoch": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "revision": "4fd9589d0b427763a73a4100ae1a9b9b39d1c5ef3f9e1053ab6bbb015d5a5e3a"
+  },
+  "inventory_complete": true,
+  "generation_count": 1,
+  "partition": {
+    "state": "open",
+    "version": 9223372036854775807
+  },
+  "actions": [
+    {
+      "action_id": "476fce0bc3fc2b0b257a3c51081414916594a2747268458788f05604d047362e",
+      "generation": "00000000000000000000000000000001",
+      "generation_ordinal": 1,
+      "rule_revision": "4fd9589d0b427763a73a4100ae1a9b9b39d1c5ef3f9e1053ab6bbb015d5a5e3a",
+      "rule": {
+        "id": 17,
+        "name": "Épreuve <>&  😀",
+        "pattern": "flood"
+      },
+      "group_hash": "8e6d4c6af6b3",
+      "group_values": {
+        "site": "Montréal <>&  😀"
+      },
+      "window_id": "e06db222d8d866b82b8bce2c9831b8b7de7d46a931efa9b653429a318eab2719",
+      "window_start_ms": 1792454400000,
+      "window_seconds": 60,
+      "frozen_count": 5,
+      "min_count": 5,
+      "enqueue_sequence": 9223372036854775807,
+      "intent_hash": "9ef218a2bcad8fbf79807a3a1fc4b550cdbca9897c503e45c7dcd52d319e5bbd",
+      "rendered_payload_hash": "bbb3a95cb23e4e1af9b5ea3810a3323e92bedb01771c7411f6d1ae1d1bf8752a",
+      "sender": {
+        "state": "retained",
+        "attempts": 1
+      },
+      "ingress": {
+        "state": "retained"
+      },
+      "outbox": {
+        "state": "pending",
+        "publication_state": "submitted"
+      },
+      "summary_child": {
+        "child_id": "1f477444e43adb70757a3e36c9d83824aebb8920bb772d4937eb2f40e7ea25d9",
+        "role": "downstream_summary_expansion",
+        "publication_state": "submitted"
+      },
+      "incident": {
+        "incident_id": "0572e2f7a827cb1c7babdd8555116db043d4ae5a4b1a3f27a11c82192bfc9175",
+        "state": "parent_active",
+        "version": 2,
+        "content_version": 1
+      },
+      "parent_create_work": {
+        "work_id": "2a63a0e1d7bbddafda5df3b98ba0a50e432bb48b090ef6865dd91e1000dbac70",
+        "state": "complete",
+        "destination_state": "accepted"
+      },
+      "history_receipt": {
+        "service": "alertmanager",
+        "action_id": "916949a4874f46724a39337b0646571d9e4fc047212932e892749328c485bbde",
+        "slot_id": "2a63a0e1d7bbddafda5df3b98ba0a50e432bb48b090ef6865dd91e1000dbac70",
+        "state": "accepted",
+        "recovery_scope": "summary",
+        "history_id": "00000000-0000-4000-8000-000000000001"
+      },
+      "history": {
+        "history_id": "00000000-0000-4000-8000-000000000001",
+        "fingerprint": "ffffffffffff",
+        "notifier_id": "alerthistory",
+        "starts_at": "2026-10-20T00:00:00+00:00",
+        "status": "firing",
+        "resolved_at": null,
+        "accepted_content_version": 1
+      },
+      "physical_history_verified": true,
+      "validation_reason": "physical_history_verified"
+    }
+  ],
+  "evidence_sha256": "cdd506ecaeb0bda8e8a4a860570180c2bc9bec8bba42985cc8b63f9a4329d5c6"
+}

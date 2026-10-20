@@ -1,0 +1,87 @@
+{
+  "actions": [
+    {
+      "action_id": "476fce0bc3fc2b0b257a3c51081414916594a2747268458788f05604d047362e",
+      "enqueue_sequence": 1,
+      "frozen_count": 5,
+      "generation": "00000000000000000000000000000001",
+      "generation_ordinal": 1,
+      "group_hash": "8e6d4c6af6b3",
+      "group_values": {
+        "site": "NYC"
+      },
+      "history": {
+        "accepted_content_version": 1,
+        "fingerprint": "ffffffffffff",
+        "history_id": "00000000-0000-4000-8000-000000000001",
+        "notifier_id": "alerthistory",
+        "resolved_at": null,
+        "starts_at": "2026-10-20T00:00:00+00:00",
+        "status": "firing"
+      },
+      "history_receipt": {
+        "action_id": "916949a4874f46724a39337b0646571d9e4fc047212932e892749328c485bbde",
+        "history_id": "00000000-0000-4000-8000-000000000001",
+        "recovery_scope": "summary",
+        "service": "alertmanager",
+        "slot_id": "2a63a0e1d7bbddafda5df3b98ba0a50e432bb48b090ef6865dd91e1000dbac70",
+        "state": "accepted"
+      },
+      "incident": {
+        "content_version": 1,
+        "incident_id": "0572e2f7a827cb1c7babdd8555116db043d4ae5a4b1a3f27a11c82192bfc9175",
+        "state": "parent_active",
+        "version": 2
+      },
+      "ingress": {
+        "state": "retained"
+      },
+      "intent_hash": "9ef218a2bcad8fbf79807a3a1fc4b550cdbca9897c503e45c7dcd52d319e5bbd",
+      "min_count": 5,
+      "outbox": {
+        "publication_state": "submitted",
+        "state": "pending"
+      },
+      "parent_create_work": {
+        "destination_state": "accepted",
+        "state": "complete",
+        "work_id": "2a63a0e1d7bbddafda5df3b98ba0a50e432bb48b090ef6865dd91e1000dbac70"
+      },
+      "physical_history_verified": true,
+      "rendered_payload_hash": "bbb3a95cb23e4e1af9b5ea3810a3323e92bedb01771c7411f6d1ae1d1bf8752a",
+      "rule": {
+        "id": 17,
+        "name": "Flood proof",
+        "pattern": "flood"
+      },
+      "rule_revision": "4fd9589d0b427763a73a4100ae1a9b9b39d1c5ef3f9e1053ab6bbb015d5a5e3a",
+      "sender": {
+        "attempts": 1,
+        "state": "retained"
+      },
+      "summary_child": {
+        "child_id": "1f477444e43adb70757a3e36c9d83824aebb8920bb772d4937eb2f40e7ea25d9",
+        "publication_state": "submitted",
+        "role": "downstream_summary_expansion"
+      },
+      "validation_reason": "physical_history_verified",
+      "window_id": "e06db222d8d866b82b8bce2c9831b8b7de7d46a931efa9b653429a318eab2719",
+      "window_seconds": 60,
+      "window_start_ms": 1792454400000
+    }
+  ],
+  "evidence_sha256": "e06d7b858a24000468512c6a53dee4e258e142f1267d09999ede49d4d77562c1",
+  "format": "compact-evidence-v1",
+  "generation_count": 1,
+  "inventory_complete": true,
+  "observed_at": "2026-10-20T11:58:41.065414+00:00",
+  "partition": {
+    "state": "open",
+    "version": 1
+  },
+  "scope": {
+    "epoch": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "revision": "4fd9589d0b427763a73a4100ae1a9b9b39d1c5ef3f9e1053ab6bbb015d5a5e3a",
+    "rule_id": 17
+  }
+}
