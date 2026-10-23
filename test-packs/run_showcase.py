@@ -293,6 +293,20 @@ def evaluate(case,run,start,end,inputs,observed,rule):
         source=next(source for source,body in expected.items() if body['labels']['alertname'].endswith('_parent'))
         child=next(source for source,body in expected.items() if body['labels']['alertname'].endswith('_child'))
         require(linked[0]['parent_fingerprint']==active[source] and linked[0]['alert_fingerprint']==active[child],'existing parent link attribution differs')
+        for member,role in ((source,'parent'),(child,'child')):
+            labels=pairs(history[member].get('labels'),'Label','Value')
+            want={'oscar_correlation_rule_id':str(rule['id']), 'oscar_correlation_rule_name':rule['name'],
+                  'oscar_correlation_pattern':'parent_child', 'oscar_correlation_role':role,
+                  'oscar_correlation_parent_fingerprint':active[source]}
+            require(all(labels.get(key)==value for key,value in want.items()),'physical existing parent link differs')
+            window=labels.get('oscar_correlation_window_id')
+            own_audit=page(observed['audit'][active[member]],'audit')
+            require(type(window) is str and 0<len(window)<=64 and any(
+                row.get('window_id')==window and row.get('parent_fingerprint')==active[source] for row in own_audit),
+                'physical existing parent window differs')
+    elif case['pattern']=='parent_child':
+        require(all(not pairs(row.get('labels'),'Label','Value').get('oscar_correlation_parent_fingerprint')
+                    for row in history.values()),'unexpected physical existing parent link')
     return {'sources':len(history),'synthetic_parents':len(parent),'existing_parent_links':len(linked),'audit_rows':len(audit_ids)}
 
 

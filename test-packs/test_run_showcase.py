@@ -99,7 +99,20 @@ class Peer:
             rows=[]
             for i,body in enumerate(self.bodies):
                 if body['labels']['alertname']==name:
-                    rows.append(self.history(i+1,{**body['labels'],'am_fingerprint':f'{i+1:016x}','oscar_fingerprint':f'oscar-{i+1}'},f'oscar-{i+1}'))
+                    labels={**body['labels'],'am_fingerprint':f'{i+1:016x}','oscar_fingerprint':f'oscar-{i+1}'}
+                    if self.case['pattern']=='parent_child' and self.case['polarity']=='positive':
+                        rule=next(r for r in self.rules if r['name']=='corrtest-showcase-v2-parent_child')
+                        labels.update(oscar_correlation_rule_id=str(rule['id']), oscar_correlation_rule_name=rule['name'],
+                            oscar_correlation_pattern='parent_child', oscar_correlation_role='parent' if i==0 else 'child',
+                            oscar_correlation_window_id=f'{rule["id"]}:012345678abc:1792497600000',
+                            oscar_correlation_parent_fingerprint='0000000000000001')
+                        if i==1 and self.failure=='missing-parent-link': labels.pop('oscar_correlation_parent_fingerprint')
+                        if i==1 and self.failure=='foreign-parent-link': labels['oscar_correlation_parent_fingerprint']='ffffffffffffffff'
+                        if i==1 and self.failure=='history-window-conflict': labels['oscar_correlation_window_id']='foreign-window'
+                        if i==0 and self.failure=='existing-parent-self-link': labels['oscar_correlation_parent_fingerprint']='ffffffffffffffff'
+                    if self.case['pattern']=='parent_child' and self.case['polarity']=='negative' and self.failure=='negative-history-link':
+                        labels['oscar_correlation_parent_fingerprint']='ffffffffffffffff'
+                    rows.append(self.history(i+1,labels,f'oscar-{i+1}'))
             if name.endswith('_synthetic_parent') and self.bodies and self.case['expected_parent_history'] and self.failure!='missing-parent':
                 rule=next(r for r in self.rules if r.get('name')=='corrtest-showcase-v2-'+self.case['pattern'])
                 window=f'{rule["id"]}:012345678abc:1792497600000'
@@ -168,6 +181,19 @@ def test_history_alertname_cannot_contradict_promoted_field(harness, distributio
 def test_unmatched_persistence_cannot_hide_rule_or_parent_attribution(harness, distribution, tmp_path, failure):
     report, peer, evidence = execute(harness, distribution, tmp_path, 'persistence-negative', failure)
     assert len(peer.bodies) == 1
+    assert report['verdict'] == 'INCONCLUSIVE'
+    assert harness.verify(evidence, report['manifest_sha256'])['verdict'] == 'INCONCLUSIVE'
+
+
+@pytest.mark.parametrize('case_id,failure', [
+    ('parent_child-positive', 'missing-parent-link'),
+    ('parent_child-positive', 'foreign-parent-link'),
+    ('parent_child-positive', 'history-window-conflict'),
+    ('parent_child-positive', 'existing-parent-self-link'),
+    ('parent_child-negative', 'negative-history-link'),
+])
+def test_parent_child_requires_physical_history_binding(harness, distribution, tmp_path, case_id, failure):
+    report, peer, evidence = execute(harness, distribution, tmp_path, case_id, failure)
     assert report['verdict'] == 'INCONCLUSIVE'
     assert harness.verify(evidence, report['manifest_sha256'])['verdict'] == 'INCONCLUSIVE'
 
