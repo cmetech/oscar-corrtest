@@ -319,3 +319,30 @@ def test_body_uses_db_milliseconds_but_exchange_wall_keeps_actual_microseconds()
     a[0]['created_at']=h[0]['created_at']
     assert m.validate_inputs(p,[row],REV)==[]
     assert m.evaluate(p,[row],h,a,REV,snapshot_completed_at=m.stamp(actual+timedelta(seconds=94)))['verdict']=='PASS'
+
+
+@pytest.mark.parametrize('parent_offset_ms,created_offset_ms,audit_offset_ms,passed', [
+    (0, 5, 1, True),
+    (0, 0, 0, True),
+    (-1, 5, 1, False),
+    (0, 5, -1, False),
+    (0, 90001, 1, False),
+])
+def test_persistence_event_due_preserves_exact_transport_latency(
+        parent_offset_ms, created_offset_ms, audit_offset_ms, passed):
+    m, p, ledger, histories, audits = synthetic_fixture()
+    actual = START + timedelta(microseconds=987)
+    ledger = [m.record_exchange(p, p['events'][0], actual, 200, b'{"status":"ok"}', [REV],
+                               actual + timedelta(seconds=.1))]
+    histories[0]['startsAt'] = ledger[0]['body']['startsAt']
+    event_due = m.instant(ledger[0]['body']['startsAt']) + timedelta(seconds=30)
+    histories[-1]['startsAt'] = m.stamp(event_due + timedelta(milliseconds=parent_offset_ms))
+    created = event_due + timedelta(milliseconds=created_offset_ms)
+    histories[-1]['created_at'] = m.stamp(created)
+    audits[0]['created_at'] = m.stamp(event_due + timedelta(milliseconds=audit_offset_ms))
+    report = m.evaluate(p, ledger, histories, audits, REV,
+                        snapshot_completed_at=m.stamp(START + timedelta(seconds=120.05)))
+    assert (report['verdict'] == 'PASS') is passed, report
+    assert report['parent_after_eligibility_seconds']['p50'] == (created - actual - timedelta(seconds=30)).total_seconds()
+    if created_offset_ms == 90001:
+        assert any('parent deadline differs' in error for error in report['errors'])

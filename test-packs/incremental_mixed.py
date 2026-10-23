@@ -219,12 +219,17 @@ def evaluate(plan,ledger,histories,audits,revision,*,snapshot_completed_at=None)
                 check(all(key not in row or row[key]==value for key,value in [('severity',group.get('expected_parent_severity','critical')),('original_severity','critical')]) and labels.get('severity','critical')=='critical' and labels.get('alertname',row['alertname'])==row['alertname'],site+': conflicting physical parent severity/name')
                 check(row['alertname']==group['parent_alertname'] and row.get('original_severity',row.get('severity'))=='critical' and row['status']==group.get('expected_parent_state','firing'),site+': parent state/name/severity differs')
                 eligibility=max(instant(expected[s]['wall']) for s in group['sources'])
-                if pattern=='persistence': eligibility+=timedelta(seconds=group.get('duration',30))
+                causal_eligibility=eligibility
+                if pattern=='persistence':
+                    duration=timedelta(seconds=group.get('duration',30))
+                    eligibility+=duration
+                    # Timer authority uses event milliseconds; latency retains exact transport wall time.
+                    causal_eligibility=max(instant(expected[s]['body']['startsAt']) for s in group['sources'])+duration
                 created=instant(row['created_at']);parent_start=instant(row['startsAt'])
-                check(eligibility<=parent_start<=created and (snapshot_end is None or created<=snapshot_end),site+': parent outside eligibility/snapshot interval')
+                check(causal_eligibility<=parent_start<=created and (snapshot_end is None or created<=snapshot_end),site+': parent outside eligibility/snapshot interval')
                 delay=(created-eligibility).total_seconds();parent_latency.append(delay)
-                check(0<=delay<=plan['limits']['parent_after_eligibility_seconds'],site+': parent deadline differs')
-                if pattern=='persistence': check(instant(row['startsAt'])>=eligibility and all(instant(a['created_at'])>=eligibility for a in matching),site+': premature Persistence parent')
+                check((created>=causal_eligibility if pattern=='persistence' else delay>=0) and delay<=plan['limits']['parent_after_eligibility_seconds'],site+': parent deadline differs')
+                if pattern=='persistence': check(instant(row['startsAt'])>=causal_eligibility and all(instant(a['created_at'])>=causal_eligibility for a in matching),site+': premature Persistence parent')
             if pattern=='parent_child':
                 existing=[(r,l) for r,l in members.values() if r['alertname'].endswith('_parent')];children=[(r,l) for r,l in members.values() if r['alertname'].endswith('_child')]
                 if group['expected_links']:
