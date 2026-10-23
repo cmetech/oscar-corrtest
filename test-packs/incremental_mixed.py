@@ -97,6 +97,8 @@ def make_plan(run,rate,start_at,profile='full',rules=None):
 
 
 def body(event,plan,actual_now):
+    # History stores event times at millisecond precision; keep exchange wall time exact.
+    actual_now=actual_now.replace(microsecond=actual_now.microsecond//1000*1000)
     return {'labels':{'alertname':event['alertname'],'qualification_pack':build.PROFILE,'qualification_run':plan['run'],
         'site':event['site'],'source_id':event['source_id'],'severity':'warning','device':event['device'],'oscar_source':event['oscar_source']},
         'startsAt':stamp(actual_now),'endsAt':stamp(actual_now+timedelta(seconds=plan.get('source_validity_seconds',7200)))}

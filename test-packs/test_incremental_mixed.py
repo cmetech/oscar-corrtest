@@ -302,3 +302,20 @@ def test_physical_history_identity_is_nonempty_bounded_string(field,value):
 def test_audit_id_is_positive_non_boolean_integer(identity):
     m,p,l,h,a=fixture();a[0]['id']=identity
     assert m.evaluate(p,l,h,a,REV,snapshot_completed_at=m.stamp(START+timedelta(seconds=94)))['verdict']=='FAIL'
+
+
+def test_body_uses_db_milliseconds_but_exchange_wall_keeps_actual_microseconds():
+    m,p,l,h,a=fixture();actual=START.replace(microsecond=123456);p['start_at']=m.stamp(actual)
+    event=p['events'][0];payload=m.body(event,p,actual)
+    assert m.instant(payload['startsAt']).microsecond==123000
+    assert m.instant(payload['endsAt']).microsecond==123000
+    assert (m.instant(payload['endsAt'])-m.instant(payload['startsAt'])).total_seconds()==7200
+    row=m.record_exchange(p,event,actual,200,b'{"status":"ok"}',[REV],actual+timedelta(seconds=.1))
+    assert row['wall']==m.stamp(actual) and m.instant(row['wall']).microsecond==123456
+    assert row['body']==payload
+    assert base64.b64decode(row['request_body_base64'])==m.canonical(payload)
+    h[0]['startsAt']=m.stamp(actual.replace(microsecond=123000))
+    h[0]['created_at']=m.stamp((actual+timedelta(seconds=1)).replace(microsecond=123000))
+    a[0]['created_at']=h[0]['created_at']
+    assert m.validate_inputs(p,[row],REV)==[]
+    assert m.evaluate(p,[row],h,a,REV,snapshot_completed_at=m.stamp(actual+timedelta(seconds=94)))['verdict']=='PASS'
