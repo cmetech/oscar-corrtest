@@ -249,7 +249,7 @@ def evaluate(case,run,start,end,inputs,observed,rule):
             body=expected[source]
             require(row.get('status')=='firing' and instant(row.get('startsAt'))==instant(body['startsAt']),'source History state differs')
             for key,want in body['labels'].items():
-                if key=='severity': require((key in labels or row.get('severity') is not None) and (key not in labels or labels[key]==want) and (row.get('severity') is None or row['severity']==want),'source severity changed')
+                if key in ('alertname','severity'): require((key in labels or row.get(key) is not None) and (key not in labels or labels[key]==want) and (row.get(key) is None or row[key]==want),'source '+key+' changed')
                 else: require(labels.get(key)==want,'source History label differs: '+key)
             require(labels.get('am_fingerprint')==active[source] and labels.get('oscar_fingerprint')==row.get('fingerprint') and row.get('fingerprint'),'History native link differs')
             require(row['fingerprint'] not in source_history_fingerprints,'duplicate source History fingerprint')
@@ -257,11 +257,16 @@ def evaluate(case,run,start,end,inputs,observed,rule):
     require(set(history)==set(expected),'source History inputs missing')
     require(set(observed['audit'])==fingerprints,'audit query coverage differs')
     triggers=[]; linked=[]; audit_ids=set()
+    unmatched=case['pattern']=='persistence' and case['polarity']=='negative'
     for fp,value in observed['audit'].items():
         rows=page(value,'audit')
+        if unmatched: require(len(rows)==1,'unmatched Persistence decision missing or duplicated')
         for row in rows:
             require(existing.positive(row.get('id')) and row['id'] not in audit_ids and row.get('alert_fingerprint')==fp,'audit source identity differs')
             audit_ids.add(row['id'])
+            if unmatched:
+                require(all(key in row and row[key] is None for key in ('rule_id','rule_name','pattern','window_id','parent_fingerprint')) and row.get('outcome')=='released_no_trigger' and row.get('reason')=='no_matching_rules' and start<=instant(row.get('created_at'))<=end,'unmatched Persistence audit differs')
+                continue
             require(row.get('rule_id')==rule['id'] and row.get('rule_name')==rule['name'] and row.get('pattern')==case['pattern'] and start<=instant(row.get('created_at'))<=end,'audit rule/time differs')
             require(row.get('outcome') in ['enriched','parent_emitted','released_no_trigger'],'unexpected dispatch/suppression decision')
             if row['outcome']=='parent_emitted': triggers.append(row)
@@ -271,12 +276,13 @@ def evaluate(case,run,start,end,inputs,observed,rule):
                     require(row.get('outcome')=='enriched' and row.get('reason')=='parent_registered' and row.get('parent_fingerprint')==fp,'existing parent registration missing')
                 elif row.get('parent_fingerprint'): linked.append(row)
         # The unmatched Persistence negative intentionally has no selected rule.
-        if not(case['pattern']=='persistence' and case['polarity']=='negative'): require(rows,'source decision missing')
+        if not unmatched: require(rows,'source decision missing')
     require(len(parent)==case['expected_parent_history'] and len(triggers)==case['expected_parent_history'],'physical parent/trigger count differs')
     if parent:
         row,labels=parent[0]; trigger=triggers[0]; window=trigger.get('window_id'); fp=trigger.get('parent_fingerprint')
         require(type(window) is str and 0<len(window)<=64 and type(fp) is str and 0<len(fp)<=128,'audit parent binding missing')
-        want={'alertname':parent_name,'qualification_pack':build.PROFILE,'qualification_run':run,'site':case['site'], 'oscar_synthetic_source':'correlator','oscar_correlation_rule_id':str(rule['id']),'oscar_correlation_rule_name':rule['name'],'oscar_correlation_window_id':window,'correlation_parent_identity':parent_identity(rule['id'],window),'am_fingerprint':fp,'oscar_fingerprint':row.get('fingerprint')}
+        require(labels.get('alertname',row.get('alertname'))==parent_name,'physical parent alertname differs')
+        want={'qualification_pack':build.PROFILE,'qualification_run':run,'site':case['site'], 'oscar_synthetic_source':'correlator','oscar_correlation_rule_id':str(rule['id']),'oscar_correlation_rule_name':rule['name'],'oscar_correlation_window_id':window,'correlation_parent_identity':parent_identity(rule['id'],window),'am_fingerprint':fp,'oscar_fingerprint':row.get('fingerprint')}
         require(all(labels.get(k)==v for k,v in want.items()) and row.get('fingerprint')==fp and row['fingerprint'] not in {item['fingerprint'] for item in history.values()} and fp not in fingerprints,'physical parent attribution differs')
         if case['pattern']=='persistence':
             due=instant(inputs[0]['startsAt'])+timedelta(seconds=30)

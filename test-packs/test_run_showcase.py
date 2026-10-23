@@ -58,10 +58,13 @@ class Peer:
         self.rules = [{**rule, 'enabled': True, 'id': i+2} for i, rule in enumerate(build.rules())]
         self.rules.insert(0, {**harness.retained_v1(), 'id':1})
     def history(self, rowid, labels, fingerprint):
+        stored_labels = {k: v for k, v in labels.items() if k not in ('alertname', 'severity')}
+        if self.failure == ('parent-alertname-conflict' if rowid == 90 else 'source-alertname-conflict'):
+            stored_labels['alertname'] = 'contradictory-alert-name'
         return {'ID': f'00000000-0000-4000-8000-{rowid:012d}', 'alertname': labels['alertname'],
                 'fingerprint': fingerprint, 'status': 'firing', 'severity': labels['severity'],
                 'startsAt': self.bodies[min(rowid-1,len(self.bodies)-1)]['startsAt'], 'createdAt': self.bodies[min(rowid-1,len(self.bodies)-1)]['startsAt'],
-                'labels': [{'Label': k, 'Value': v} for k,v in labels.items()], 'annotations': []}
+                'labels': [{'Label': k, 'Value': v} for k,v in stored_labels.items()], 'annotations': []}
     def handle(self, request):
         self.calls.append((request.method, request.url.path))
         assert request.headers['X-API-Key'] == TOKEN
@@ -110,7 +113,11 @@ class Peer:
             rule=next(r for r in self.rules if r.get('name')=='corrtest-showcase-v2-'+self.case['pattern'])
             triggered=i==len(self.bodies)-1 and self.case['expected_parent_history']
             rows=[{'id':i+1,'created_at':self.bodies[i]['startsAt'],'alert_fingerprint':f'{i+1:016x}','rule_id':rule['id'],'rule_name':rule['name'],'pattern':rule['pattern'],'outcome':'parent_emitted' if triggered else 'enriched','window_id':f'{rule["id"]}:012345678abc:1792497600000','parent_fingerprint':'parent-history' if triggered else None,'reason':None}]
-            if self.case['pattern']=='persistence' and self.case['polarity']=='negative': rows=[]
+            if self.case['pattern']=='persistence' and self.case['polarity']=='negative':
+                rows=[{**rows[0], 'rule_id':None, 'rule_name':None, 'pattern':None,
+                       'outcome':'released_no_trigger', 'reason':'no_matching_rules', 'window_id':None, 'parent_fingerprint':None}]
+                if self.failure=='unmatched-rule': rows[0]['rule_id']=7
+                if self.failure=='unmatched-parent': rows[0]['parent_fingerprint']='unexpected-parent'
             if self.case['pattern']=='persistence' and self.case['polarity']=='positive' and self.failure!='early-parent':
                 rows[0]['created_at']=self.h.stamp(self.h.instant(self.bodies[0]['startsAt'])+timedelta(seconds=30))
             if self.case['pattern']=='parent_child' and self.case['polarity']=='positive':
@@ -148,6 +155,22 @@ def test_no_retry_and_no_false_parent_pass(harness,distribution,tmp_path,failure
     if failure=='lost': assert len(peer.bodies)==1
     if failure=='dispatch': assert not peer.bodies
     assert harness.verify(evidence,report['manifest_sha256'])['verdict']!='PASS'
+
+@pytest.mark.parametrize('failure', ['source-alertname-conflict', 'parent-alertname-conflict'])
+def test_history_alertname_cannot_contradict_promoted_field(harness, distribution, tmp_path, failure):
+    report, peer, evidence = execute(harness, distribution, tmp_path, 'flood-positive', failure)
+    assert len(peer.bodies) == 5
+    assert report['verdict'] == 'INCONCLUSIVE'
+    assert harness.verify(evidence, report['manifest_sha256'])['verdict'] == 'INCONCLUSIVE'
+
+
+@pytest.mark.parametrize('failure', ['unmatched-rule', 'unmatched-parent'])
+def test_unmatched_persistence_cannot_hide_rule_or_parent_attribution(harness, distribution, tmp_path, failure):
+    report, peer, evidence = execute(harness, distribution, tmp_path, 'persistence-negative', failure)
+    assert len(peer.bodies) == 1
+    assert report['verdict'] == 'INCONCLUSIVE'
+    assert harness.verify(evidence, report['manifest_sha256'])['verdict'] == 'INCONCLUSIVE'
+
 
 def test_export_verifier_rejects_changed_parent_and_report(harness,distribution,tmp_path):
     report,peer,evidence=execute(harness,distribution,tmp_path,'flood-positive')
