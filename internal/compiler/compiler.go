@@ -50,14 +50,15 @@ type CasePlan struct {
 	Inspection        Inspection            `json:"inspection"`
 }
 type RulePlan struct {
-	Name          string            `json:"name"`
-	Pattern       string            `json:"pattern"`
-	WindowSeconds int               `json:"windowSeconds"`
-	GroupBy       []string          `json:"groupByLabels"`
-	MatchCriteria map[string]any    `json:"matchCriteria"`
-	EmitAlertName string            `json:"emitAlertName"`
-	EmitLabels    map[string]string `json:"emitLabels"`
-	Description   string            `json:"description"`
+	Name            string            `json:"name"`
+	Pattern         string            `json:"pattern"`
+	WindowSeconds   int               `json:"windowSeconds"`
+	GroupBy         []string          `json:"groupByLabels"`
+	MatchCriteria   map[string]any    `json:"matchCriteria"`
+	EmitAlertName   string            `json:"emitAlertName"`
+	EmitLabels      map[string]string `json:"emitLabels"`
+	EmitAnnotations map[string]string `json:"emitAnnotations,omitempty"`
+	Description     string            `json:"description"`
 }
 type AlertPlan struct {
 	Source        string            `json:"source,omitempty"`
@@ -142,6 +143,10 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 			}
 		}
 		caseCode, short := strings.ToUpper(source.Code), strings.ToUpper(run.ShortToken)
+		trigger := "TRIGGER"
+		if source.Polarity == "negative" {
+			trigger = "NON-TRIGGER"
+		}
 		ruleName := fmt.Sprintf("corrtest-%s-%s-%s", input.Pattern, strings.ToLower(caseCode), strings.ToLower(short))
 		names := map[string]string{}
 		for _, event := range events {
@@ -167,6 +172,10 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 		}
 		item := CasePlan{Control: source.Control, Name: source.Name, Code: caseCode, Polarity: source.Polarity, Checkpoints: source.Checkpoints, Assertions: source.Assertions, ObservationWindow: observationWindow}
 		item.Rule = RulePlan{Name: ruleName, Pattern: input.Pattern, WindowSeconds: int(source.Window / time.Second), GroupBy: source.GroupBy, MatchCriteria: matchCriteria(input.Pattern, names, source), EmitAlertName: syntheticName, EmitLabels: identityLabels(run, input, source, ruleName, "synthetic", "synthetic_parent"), Description: fmt.Sprintf("Temporary OSCAR correlation test rule; run=%s scenario=%s case=%s", run.ID, input.Name, source.Name)}
+		if syntheticName != "" {
+			parentSummary := fmt.Sprintf("[CORRTEST][%s][%s][%s] %s: correlation parent", input.Pattern, trigger, short, source.Name)
+			item.Rule.EmitAnnotations = map[string]string{"summary": parentSummary, "description": parentSummary}
+		}
 		activeByRole := map[string]map[string]string{}
 		retainedSources := map[string]map[string]string{}
 		episodeOffsets := map[string]time.Duration{}
@@ -218,7 +227,8 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 				value := episodeOffsets[key]
 				episodeOffset = &value
 			}
-			item.Alerts = append(item.Alerts, AlertPlan{Source: event.Source, EpisodeOffset: episodeOffset, Name: name, Status: event.Status, Labels: labels, Delay: event.Delay, Annotations: map[string]string{"oscar_test_event_id": labels["oscar_test_event_id"], "oscar_test_event_index": labels["oscar_test_event_index"], "oscar_test_attempt_index": strconv.Itoa(index + 1), "summary": fmt.Sprintf("[CORRTEST][%s][%s][%s] source alert %d of %d", patternCode, caseCode, short, index+1, len(events))}})
+			summary := fmt.Sprintf("[CORRTEST][%s][%s][%s] %s: source alert %d of %d", input.Pattern, trigger, short, source.Name, index+1, len(events))
+			item.Alerts = append(item.Alerts, AlertPlan{Source: event.Source, EpisodeOffset: episodeOffset, Name: name, Status: event.Status, Labels: labels, Delay: event.Delay, Annotations: map[string]string{"oscar_test_event_id": labels["oscar_test_event_id"], "oscar_test_event_index": labels["oscar_test_event_index"], "oscar_test_attempt_index": strconv.Itoa(index + 1), "summary": summary, "description": summary}})
 			if event.Delay > item.ObservationWindow || event.Delay > input.MaxDuration {
 				return Plan{}, fmt.Errorf("case %q event delay exceeds its observation budget", source.Name)
 			}

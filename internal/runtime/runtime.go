@@ -304,6 +304,62 @@ func (r *Runtime) StartBuiltin(ctx context.Context, targetID, pattern, pipelineM
 	return run, nil
 }
 
+// StartSavedScenario runs an immutable imported scenario from the browser using
+// the same runner and receiver binding as the CLI.
+func (r *Runtime) StartSavedScenario(ctx context.Context, targetID, scenarioID, pipelineMode string) (domain.Run, error) {
+	item, err := r.database.GetScenario(ctx, scenarioID)
+	if err != nil {
+		return domain.Run{}, err
+	}
+	document, err := scenario.Decode(strings.NewReader(item.SourceDocument))
+	if err != nil {
+		return domain.Run{}, err
+	}
+	return r.startScenario(ctx, targetID, scenarioID, document, pipelineMode)
+}
+
+func (r *Runtime) startScenario(ctx context.Context, targetID, scenarioID string, document scenario.Scenario, pipelineMode string) (domain.Run, error) {
+	target, err := r.GetTarget(ctx, targetID)
+	if err != nil {
+		return domain.Run{}, err
+	}
+	preview, err := r.PreviewScenario(ctx, targetID, document, pipelineMode)
+	if err != nil {
+		return domain.Run{}, err
+	}
+	client, err := r.newOSCARClient(target, preview.InputPath)
+	if err != nil {
+		return domain.Run{}, err
+	}
+	run, err := r.history.CreateRun(ctx, targetID, scenarioID, r.version)
+	if err != nil {
+		return domain.Run{}, err
+	}
+	plan, err := compiler.Compile(run, document, compiler.Capabilities{PipelineMode: pipelineMode})
+	if err != nil {
+		return domain.Run{}, err
+	}
+	executionCtx, cancel := context.WithCancel(r.rootCtx)
+	r.activeMu.Lock()
+	r.active[run.ID] = cancel
+	r.activeMu.Unlock()
+	r.runWG.Add(1)
+	go func() {
+		defer r.runWG.Done()
+		defer func() {
+			r.activeMu.Lock()
+			delete(r.active, run.ID)
+			r.activeMu.Unlock()
+			cancel()
+		}()
+		r.runMu.Lock()
+		defer r.runMu.Unlock()
+		diagnostic := r.diagnose(executionCtx, client, target, run, plan, pipelineMode)
+		_ = runner.New(r.database, client, runner.Options{EvidenceWriter: r.evidenceWriter()}).Execute(executionCtx, run, plan, diagnostic.snapshot())
+	}()
+	return run, nil
+}
+
 // CancelRun requests cancellation for a run owned by this process. The runner
 // persists its terminal error and bounded cleanup evidence before it exits.
 func (r *Runtime) CancelRun(ctx context.Context, runID string) error {

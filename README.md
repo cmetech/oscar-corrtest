@@ -73,6 +73,7 @@ and macOS use `$HOME/.config/oscar-corrtest/.env` unless
 Advanced targets may still use explicit environment/file/systemd references,
 which override the global key.
 Runs started from the browser continue if the browser disconnects; reconnecting replays persisted events.
+The **Run test** page also offers manual webhook receiver and SNMP trap receiver checks; see [receiver checks](docs/receiver-checks.md) for their required mapping, credentials, and evidence boundaries.
 Open `/authoring` for the target-free Authoring guide: 16 basic/advanced
 examples across all eight patterns, plus exact YAML, compiled-contract, OSCAR
 API, and lifecycle previews. Opening an example in Scenarios creates an

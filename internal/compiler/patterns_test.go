@@ -2,6 +2,7 @@ package compiler_test
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,9 +88,19 @@ func TestAllBuiltinsCompilePositiveAndNegativeCases(t *testing.T) {
 				t.Fatalf("cases=%+v", plan.Cases)
 			}
 			for _, item := range plan.Cases {
+				trigger := "TRIGGER"
+				if item.Code == "N01" {
+					trigger = "NON-TRIGGER"
+				}
+				if item.Rule.EmitAlertName != "" && !strings.Contains(item.Rule.EmitAnnotations["summary"], "["+input.Pattern+"]["+trigger+"]") {
+					t.Fatalf("parent summary=%q", item.Rule.EmitAnnotations["summary"])
+				}
 				for _, alert := range item.Alerts {
 					if alert.Labels["oscar_test_pattern"] != input.Pattern || alert.Labels["category"] != "corrtest_"+input.Pattern {
 						t.Fatalf("identity labels=%v", alert.Labels)
+					}
+					if summary := alert.Annotations["summary"]; !strings.Contains(summary, "["+input.Pattern+"]["+trigger+"]") || alert.Annotations["description"] != summary {
+						t.Fatalf("demo annotations=%v", alert.Annotations)
 					}
 				}
 			}

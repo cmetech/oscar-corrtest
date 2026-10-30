@@ -10,5 +10,37 @@
     <button type="submit">Start run</button>
   </form>
 </section>
+<section class="panel">
+  <h2>Run the webhook receiver scenario</h2>
+  <p>The bounded Flood scenario uses the pinned <code>corrtest_ordinary_v1</code> webhook mapping, Native Alertmanager, and the normal callback path. Configure the target’s ordinary webhook binding before running.</p>
+  <form method="post" action="/runs/webhook" class="form-grid">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <label>Target<select name="target_id" required>{{range .Targets}}<option value="{{.ID}}">{{.DisplayName}} — {{.BaseURL}}</option>{{end}}</select></label>
+    <label>Pipeline mode<select name="pipeline_mode" required><option value="phase_b_dispatch">Phase B — audit and dispatch</option><option value="phase_a_audit_only">Phase A — audit only</option></select></label>
+    <button type="submit">Start webhook receiver scenario</button>
+  </form>
+</section>
+<section class="panel">
+  <h2>Run a saved scenario</h2>
+  <p>Saved custom scenarios can also run from the browser, including other receiver fixtures supported by CorrTest.</p>
+  {{if .ImportedScenarios}}<form method="post" action="/runs/saved" class="form-grid">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <label>Target<select name="target_id" required>{{range .Targets}}<option value="{{.ID}}">{{.DisplayName}} — {{.BaseURL}}</option>{{end}}</select></label>
+    <label>Saved scenario<select name="scenario_id" required>{{range .ImportedScenarios}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
+    <label>Pipeline mode<select name="pipeline_mode" required><option value="phase_b_dispatch">Phase B — audit and dispatch</option><option value="phase_a_audit_only">Phase A — audit only</option></select></label>
+    <button type="submit">Start saved scenario</button>
+  </form>{{else}}<p>No saved scenarios yet. <a href="/scenarios">Open Scenario workbench</a>.</p>{{end}}
+</section>
+<section class="panel">
+  <h2>Run an SNMP trap receiver check</h2>
+  <p>Sends one H3C Smart Link problem trap and its matching clear through the target’s UDP trap receiver, then checks the normalized Alert History. The generated mapping <code>1.3.6.1.4.1.25506.2.147.2</code> must already be installed. This is a bounded functional check, not a throughput test.</p>
+  <form method="post" action="/runs/trap" class="form-grid">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <label>Target<select name="target_id" required>{{range .Targets}}<option value="{{.ID}}">{{.DisplayName}} — {{.BaseURL}}</option>{{end}}</select><small>The trap goes to this target’s hostname.</small></label>
+    <label>SNMP UDP port<input name="trap_port" type="number" min="1" max="65535" value="162" required></label>
+    <p class="muted">The SNMP community is read from <code>CORRTEST_SNMP_COMMUNITY</code> on the CorrTest host; it is never stored in the run.</p>
+    <button type="submit">Start SNMP receiver check</button>
+  </form>
+</section>
 <section class="panel"><h2>Built-in coverage</h2><div class="data-table-wrapper"><table><caption>Positive and negative scenarios</caption><thead><tr><th>Pattern</th><th>Scenario</th><th>Cases</th></tr></thead><tbody>{{range .Scenarios}}<tr><td><code>{{.Pattern}}</code></td><td>{{.Name}}</td><td>{{len .Cases}}</td></tr>{{end}}</tbody></table></div></section>
 {{end}}

@@ -8,6 +8,10 @@ the full `oscar_test_*` identity contract. Open the linked tutorial to compare
 the basic and advanced YAML, compiled contract, API JSON, and lifecycle before
 opening an unsaved draft in Scenarios.
 
+Source alert summaries and descriptions begin with `[CORRTEST][<pattern>][TRIGGER]`
+or `[CORRTEST][<pattern>][NON-TRIGGER]`. Generated parent summaries use the
+`TRIGGER` marker, so each pattern is easy to find in OSCAR Alert History.
+
 | Pattern | Positive proof | Negative proof | Tutorial |
 |---|---|---|---|
 | `flood` | Five stable occurrences emit exactly one parent | Four occurrences remain below threshold | [Flood](/authoring?section=patterns&pattern=flood#pattern-flood) |

@@ -112,6 +112,18 @@ type runStarter interface {
 	StartBuiltin(context.Context, string, string, string) (domain.Run, error)
 }
 
+type savedRunStarter interface {
+	StartSavedScenario(context.Context, string, string, string) (domain.Run, error)
+}
+
+type trapRunStarter interface {
+	StartTrapCheck(context.Context, string, appruntime.TrapCheckOptions) (domain.Run, error)
+}
+
+type webhookRunStarter interface {
+	StartOrdinaryWebhook(context.Context, string, string) (domain.Run, error)
+}
+
 type runExporter interface {
 	ExportRun(context.Context, string, string) (evidence.Result, error)
 }
@@ -279,6 +291,13 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 				return
 			}
 			view.Targets = targets
+			if manager, ok := data.(scenarioManager); ok {
+				view.ImportedScenarios, err = manager.ListScenarios(r.Context())
+				if err != nil {
+					renderStatus(w, tmpl, nonce, http.StatusServiceUnavailable, pageData{Version: info, Page: "run-test", Error: err.Error(), Readiness: readiness(data)})
+					return
+				}
+			}
 			if csrfErr == nil {
 				view.CSRFToken = csrfToken(w, r, csrfSecret)
 			}
@@ -493,6 +512,87 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 			return
 		}
 		run, err := starter.StartBuiltin(r.Context(), r.FormValue("target_id"), r.FormValue("pattern"), mode)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+		http.Redirect(w, r, "/runs/"+url.PathEscape(run.ID), http.StatusSeeOther)
+	})
+	mux.HandleFunc("POST /runs/saved", func(w http.ResponseWriter, r *http.Request) {
+		starter, ok := data.(savedRunStarter)
+		if !ok || csrfErr != nil {
+			http.Error(w, "saved scenario execution unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid run form", http.StatusBadRequest)
+			return
+		}
+		if !sameOrigin(r) || !validCSRF(r, csrfSecret) {
+			http.Error(w, "request origin or CSRF token is invalid", http.StatusForbidden)
+			return
+		}
+		mode := r.FormValue("pipeline_mode")
+		if mode != "phase_a_audit_only" && mode != "phase_b_dispatch" {
+			http.Error(w, "pipeline mode is invalid", http.StatusUnprocessableEntity)
+			return
+		}
+		run, err := starter.StartSavedScenario(r.Context(), r.FormValue("target_id"), r.FormValue("scenario_id"), mode)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+		http.Redirect(w, r, "/runs/"+url.PathEscape(run.ID), http.StatusSeeOther)
+	})
+	mux.HandleFunc("POST /runs/trap", func(w http.ResponseWriter, r *http.Request) {
+		starter, ok := data.(trapRunStarter)
+		if !ok || csrfErr != nil {
+			http.Error(w, "SNMP trap execution unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid run form", http.StatusBadRequest)
+			return
+		}
+		if !sameOrigin(r) || !validCSRF(r, csrfSecret) {
+			http.Error(w, "request origin or CSRF token is invalid", http.StatusForbidden)
+			return
+		}
+		port, err := strconv.Atoi(r.FormValue("trap_port"))
+		if err != nil {
+			http.Error(w, "SNMP port is invalid", http.StatusUnprocessableEntity)
+			return
+		}
+		run, err := starter.StartTrapCheck(r.Context(), r.FormValue("target_id"), appruntime.TrapCheckOptions{Port: port})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+		http.Redirect(w, r, "/runs/"+url.PathEscape(run.ID), http.StatusSeeOther)
+	})
+	mux.HandleFunc("POST /runs/webhook", func(w http.ResponseWriter, r *http.Request) {
+		starter, ok := data.(webhookRunStarter)
+		if !ok || csrfErr != nil {
+			http.Error(w, "webhook receiver execution unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid run form", http.StatusBadRequest)
+			return
+		}
+		if !sameOrigin(r) || !validCSRF(r, csrfSecret) {
+			http.Error(w, "request origin or CSRF token is invalid", http.StatusForbidden)
+			return
+		}
+		mode := r.FormValue("pipeline_mode")
+		if mode != "phase_a_audit_only" && mode != "phase_b_dispatch" {
+			http.Error(w, "pipeline mode is invalid", http.StatusUnprocessableEntity)
+			return
+		}
+		run, err := starter.StartOrdinaryWebhook(r.Context(), r.FormValue("target_id"), mode)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 			return

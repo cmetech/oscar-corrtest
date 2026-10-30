@@ -30,8 +30,9 @@ type RuleRequest struct {
 
 // EmitSpecRequest is the optional public-v1 synthetic alert specification.
 type EmitSpecRequest struct {
-	AlertName string            `json:"alertname"`
-	Labels    map[string]string `json:"labels"`
+	AlertName   string            `json:"alertname"`
+	Labels      map[string]string `json:"labels"`
+	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
 // AlertGroupRequest is the Alertmanager-compatible public-v1 alert envelope.
@@ -64,7 +65,7 @@ func BuildRuleRequest(rule compiler.RulePlan, harnessVersion string) RuleRequest
 		Description: rule.Description, CreatedBy: "oscar-corrtest/" + harnessVersion,
 	}
 	if rule.EmitAlertName != "" {
-		request.EmitSpec = &EmitSpecRequest{AlertName: rule.EmitAlertName, Labels: cloneStringMap(rule.EmitLabels)}
+		request.EmitSpec = &EmitSpecRequest{AlertName: rule.EmitAlertName, Labels: cloneStringMap(rule.EmitLabels), Annotations: cloneStringMap(rule.EmitAnnotations)}
 	}
 	return request
 }

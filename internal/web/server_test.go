@@ -543,6 +543,42 @@ func TestRunTestPageStartsBackgroundRunWithCSRF(t *testing.T) {
 	}
 }
 
+func TestRunTestPageStartsReceiverChecksWithCSRF(t *testing.T) {
+	data := &receiverUIData{}
+	handler := NewHandlerWithData(version.Info{Version: "test"}, data)
+	get := httptest.NewRequest(http.MethodGet, "http://example.com/run-test", nil)
+	page := httptest.NewRecorder()
+	handler.ServeHTTP(page, get)
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "SNMP trap receiver check") || !strings.Contains(page.Body.String(), "webhook receiver scenario") {
+		t.Fatalf("receiver controls missing: status=%d", page.Code)
+	}
+	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(page.Body.String())
+	if len(match) != 2 {
+		t.Fatal("CSRF token missing")
+	}
+	for _, test := range []struct {
+		path   string
+		fields url.Values
+	}{
+		{"/runs/webhook", url.Values{"target_id": {"tgt_lab"}, "pipeline_mode": {"phase_b_dispatch"}}},
+		{"/runs/trap", url.Values{"target_id": {"tgt_lab"}, "trap_port": {"1162"}}},
+	} {
+		test.fields.Set("csrf_token", match[1])
+		post := httptest.NewRequest(http.MethodPost, "http://example.com"+test.path, strings.NewReader(test.fields.Encode()))
+		post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		post.Header.Set("Origin", "http://example.com")
+		post.AddCookie(page.Result().Cookies()[0])
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, post)
+		if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/runs/crt_ui" {
+			t.Fatalf("%s: status=%d body=%s", test.path, response.Code, response.Body.String())
+		}
+	}
+	if data.webhookMode != "phase_b_dispatch" || data.trapOptions.Port != 1162 {
+		t.Fatalf("receiver args: %+v", data)
+	}
+}
+
 func TestRunEventsSSEReplaysAfterSequence(t *testing.T) {
 	handler := NewHandlerWithData(version.Info{}, &sseData{runUIData: runUIData{}})
 	request := httptest.NewRequest(http.MethodGet, "/runs/crt_ui/events?after=1", nil)
@@ -1536,6 +1572,28 @@ type runUIData struct {
 	diagnosticData
 	pattern   string
 	cancelled bool
+}
+
+type receiverUIData struct {
+	runUIData
+	webhookMode string
+	trapOptions appruntime.TrapCheckOptions
+}
+
+func (d *receiverUIData) StartOrdinaryWebhook(_ context.Context, targetID, mode string) (domain.Run, error) {
+	if targetID != "tgt_lab" {
+		return domain.Run{}, errors.New("wrong target")
+	}
+	d.webhookMode = mode
+	return domain.Run{ID: "crt_ui", ShortToken: "00000001", Status: domain.RunQueued, CleanupStatus: domain.CleanupNotRequired}, nil
+}
+
+func (d *receiverUIData) StartTrapCheck(_ context.Context, targetID string, options appruntime.TrapCheckOptions) (domain.Run, error) {
+	if targetID != "tgt_lab" {
+		return domain.Run{}, errors.New("wrong target")
+	}
+	d.trapOptions = options
+	return domain.Run{ID: "crt_ui", ShortToken: "00000001", Status: domain.RunQueued, CleanupStatus: domain.CleanupNotRequired}, nil
 }
 
 func (d *runUIData) ReadyStatus() (bool, string) { return true, "" }

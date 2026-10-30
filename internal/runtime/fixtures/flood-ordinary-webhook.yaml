@@ -1,0 +1,39 @@
+# Ordinary receiver forwarding only; selected admission and physical clear are unproved.
+# Requires the pinned corrtest_ordinary_v1 Mapping and native callback timing within each 60s observation.
+apiVersion: corrtest.oscar/v1alpha1
+kind: CorrelationScenario
+name: flood-ordinary-webhook
+suite: reliability
+pattern: flood
+inputPath: ordinary-webhook
+maxDuration: 4m
+cases:
+- name: five-ordinary-inputs
+  code: P01
+  polarity: positive
+  window: 60s
+  groupBy: [site]
+  labels: {site: lab}
+  events:
+  - {role: interface_down, source: A, status: firing}
+  - {role: interface_down, source: B, status: firing, delay: 1s}
+  - {role: interface_down, source: C, status: firing, delay: 2s}
+  - {role: interface_down, source: D, status: firing, delay: 3s}
+  - {role: interface_down, source: E, status: firing, delay: 4s}
+  assertions:
+  - {kind: audit-count, outcome: parent_emitted, equals: 1}
+  - {kind: source-episode-state-count, outcome: firing, equals: 5}
+- name: four-matching-inputs
+  code: N01
+  polarity: negative
+  window: 60s
+  groupBy: [site]
+  labels: {site: lab}
+  events:
+  - {role: interface_down, source: A, status: firing}
+  - {role: interface_down, source: B, status: firing, delay: 1s}
+  - {role: interface_down, source: C, status: firing, delay: 2s}
+  - {role: interface_down, source: D, status: firing, delay: 3s}
+  assertions:
+  - {kind: audit-count, outcome: parent_emitted, equals: 0}
+  - {kind: source-episode-state-count, outcome: firing, equals: 4}

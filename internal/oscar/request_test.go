@@ -99,7 +99,8 @@ func TestBuildAlertRequestKeepsEventIdentityButExcludesAttemptMetadata(t *testin
 	wantAnnotations := map[string]string{
 		"oscar_test_event_id":    "crt_0123456789ABCDEFGHJKMNPQRS-N01-001",
 		"oscar_test_event_index": "1",
-		"summary":                "[CORRTEST][PERSISTENCE][N01][7Q9K2M4A] source alert 2 of 2",
+		"summary":                "[CORRTEST][persistence][NON-TRIGGER][7Q9K2M4A] resolution-cancels-persistence: source alert 2 of 2",
+		"description":            "[CORRTEST][persistence][NON-TRIGGER][7Q9K2M4A] resolution-cancels-persistence: source alert 2 of 2",
 	}
 	if !reflect.DeepEqual(request.CommonAnnotations, wantAnnotations) || !reflect.DeepEqual(request.Alerts[0].Annotations, wantAnnotations) {
 		t.Fatalf("annotations common=%v nested=%v", request.CommonAnnotations, request.Alerts[0].Annotations)
@@ -131,13 +132,13 @@ func TestPublicRequestBuildersPinCurrentWireShape(t *testing.T) {
 	rule := compiler.RulePlan{
 		Name: "corrtest-flood-p01-preview1", Pattern: "flood", WindowSeconds: 30,
 		GroupBy: []string{"site"}, MatchCriteria: map[string]any{"min_count": 5},
-		EmitAlertName: "PARENT", EmitLabels: map[string]string{"oscar_test_run_id": "crt_abc"}, Description: "owned",
+		EmitAlertName: "PARENT", EmitLabels: map[string]string{"oscar_test_run_id": "crt_abc"}, EmitAnnotations: map[string]string{"summary": "flood TRIGGER"}, Description: "owned",
 	}
 	encoded, err := oscar.CanonicalJSON(oscar.BuildRuleRequest(rule, "test-version"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantRule := `{"name":"corrtest-flood-p01-preview1","pattern":"flood","window_seconds":30,"group_by_labels":["site"],"match_criteria":{"min_count":5},"priority":100,"max_synthetic_per_minute":10,"enabled":true,"description":"owned","created_by":"oscar-corrtest/test-version","emit_spec":{"alertname":"PARENT","labels":{"oscar_test_run_id":"crt_abc"}}}`
+	wantRule := `{"name":"corrtest-flood-p01-preview1","pattern":"flood","window_seconds":30,"group_by_labels":["site"],"match_criteria":{"min_count":5},"priority":100,"max_synthetic_per_minute":10,"enabled":true,"description":"owned","created_by":"oscar-corrtest/test-version","emit_spec":{"alertname":"PARENT","labels":{"oscar_test_run_id":"crt_abc"},"annotations":{"summary":"flood TRIGGER"}}}`
 	if string(encoded) != wantRule {
 		t.Fatalf("rule JSON=%s", encoded)
 	}
