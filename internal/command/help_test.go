@@ -30,7 +30,7 @@ func TestGlobalHelpMakesTheCLIDiscoverable(t *testing.T) {
 			}
 			got := stdout.String()
 			for _, want := range []string{
-				"OSCAR Correlation Test Harness",
+				"OSCAR Test Console",
 				"Usage:\n  oscar-corrtest <command> [options]",
 				"Commands:",
 				"serve",

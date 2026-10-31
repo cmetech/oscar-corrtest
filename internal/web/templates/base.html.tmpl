@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>OSCAR Correlation Test Harness</title>
+  <link rel="icon" href="/static/branding/ericsson-favicon.png">
+  <title>OSCAR Test Console</title>
   <script nonce="{{.Nonce}}">(function(){try{var k='corrtest-theme';var s=localStorage.getItem(k);var t=(s==='light'||s==='dark')?s:(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');document.documentElement.dataset.theme=t;document.documentElement.style.colorScheme=t;}catch(e){document.documentElement.dataset.theme='dark';}})();</script>
   <link rel="stylesheet" href="/static/css/tokens.css">
   <link rel="stylesheet" href="/static/css/base.css">
@@ -18,10 +19,11 @@
   <script defer src="/static/js/authoring.js"></script>
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="app-header">
     <div class="brand-lockup">
-      <span class="brand-mark" aria-hidden="true">OC</span>
-      <a class="brand" href="/" aria-label="OSCAR Correlation Test Harness home">OSCAR <span>Correlation Test Harness</span></a>
+      <img class="brand-logo" src="/static/branding/ericsson-logo-dark.png" alt="Ericsson" width="104" height="52">
+      <a class="brand" href="/" aria-label="OSCAR Test Console home">OSCAR <span>Test Console</span></a>
     </div>
     <div class="header-tools">
       <span class="build">{{.Version.Version}} · {{.Version.Commit}}</span>
@@ -39,10 +41,10 @@
       <a href="/scenarios"{{if eq .Page "scenarios"}} aria-current="page"{{end}}>Scenarios</a>
       <a href="/authoring"{{if eq .Page "authoring"}} aria-current="page"{{end}}>Authoring</a>
       <a href="/targets"{{if eq .Page "targets"}} aria-current="page"{{end}}>Targets</a>
-      <a href="/operations"{{if eq .Page "operations"}} aria-current="page"{{end}}>Operations</a>
+      <a href="/operations"{{if eq .Page "operations"}} aria-current="page"{{end}}>Settings &amp; operations</a>
       <a href="/reference"{{if eq .Page "reference"}} aria-current="page"{{end}}>Reference</a>
     </nav>
-    <main>
+    <main id="main-content">
       {{if eq .Page "targets"}}{{template "targets" .}}
 	  {{else if eq .Page "run-test"}}{{template "run-test" .}}
       {{else if eq .Page "scenarios"}}{{template "scenarios" .}}

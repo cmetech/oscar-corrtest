@@ -1,0 +1,31 @@
+?   	github.com/cmetech/oscar-corrtest/cmd/generate-scenario-schema	[no test files]
+ok  	github.com/cmetech/oscar-corrtest/cmd/oscar-corrtest	0.327s
+?   	github.com/cmetech/oscar-corrtest/cmd/package-zip	[no test files]
+ok  	github.com/cmetech/oscar-corrtest/internal/applog	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/artifact	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/authoring	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/command	0.910s
+ok  	github.com/cmetech/oscar-corrtest/internal/compiler	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/config	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/docs	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/domain	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/envfile	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/evidence	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/history	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/integration	0.810s
+ok  	github.com/cmetech/oscar-corrtest/internal/operations	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/oscar	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/persistence/sqlite	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/platformpaths	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/releasearchive	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/report	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/runner	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/runtime	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/scenario	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/service	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/snmpload	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/testoscar	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/testpack	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/version	(cached)
+ok  	github.com/cmetech/oscar-corrtest/internal/web	0.959s
+ok  	github.com/cmetech/oscar-corrtest/scripts	(cached)

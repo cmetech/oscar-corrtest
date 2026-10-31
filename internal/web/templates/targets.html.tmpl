@@ -27,7 +27,7 @@
 <section class="panel" aria-labelledby="target-list-title">
   <h2 id="target-list-title">Configured targets</h2>
   {{if .Targets}}<div class="data-table-wrapper"><table><caption>Configured OSCAR targets</caption><thead><tr><th>Name</th><th>URL</th><th>Credential reference</th><th>TLS</th><th>Ordinary receiver</th></tr></thead><tbody>
-  {{range .Targets}}<tr><td>{{.DisplayName}}</td><td><code>{{.BaseURL}}</code></td><td>{{if .Credential.Reference}}<code>{{.Credential.Kind}}:{{.Credential.Reference}}</code>{{else}}None{{end}}</td><td>{{if .TLS.Insecure}}Insecure{{else}}Verified{{end}}</td><td>{{with .OrdinaryWebhook}}<code>{{.Endpoint}}</code><br>{{.ValiditySeconds}}s · {{.Credential.Kind}}:{{.Credential.Reference}} · {{if .TLS.Insecure}}Insecure{{else}}Verified{{end}}{{else}}Not configured{{end}}</td></tr>{{end}}
+  {{range .Targets}}<tr><td><span class="status-pill">{{.DisplayName}}</span></td><td><code>{{.BaseURL}}</code></td><td>{{if .Credential.Reference}}<code>{{.Credential.Kind}}:{{.Credential.Reference}}</code>{{else}}None{{end}}</td><td>{{if .TLS.Insecure}}Insecure{{else}}Verified{{end}}</td><td>{{with .OrdinaryWebhook}}<code>{{.Endpoint}}</code><br>{{.ValiditySeconds}}s · {{.Credential.Kind}}:{{.Credential.Reference}} · {{if .TLS.Insecure}}Insecure{{else}}Verified{{end}}{{else}}Not configured{{end}}</td></tr>{{end}}
   </tbody></table></div>{{else}}<p class="muted">No targets configured.</p>{{end}}
 </section>
 {{end}}

@@ -13,7 +13,7 @@ body {
   background: var(--ct-bg);
   color: var(--ct-fg);
   font-family: var(--ct-font-sans);
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.5;
   text-rendering: optimizeLegibility;
 }
@@ -42,7 +42,7 @@ textarea:focus-visible {
   justify-content: space-between;
   gap: var(--ct-space-4);
   padding: var(--ct-space-3) var(--ct-space-6);
-  border-bottom: 1px solid #343945;
+  border-bottom: 1px solid rgb(255 255 255 / 18%);
   background: var(--ct-header);
   color: #FAFAFA;
 }
@@ -54,33 +54,21 @@ textarea:focus-visible {
   gap: var(--ct-space-3);
 }
 
-.brand-mark {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 1px solid #4A505D;
-  border-radius: var(--ct-radius-input);
-  color: var(--ct-accent);
-  font-family: var(--ct-font-mono);
-  font-weight: 800;
-  letter-spacing: -0.08em;
-}
+.brand-logo { width: 104px; height: 52px; object-fit: contain; padding: 11px; flex: 0 0 auto; }
 
 .brand {
   color: #FAFAFA;
   font-size: 14px;
-  font-weight: 750;
+  font-weight: 500;
   letter-spacing: 0.01em;
   text-decoration: none;
 }
 
 .brand span {
   display: block;
-  color: #AEB4C0;
+  color: #D6E2F5;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0.09em;
   text-transform: uppercase;
 }
@@ -92,7 +80,7 @@ textarea:focus-visible {
 }
 
 .build {
-  color: #AEB4C0;
+  color: #D6E2F5;
   font-family: var(--ct-font-mono);
   font-size: 11px;
 }
@@ -100,7 +88,7 @@ textarea:focus-visible {
 .app-shell {
   display: grid;
   min-height: calc(100vh - 56px);
-  grid-template-columns: 196px minmax(0, 1fr);
+  grid-template-columns: 224px minmax(0, 1fr);
 }
 
 .primary-nav {
@@ -120,7 +108,7 @@ textarea:focus-visible {
   border: 1px solid transparent;
   border-radius: var(--ct-radius-input);
   color: var(--ct-fg-muted);
-  font-weight: 650;
+  font-weight: 500;
   text-decoration: none;
 }
 
@@ -144,7 +132,7 @@ textarea:focus-visible {
 main {
   width: 100%;
   min-width: 0;
-  padding: clamp(var(--ct-space-4), 3vw, 36px);
+  padding: var(--ct-space-6);
 }
 
 body.help-open,
@@ -201,3 +189,15 @@ table {
     animation-iteration-count: 1 !important;
   }
 }
+
+a { color: var(--ct-accent); text-underline-offset: 3px; }
+.skip-link { position: fixed; z-index: 50; top: -80px; left: 16px; padding: 12px; background: var(--ct-card); color: var(--ct-fg); }
+.skip-link:focus { top: 8px; }
+.primary-nav a[aria-current="page"] { box-shadow: inset 3px 0 var(--ct-accent); }
+@media (max-width: 520px) {
+  .app-header { flex-wrap: wrap; gap: 8px; }
+  .header-tools { margin-left: auto; }
+  .reference-button { font-size: 12px; }
+}
+
+.app-header :focus-visible { outline-color: #D6E2F5; }

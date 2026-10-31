@@ -1,0 +1,41 @@
+{
+  "sourceRepository": "oscar-adminui",
+  "sourceCommit": "a8ac92b13c63d218fb8cf5acd888298e61fc1567",
+  "assets": [
+    {
+      "file": "ericsson-favicon.png",
+      "source": "public/images/ericsson-favicon.png",
+      "sha256": "4655175a67522fe19514c9bc080265de99bebdce8640b9307da1287e99277577"
+    },
+    {
+      "file": "ericsson-hilda-bold.woff2",
+      "source": "public/fonts/branding/ericsson-hilda-bold.woff2",
+      "sha256": "17e0f95f818cafd82dfeaf288ae8a7cde5b78ca898e28756d22ad72f0947a710"
+    },
+    {
+      "file": "ericsson-hilda-light.woff2",
+      "source": "public/fonts/branding/ericsson-hilda-light.woff2",
+      "sha256": "ab07effc6e9c4779f0d2037467676e819890ade2476e80f93fe4389e8f3f485f"
+    },
+    {
+      "file": "ericsson-hilda-medium.woff2",
+      "source": "public/fonts/branding/ericsson-hilda-medium.woff2",
+      "sha256": "0945ae03b55c5fa7636fef673c05f1ac700a60080f950a0decdd201c56378cbb"
+    },
+    {
+      "file": "ericsson-hilda-mono-regular.woff2",
+      "source": "public/fonts/branding/ericsson-hilda-mono-regular.woff2",
+      "sha256": "09ecd2f61884b395f4123f88feac4a4fdf4811772c8016e1dc0258bc9bf56328"
+    },
+    {
+      "file": "ericsson-hilda-regular.woff2",
+      "source": "public/fonts/branding/ericsson-hilda-regular.woff2",
+      "sha256": "877f0f925eaeccd5f2a789d96231781740a743bdb32d83848f5dc3a359df0719"
+    },
+    {
+      "file": "ericsson-logo-dark.png",
+      "source": "public/images/ericsson-logo-dark.png",
+      "sha256": "8febc4bd89951ebd8132d004b67f35bed38b2ee85cb6ee8a17956ebea2522f71"
+    }
+  ]
+}

@@ -1,13 +1,14 @@
 {{define "run-test"}}
-<section class="page-heading"><p class="eyebrow">Deterministic black-box proof</p><h1>Run correlation test</h1><p>Review the target, pipeline mode, and mutation scope. The harness runs its rule-schema and reserved-label preflight automatically.</p></section>
+<section class="page-heading"><p class="eyebrow">Deterministic black-box proof</p><h1>Run test</h1><p>Review the target, pipeline mode, and mutation scope. The harness runs its rule-schema and reserved-label preflight automatically.</p></section>
 {{if .Error}}<div class="notice notice--error" role="alert">{{.Error}}</div>{{end}}
 <section class="panel">
+  <h2>Run a correlation scenario</h2>
   <form method="post" action="/runs" class="form-grid">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
     <label>Target<select name="target_id" required>{{range .Targets}}<option value="{{.ID}}">{{.DisplayName}} — {{.BaseURL}}</option>{{end}}</select></label>
     <label>Pattern<select name="pattern" required>{{range .Scenarios}}<option value="{{.Pattern}}">{{.Pattern}} — {{len .Cases}} cases</option>{{end}}</select></label>
     <label>Pipeline mode<select name="pipeline_mode" required><option value="phase_b_dispatch">Phase B — audit and dispatch</option><option value="phase_a_audit_only">Phase A — audit only (cannot pass dispatch assertions)</option></select></label>
-    <button type="submit">Start run</button>
+    <button class="primary-button" type="submit">Start run</button>
   </form>
 </section>
 <section class="panel">
@@ -17,18 +18,18 @@
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
     <label>Target<select name="target_id" required>{{range .Targets}}<option value="{{.ID}}">{{.DisplayName}} — {{.BaseURL}}</option>{{end}}</select></label>
     <label>Pipeline mode<select name="pipeline_mode" required><option value="phase_b_dispatch">Phase B — audit and dispatch</option><option value="phase_a_audit_only">Phase A — audit only</option></select></label>
-    <button type="submit">Start webhook receiver scenario</button>
+    <button class="primary-button" type="submit">Start webhook receiver scenario</button>
   </form>
 </section>
 <section class="panel">
   <h2>Run a saved scenario</h2>
-  <p>Saved custom scenarios can also run from the browser, including other receiver fixtures supported by CorrTest.</p>
+  <p>Saved custom scenarios can also run from the browser, including other receiver fixtures supported by OSCAR Test Console.</p>
   {{if .ImportedScenarios}}<form method="post" action="/runs/saved" class="form-grid">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
     <label>Target<select name="target_id" required>{{range .Targets}}<option value="{{.ID}}">{{.DisplayName}} — {{.BaseURL}}</option>{{end}}</select></label>
     <label>Saved scenario<select name="scenario_id" required>{{range .ImportedScenarios}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
     <label>Pipeline mode<select name="pipeline_mode" required><option value="phase_b_dispatch">Phase B — audit and dispatch</option><option value="phase_a_audit_only">Phase A — audit only</option></select></label>
-    <button type="submit">Start saved scenario</button>
+    <button class="primary-button" type="submit">Start saved scenario</button>
   </form>{{else}}<p>No saved scenarios yet. <a href="/scenarios">Open Scenario workbench</a>.</p>{{end}}
 </section>
 <section class="panel">
@@ -38,8 +39,8 @@
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
     <label>Target<select name="target_id" required>{{range .Targets}}<option value="{{.ID}}">{{.DisplayName}} — {{.BaseURL}}</option>{{end}}</select><small>The trap goes to this target’s hostname.</small></label>
     <label>SNMP UDP port<input name="trap_port" type="number" min="1" max="65535" value="162" required></label>
-    <p class="muted">The SNMP community is read from <code>CORRTEST_SNMP_COMMUNITY</code> on the CorrTest host; it is never stored in the run.</p>
-    <button type="submit">Start SNMP receiver check</button>
+    <p class="muted">The SNMP community is read from <code>CORRTEST_SNMP_COMMUNITY</code> on the OSCAR Test Console host; it is never stored in the run.</p>
+    <button class="primary-button" type="submit">Start SNMP receiver check</button>
   </form>
 </section>
 <section class="panel">
@@ -61,9 +62,9 @@
     <label>Nominal offer duration (seconds)<input name="duration" type="number" min="10" max="600" value="60" required></label>
     <label>Minimum time before clear (seconds)<input name="clear_delay" type="number" min="1" max="120" value="30" required></label>
     <label>History drain timeout (seconds)<input name="drain_timeout" type="number" min="10" max="1800" value="300" required></label>
-    <p class="muted">Problems, repeats and clears share the local-send budget. Packet emission and arrival can vary. The sender allows scheduling lag of one second or 5% of elapsed offer time, then stops if exceeded. Preflight is separate. Remaining clears continue at the same rate after the offer window; cancellation stops new problems and attempts clears for owned problems without a prior clear attempt. Ambiguous sends are not replayed. Credentials use CORRTEST_SNMP_COMMUNITY on the CorrTest host.</p>
+    <p class="muted">Problems, repeats and clears share the local-send budget. Packet emission and arrival can vary. The sender allows scheduling lag of one second or 5% of elapsed offer time, then stops if exceeded. Preflight is separate. Remaining clears continue at the same rate after the offer window; cancellation stops new problems and attempts clears for owned problems without a prior clear attempt. Ambiguous sends are not replayed. Credentials use CORRTEST_SNMP_COMMUNITY on the OSCAR Test Console host.</p>
     <p class="muted">Results include the packet ledger, sender timing and exact History identities. A local UDP send is not a receiver acknowledgement. This test alone does not verify repeated-packet receipt, outbound notifications, UI/task responsiveness or capacity.</p>
-    <button type="submit">Start SNMP load test</button>
+    <button class="primary-button" type="submit">Start SNMP load test</button>
   </form>
 </section>
 <section class="panel"><h2>Built-in coverage</h2><div class="data-table-wrapper"><table><caption>Positive and negative scenarios</caption><thead><tr><th>Pattern</th><th>Scenario</th><th>Cases</th></tr></thead><tbody>{{range .Scenarios}}<tr><td><code>{{.Pattern}}</code></td><td>{{.Name}}</td><td>{{len .Cases}}</td></tr>{{end}}</tbody></table></div></section>

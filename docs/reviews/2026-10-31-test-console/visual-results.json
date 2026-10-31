@@ -1,0 +1,322 @@
+[
+  {
+    "theme": "dark",
+    "width": 1440,
+    "scroll": 1425,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "dashboard",
+    "size": "desktop"
+  },
+  {
+    "theme": "dark",
+    "width": 1440,
+    "scroll": 1425,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "targets",
+    "size": "desktop"
+  },
+  {
+    "theme": "dark",
+    "width": 1440,
+    "scroll": 1425,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "scenarios",
+    "size": "desktop"
+  },
+  {
+    "theme": "dark",
+    "width": 1440,
+    "scroll": 1425,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "run-test",
+    "size": "desktop"
+  },
+  {
+    "theme": "dark",
+    "width": 1440,
+    "scroll": 1425,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "runs",
+    "size": "desktop"
+  },
+  {
+    "theme": "dark",
+    "width": 1440,
+    "scroll": 1425,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "evidence",
+    "size": "desktop"
+  },
+  {
+    "theme": "dark",
+    "width": 1440,
+    "scroll": 1425,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "settings",
+    "size": "desktop"
+  },
+  {
+    "theme": "dark",
+    "width": 1440,
+    "scroll": 1425,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "authoring",
+    "size": "desktop"
+  },
+  {
+    "theme": "dark",
+    "width": 390,
+    "scroll": 375,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "dashboard",
+    "size": "mobile"
+  },
+  {
+    "theme": "dark",
+    "width": 390,
+    "scroll": 375,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "targets",
+    "size": "mobile"
+  },
+  {
+    "theme": "dark",
+    "width": 390,
+    "scroll": 375,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "scenarios",
+    "size": "mobile"
+  },
+  {
+    "theme": "dark",
+    "width": 390,
+    "scroll": 375,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "run-test",
+    "size": "mobile"
+  },
+  {
+    "theme": "dark",
+    "width": 390,
+    "scroll": 375,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "runs",
+    "size": "mobile"
+  },
+  {
+    "theme": "dark",
+    "width": 390,
+    "scroll": 375,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "evidence",
+    "size": "mobile"
+  },
+  {
+    "theme": "dark",
+    "width": 390,
+    "scroll": 375,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "settings",
+    "size": "mobile"
+  },
+  {
+    "theme": "dark",
+    "width": 390,
+    "scroll": 375,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "authoring",
+    "size": "mobile"
+  },
+  {
+    "theme": "light",
+    "width": 1440,
+    "scroll": 1425,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "dashboard",
+    "size": "desktop"
+  },
+  {
+    "theme": "light",
+    "width": 1440,
+    "scroll": 1425,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "targets",
+    "size": "desktop"
+  },
+  {
+    "theme": "light",
+    "width": 1440,
+    "scroll": 1425,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "scenarios",
+    "size": "desktop"
+  },
+  {
+    "theme": "light",
+    "width": 1440,
+    "scroll": 1425,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "run-test",
+    "size": "desktop"
+  },
+  {
+    "theme": "light",
+    "width": 1440,
+    "scroll": 1425,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "runs",
+    "size": "desktop"
+  },
+  {
+    "theme": "light",
+    "width": 1440,
+    "scroll": 1425,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "evidence",
+    "size": "desktop"
+  },
+  {
+    "theme": "light",
+    "width": 1440,
+    "scroll": 1425,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "settings",
+    "size": "desktop"
+  },
+  {
+    "theme": "light",
+    "width": 1440,
+    "scroll": 1425,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "authoring",
+    "size": "desktop"
+  },
+  {
+    "theme": "light",
+    "width": 390,
+    "scroll": 375,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "dashboard",
+    "size": "mobile"
+  },
+  {
+    "theme": "light",
+    "width": 390,
+    "scroll": 375,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "targets",
+    "size": "mobile"
+  },
+  {
+    "theme": "light",
+    "width": 390,
+    "scroll": 375,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "scenarios",
+    "size": "mobile"
+  },
+  {
+    "theme": "light",
+    "width": 390,
+    "scroll": 375,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "run-test",
+    "size": "mobile"
+  },
+  {
+    "theme": "light",
+    "width": 390,
+    "scroll": 375,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "runs",
+    "size": "mobile"
+  },
+  {
+    "theme": "light",
+    "width": 390,
+    "scroll": 375,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "evidence",
+    "size": "mobile"
+  },
+  {
+    "theme": "light",
+    "width": 390,
+    "scroll": 375,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "settings",
+    "size": "mobile"
+  },
+  {
+    "theme": "light",
+    "width": 390,
+    "scroll": 375,
+    "title": "OSCAR Test Console",
+    "main": true,
+    "images": true,
+    "page": "authoring",
+    "size": "mobile"
+  }
+]

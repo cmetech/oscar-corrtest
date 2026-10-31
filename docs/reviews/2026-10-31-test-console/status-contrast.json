@@ -1,0 +1,26 @@
+[
+  {
+    "state": "pass",
+    "background": "#23969A",
+    "text": "#000000",
+    "contrast": 5.9
+  },
+  {
+    "state": "fail",
+    "background": "#C52A32",
+    "text": "#FFFFFF",
+    "contrast": 5.6
+  },
+  {
+    "state": "warning",
+    "background": "#FAD22D",
+    "text": "#242424",
+    "contrast": 10.59
+  },
+  {
+    "state": "running",
+    "background": "#1174E6",
+    "text": "#FFFFFF",
+    "contrast": 4.5
+  }
+]

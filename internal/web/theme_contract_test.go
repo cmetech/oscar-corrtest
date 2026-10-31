@@ -1,6 +1,10 @@
 package web
 
 import (
+	"context"
+	"github.com/cmetech/oscar-corrtest/internal/config"
+	"github.com/cmetech/oscar-corrtest/internal/operations"
+	appruntime "github.com/cmetech/oscar-corrtest/internal/runtime"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -17,18 +21,18 @@ func TestThemeDefinesApprovedTokens(t *testing.T) {
 
 	want := map[string]map[string]string{
 		"dark": {
-			"--ct-bg": "#1A1D24", "--ct-card": "#242832", "--ct-card-hover": "#2C3140",
-			"--ct-header": "#1E2128", "--ct-border": "#2D3340", "--ct-fg": "#FAFAFA",
-			"--ct-fg-muted": "#9CA3AF", "--ct-accent": "#FAD22D", "--ct-accent-fg": "#1A1D24",
-			"--ct-pass": "#0FC373", "--ct-warning": "#FF8C0A", "--ct-fail": "#FF3232",
-			"--ct-activity": "#AF78D2", "color-scheme": "dark",
+			"--ct-bg": "#101029", "--ct-card": "#1B1B35", "--ct-card-hover": "#272744",
+			"--ct-header": "#000082", "--ct-border": "#44445C", "--ct-fg": "#FFFFFF",
+			"--ct-fg-muted": "#B8B8CA", "--ct-accent": "#D6E2F5", "--ct-accent-fg": "#101029",
+			"--ct-pass": "#BDE0E1", "--ct-warning": "#FAD22D", "--ct-fail": "#EFD4D3",
+			"--ct-activity": "#D6E2F5", "color-scheme": "dark",
 		},
 		"light": {
-			"--ct-bg": "#F7F8FA", "--ct-card": "#FFFFFF", "--ct-card-hover": "#F1F3F7",
-			"--ct-header": "#1E2128", "--ct-border": "#E5E7EB", "--ct-fg": "#1A1D24",
-			"--ct-fg-muted": "#4B5563", "--ct-accent": "#FAD22D", "--ct-accent-fg": "#1A1D24",
-			"--ct-pass": "#087A49", "--ct-warning": "#A34D00", "--ct-fail": "#B42318",
-			"--ct-activity": "#704099", "color-scheme": "light",
+			"--ct-bg": "#F2F2F2", "--ct-card": "#FFFFFF", "--ct-card-hover": "#D6E2F5",
+			"--ct-header": "#000082", "--ct-border": "#E0E0E0", "--ct-fg": "#101029",
+			"--ct-fg-muted": "#555568", "--ct-accent": "#000082", "--ct-accent-fg": "#101029",
+			"--ct-pass": "#0B2D2E", "--ct-warning": "#765800", "--ct-fail": "#C52A32",
+			"--ct-activity": "#000082", "color-scheme": "light",
 		},
 	}
 
@@ -55,7 +59,7 @@ func TestThemeIncludesAccessibleMotionAndFocusContracts(t *testing.T) {
 	for _, fragment := range []string{
 		"--ct-space-1: 4px", "--ct-space-2: 8px", "--ct-space-3: 12px",
 		"--ct-space-4: 16px", "--ct-space-6: 24px", "--ct-space-8: 32px",
-		"--ct-radius-input: 4px", "--ct-radius-card: 6px",
+		"--ct-radius-input: 4px", "--ct-radius-card: 4px",
 		"outline: 3px solid", "@media (prefers-reduced-motion: reduce)",
 	} {
 		if !strings.Contains(all, fragment) {
@@ -212,4 +216,32 @@ func cssBlock(t *testing.T, css, selector string) string {
 		t.Fatalf("CSS selector %q not found", selector)
 	}
 	return match[1]
+}
+
+func TestConsoleBrandAssetsAreServedLocally(t *testing.T) {
+	settings := config.Settings{DataDir: t.TempDir()}
+	app, err := appruntime.OpenWithOptions(context.Background(), settings, version.Info{}, appruntime.Options{Operations: operations.New(settings, nil, nil, nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	handler := NewHandlerWithData(version.Info{}, app)
+	for _, path := range []string{"/static/branding/ericsson-logo-dark.png", "/static/branding/ericsson-favicon.png", "/static/branding/ericsson-hilda-regular.woff2", "/static/branding/ericsson-hilda-mono-regular.woff2"} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusOK || response.Body.Len() < 100 {
+			t.Errorf("brand asset unavailable: %s", path)
+		}
+	}
+	for _, path := range []string{"/", "/targets", "/scenarios", "/run-test", "/runs", "/operations", "/authoring"} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		body := response.Body.String()
+		if !strings.Contains(body, "<title>OSCAR Test Console</title>") || !strings.Contains(body, `alt="Ericsson"`) || !strings.Contains(body, `id="main-content"`) {
+			t.Errorf("console shell missing from %s", path)
+		}
+		if strings.Contains(body, "OSCAR Correlation Test Harness") {
+			t.Errorf("old application name on %s", path)
+		}
+	}
 }

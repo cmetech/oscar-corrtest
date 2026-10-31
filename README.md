@@ -1,6 +1,6 @@
-# OSCAR Correlation Test Harness
+# OSCAR Test Console
 
-`oscar-corrtest` is a standalone Go application for black-box testing all eight OSCAR alarm-correlation patterns. It creates isolated temporary rules through OSCAR's public API, sends deterministic alerts, resolves authoritative fingerprints from alert history, collects audit/notifier evidence, cleans up owned rules, and preserves run reports in SQLite. The same executable provides a CLI and an embedded light/dark web UI.
+**OSCAR Test Console** (`oscar-corrtest`) is a standalone Go application for correlation scenarios, ordinary alerts, webhook and SNMP receiver checks, and load testing. It supports all eight OSCAR alarm-correlation patterns. It creates isolated temporary rules through OSCAR's public API, sends deterministic alerts, resolves authoritative fingerprints from alert history, collects audit/notifier evidence, cleans up owned rules, and preserves run reports in SQLite. The same executable provides a CLI and an embedded light/dark web UI.
 
 ## Quick start
 
@@ -66,7 +66,7 @@ oscar-corrtest run builtin:flood \
 ```
 
 The easiest persistent configuration is the Operations page: paste the global
-key once and CorrTest writes `OSCAR_API_KEY` to its managed user `.env`. Linux
+key once and OSCAR Test Console writes `OSCAR_API_KEY` to its managed user `.env`. Linux
 and macOS use `$HOME/.config/oscar-corrtest/.env` unless
 `XDG_CONFIG_HOME` is set; Windows uses
 `%LOCALAPPDATA%\oscar-corrtest\.env`. The UI never reads the value back.
@@ -133,7 +133,7 @@ Custom YAML/JSON is strict and bounded: unknown/duplicate keys, aliases, multipl
 
 Evidence ZIPs are atomic and non-overwriting. They contain the canonical JSON report, immutable plan, timeline, offline HTML, JUnit XML, and a SHA-256 manifest. Run deletion requires an exact ID, `--yes`, a terminal clean/not-required cleanup state, and verified local artifacts. Retention uses the same gate, provides a separate preview, and processes no more than 500 exact candidates per invocation.
 
-One CorrTest runtime owns each data directory. While `serve` or a CLI run is using it, another stateful CLI command (including `runs show`, `runs list`, backup or export) refuses with “state directory already in use.” Use the running web UI for status, or wait for the owner to exit before using the CLI. Independent data directories remain separate. The persistent `.corrtest.lock` file is normal; never delete it to force access. The OS releases ownership after process exit or a crash, and the next owner performs existing interrupted-run recovery without resuming injection. Stop older CorrTest binaries before upgrading: they do not honor this lock.
+One OSCAR Test Console runtime owns each data directory. While `serve` or a CLI run is using it, another stateful CLI command (including `runs show`, `runs list`, backup or export) refuses with “state directory already in use.” Use the running web UI for status, or wait for the owner to exit before using the CLI. Independent data directories remain separate. The persistent `.corrtest.lock` file is normal; never delete it to force access. The OS releases ownership after process exit or a crash, and the next owner performs existing interrupted-run recovery without resuming injection. Stop older OSCAR Test Console binaries before upgrading: they do not honor this lock.
 
 SQLite uses WAL, foreign keys, a busy timeout, and full synchronous writes. Keep the data directory on a local filesystem. The online database backup does not include separate run artifact directories; preserve the whole state directory or export the required runs.
 
@@ -193,7 +193,7 @@ Pushing an annotated `vMAJOR.MINOR.PATCH` tag starts the GitHub Actions release
 pipeline; no local build or packaging script is required:
 
 ```bash
-git tag -a v1.2.3 -m "OSCAR Correlation Test Harness v1.2.3"
+git tag -a v1.2.3 -m "OSCAR Test Console v1.2.3"
 git push origin refs/tags/v1.2.3
 ```
 

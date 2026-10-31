@@ -33,7 +33,7 @@
       <section><h4>Expected evidence</h4><p>{{.ExpectedEvidence}}</p></section>
       <section><h4>Common mistakes</h4><ul>{{range .Mistakes}}<li>{{.}}</li>{{end}}</ul></section>
     </div>
-    {{if eq .ID "parent_child"}}<p class="authoring-contract-note"><strong>Parent-child contract:</strong> there is no synthetic emit_spec; CorrTest compiles the parent and child match policy without a synthetic parent rule.</p>{{end}}
+    {{if eq .ID "parent_child"}}<p class="authoring-contract-note"><strong>Parent-child contract:</strong> there is no synthetic emit_spec; OSCAR Test Console compiles the parent and child match policy without a synthetic parent rule.</p>{{end}}
   </article>
   {{end}}{{end}}
 
@@ -64,7 +64,7 @@
   <article class="authoring-guidance" id="validation">
     <p class="eyebrow">Validation</p><h2>Closed inputs</h2>
     {{range $page.Catalog.ValidationNotes}}<section><h3>{{.Title}}</h3><p>{{.Content}}</p></section>{{end}}
-    <section><h3>Protected labels</h3><p>CorrTest compiler-owned identity labels and OSCAR transport fingerprint labels cannot be overridden by case or event labels.</p></section>
+    <section><h3>Protected labels</h3><p>OSCAR Test Console compiler-owned identity labels and OSCAR transport fingerprint labels cannot be overridden by case or event labels.</p></section>
     {{range $page.Contract.Fields}}{{if eq .ID "case.labels"}}<section><h3>Label budget</h3><p>{{.Limits}}. {{.CommonError}}</p></section>{{end}}{{end}}
   </article>
 </section>

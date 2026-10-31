@@ -1,14 +1,16 @@
 {{define "dashboard"}}
 <section class="page-heading">
-  <p class="eyebrow">Correlation assurance</p>
-  <h1>Dashboard</h1>
-  <p>Build evidence that OSCAR correlation rules behave exactly as intended.</p>
+  <p class="eyebrow">OSCAR Test Console</p>
+  <h1>Confidence starts with evidence.</h1>
+  <p>Test correlation scenarios, ordinary alerts, webhook and SNMP receivers, and load behavior from one console.</p>
+  <div class="button-row"><a class="primary-button" href="/run-test">Create a test run</a><a class="secondary-button" href="/runs">Review run evidence</a></div>
 </section>
 {{if not .Readiness.Ready}}<div class="notice notice--error" role="alert">Database unavailable: {{.Readiness.Error}}</div>{{end}}
-<section class="empty-state" aria-labelledby="empty-title">
-  <span class="empty-mark" aria-hidden="true">◎</span>
-  <h2 id="empty-title">No correlation runs yet</h2>
-  <p>Configure an OSCAR target, then start a built-in test suite.</p>
+<section class="dashboard-grid" aria-label="Test workflows">
+  <a class="workflow-card" href="/scenarios"><span class="eyebrow">01 / Design</span><h2>Scenarios &amp; alerts</h2><p>Inspect built-in scenarios, ordinary alert inputs and expected outcomes before running.</p><span class="workflow-link">Open scenario workbench →</span></a>
+  <a class="workflow-card" href="/run-test"><span class="eyebrow">02 / Exercise</span><h2>Receivers &amp; load</h2><p>Review webhook and SNMP receiver checks, paced load plans and their coverage boundaries.</p><span class="workflow-link">Configure a test →</span></a>
+  <a class="workflow-card" href="/targets"><span class="eyebrow">03 / Connect</span><h2>Targets &amp; access</h2><p>Choose OSCAR endpoints and credential references. Secrets stay out of run evidence.</p><span class="workflow-link">Manage targets →</span></a>
 </section>
+<section class="panel"><h2>Read every outcome independently</h2><p>Transport success, alert persistence and notification delivery are separate observations. A successful send does not prove downstream delivery.</p><p class="button-row"><span class="status-pill" data-status="UNKNOWN">UNKNOWN</span><span class="status-pill" data-status="DIRTY">DIRTY</span><span class="status-pill" data-status="INCONCLUSIVE">INCONCLUSIVE</span><span class="status-pill" data-status="FAIL">FAIL</span></p><p class="muted">Missing evidence stays unknown. Unresolved cleanup remains visible. Review each run’s coverage boundary and verified evidence before drawing conclusions.</p></section>
 <footer class="page-footer">Build timestamp · {{.Version.BuildDate}}</footer>
 {{end}}

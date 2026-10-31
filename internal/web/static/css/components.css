@@ -3,9 +3,9 @@
   width: 36px;
   height: 36px;
   place-items: center;
-  border: 1px solid #4A505D;
+  border: 1px solid rgb(255 255 255 / 45%);
   border-radius: var(--ct-radius-input);
-  background: #272B34;
+  background: transparent;
   color: #FAFAFA;
   cursor: pointer;
   font: inherit;
@@ -16,9 +16,9 @@
 .icon-button {
   min-height: 36px;
   padding: 6px 10px;
-  border: 1px solid #4A505D;
+  border: 1px solid rgb(255 255 255 / 45%);
   border-radius: var(--ct-radius-input);
-  background: #272B34;
+  background: transparent;
   color: #FAFAFA;
   cursor: pointer;
   font: inherit;
@@ -105,7 +105,7 @@
   border-radius: var(--ct-radius-input);
   color: var(--ct-accent);
   font-family: var(--ct-font-mono);
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.08em;
 }
 
@@ -167,7 +167,7 @@
 
 .theme-toggle:hover {
   border-color: var(--ct-accent);
-  background: #303541;
+  background: rgb(255 255 255 / 12%);
 }
 
 .theme-toggle:active {
@@ -186,9 +186,9 @@
 .eyebrow {
   margin: 0 0 var(--ct-space-3);
   color: var(--ct-activity);
-  font-family: var(--ct-font-mono);
+  font-family: var(--ct-font-sans);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -201,15 +201,15 @@ p {
 
 h1 {
   margin-bottom: var(--ct-space-3);
-  font-size: clamp(30px, 4vw, 48px);
-  line-height: 1.05;
-  letter-spacing: -0.035em;
+  font-size: clamp(28px, 3vw, 36px);
+  line-height: 1.25;
+  letter-spacing: 0;
 }
 
 .page-heading > p:last-child {
   max-width: 620px;
   color: var(--ct-fg-muted);
-  font-size: 17px;
+  font-size: 16px;
 }
 
 .empty-state {
@@ -261,3 +261,6 @@ h1 {
   font-family: var(--ct-font-mono);
   font-size: 11px;
 }
+
+h1 { font-weight: 300; }
+h2 { font-size: 20px; font-weight: 500; }

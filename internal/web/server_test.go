@@ -72,7 +72,7 @@ func TestHandlerRoutes(t *testing.T) {
 	tests := []struct{ path, contentType, body string }{
 		{"/healthz", "application/json", `"status":"ok"`},
 		{"/readyz", "application/json", `"status":"ready"`},
-		{"/", "text/html", "OSCAR Correlation Test Harness"},
+		{"/", "text/html", "OSCAR Test Console"},
 		{"/static/css/tokens.css", "text/css", "--ct-bg"},
 	}
 
@@ -272,7 +272,7 @@ func TestAuthoringLifecycleRendersOrderedRuntimeHonestStages(t *testing.T) {
 				"preflight.validate_rule", "setup.create_rule", "stimulus.inject_alert", "evidence.read_history",
 				"evidence.evaluate_assertions", "evidence.persist_final_transaction", "cleanup.delete_rule", "cleanup.resolve_alert",
 				"{returned-rule-id}", "{server-fingerprint}", "Runtime-dependent",
-				"CorrTest creates two temporary correlation rules (P01 and N01), injects source alerts directly through the public alert API, observes OSCAR evidence, deletes only the returned rule IDs, resolves its injected alerts, and then persists terminal facts and evidence. It does not create ordinary OSCAR alert rules.",
+				"OSCAR Test Console creates two temporary correlation rules (P01 and N01), injects source alerts directly through the public alert API, observes OSCAR evidence, deletes only the returned rule IDs, resolves its injected alerts, and then persists terminal facts and evidence. It does not create ordinary OSCAR alert rules.",
 			} {
 				if !strings.Contains(body, want) {
 					t.Errorf("%s missing %q", path, want)
@@ -521,7 +521,7 @@ func TestRunTestPageStartsBackgroundRunWithCSRF(t *testing.T) {
 	get := httptest.NewRequest(http.MethodGet, "http://example.com/run-test", nil)
 	getResponse := httptest.NewRecorder()
 	handler.ServeHTTP(getResponse, get)
-	if getResponse.Code != http.StatusOK || !strings.Contains(getResponse.Body.String(), "Run correlation test") || !strings.Contains(getResponse.Body.String(), "parent_child") {
+	if getResponse.Code != http.StatusOK || !strings.Contains(getResponse.Body.String(), "Run test") || !strings.Contains(getResponse.Body.String(), "parent_child") {
 		t.Fatalf("GET status=%d body=%s", getResponse.Code, getResponse.Body.String())
 	}
 	match := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(getResponse.Body.String())
@@ -1327,8 +1327,8 @@ func TestOperationsPageManagesWriteOnlyAPIKeyAndShowsServiceLogs(t *testing.T) {
 		`class="operations-workspace"`, `class="operations-rail"`, `data-log-source-filter`,
 		`data-log-level-filter`, `data-log-text-filter`, `data-log-source="runtime"`, `data-log-level="info"`,
 		`action="/operations/api-key/clear" data-confirm-form`, `data-confirm-title="Clear managed OSCAR API key?"`,
-		`action="/operations/service/stop" data-confirm-form`, `data-confirm-title="Stop CorrTest service?"`,
-		`action="/operations/service/uninstall" data-confirm-form`, `data-confirm-title="Uninstall CorrTest user service?"`,
+		`action="/operations/service/stop" data-confirm-form`, `data-confirm-title="Stop OSCAR Test Console service?"`,
+		`action="/operations/service/uninstall" data-confirm-form`, `data-confirm-title="Uninstall OSCAR Test Console user service?"`,
 	} {
 		if !strings.Contains(body, required) {
 			t.Errorf("operations page missing %q", required)

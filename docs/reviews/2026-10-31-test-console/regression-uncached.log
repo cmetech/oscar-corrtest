@@ -1,0 +1,31 @@
+?   	github.com/cmetech/oscar-corrtest/cmd/generate-scenario-schema	[no test files]
+ok  	github.com/cmetech/oscar-corrtest/cmd/oscar-corrtest	0.809s
+?   	github.com/cmetech/oscar-corrtest/cmd/package-zip	[no test files]
+ok  	github.com/cmetech/oscar-corrtest/internal/applog	0.354s
+ok  	github.com/cmetech/oscar-corrtest/internal/artifact	0.232s
+ok  	github.com/cmetech/oscar-corrtest/internal/authoring	0.530s
+ok  	github.com/cmetech/oscar-corrtest/internal/command	1.540s
+ok  	github.com/cmetech/oscar-corrtest/internal/compiler	1.602s
+ok  	github.com/cmetech/oscar-corrtest/internal/config	1.441s
+ok  	github.com/cmetech/oscar-corrtest/internal/docs	0.873s
+ok  	github.com/cmetech/oscar-corrtest/internal/domain	1.278s
+ok  	github.com/cmetech/oscar-corrtest/internal/envfile	1.759s
+ok  	github.com/cmetech/oscar-corrtest/internal/evidence	2.425s
+ok  	github.com/cmetech/oscar-corrtest/internal/history	2.168s
+ok  	github.com/cmetech/oscar-corrtest/internal/integration	3.166s
+ok  	github.com/cmetech/oscar-corrtest/internal/operations	2.315s
+ok  	github.com/cmetech/oscar-corrtest/internal/oscar	5.269s
+ok  	github.com/cmetech/oscar-corrtest/internal/persistence/sqlite	10.561s
+ok  	github.com/cmetech/oscar-corrtest/internal/platformpaths	4.657s
+ok  	github.com/cmetech/oscar-corrtest/internal/releasearchive	2.621s
+ok  	github.com/cmetech/oscar-corrtest/internal/report	4.499s
+ok  	github.com/cmetech/oscar-corrtest/internal/runner	87.354s
+ok  	github.com/cmetech/oscar-corrtest/internal/runtime	113.990s
+ok  	github.com/cmetech/oscar-corrtest/internal/scenario	4.201s
+ok  	github.com/cmetech/oscar-corrtest/internal/service	5.054s
+ok  	github.com/cmetech/oscar-corrtest/internal/snmpload	5.672s
+ok  	github.com/cmetech/oscar-corrtest/internal/testoscar	3.848s
+ok  	github.com/cmetech/oscar-corrtest/internal/testpack	9.945s
+ok  	github.com/cmetech/oscar-corrtest/internal/version	4.336s
+ok  	github.com/cmetech/oscar-corrtest/internal/web	6.900s
+ok  	github.com/cmetech/oscar-corrtest/scripts	6.820s

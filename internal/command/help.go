@@ -42,7 +42,7 @@ var helpTopics = map[string]helpTopic{
 			{"--evidence <file>", "New exclusive private observation artifact; parent directory must exist."},
 			{"--output <format>", "human or json summary, without raw response bodies."},
 			{"--config <path>", "Configuration file path."},
-			{"--data-dir <path>", "Existing CorrTest state directory."},
+			{"--data-dir <path>", "Existing OSCAR Test Console state directory."},
 		},
 		notes: []string{"Read-only observation; not scenario PASS. No alerts, rule updates, source clears or retries.",
 			"Scope comes from verified runtime readback; zero roots does not prove source-processing completeness.",
@@ -272,7 +272,7 @@ var helpTopics = map[string]helpTopic{
 	"run":  planOrRunHelp("run", "Execute a scenario, evaluate its assertions, preserve evidence, and clean up owned OSCAR resources."),
 	"runs": {
 		usage:       "oscar-corrtest runs <action>",
-		description: "Query and manage correlation-test runs preserved in local storage.",
+		description: "Query and manage test runs preserved in local storage.",
 		commands: []helpItem{
 			{"list", "Filter and list saved runs."},
 			{"show", "Show one run's status and verdict."},
@@ -467,7 +467,7 @@ func (a *App) commandUsageError(path, message string) int {
 
 func writeHelpTopic(output io.Writer, path string, topic helpTopic) {
 	if path == "" {
-		fmt.Fprintln(output, "OSCAR Correlation Test Harness")
+		fmt.Fprintln(output, "OSCAR Test Console")
 	} else {
 		fmt.Fprintf(output, "oscar-corrtest %s\n", path)
 	}
