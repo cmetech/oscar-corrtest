@@ -1,6 +1,6 @@
 module github.com/cmetech/oscar-corrtest
 
-go 1.27.0
+go 1.27.3
 
 require (
 	golang.org/x/sys v0.46.0

@@ -83,24 +83,21 @@ func (d *Database) ReadInstalledPackExport(ctx context.Context, runID string) (I
 	if err != nil {
 		return s, err
 	}
+	defer events.Close()
 	for events.Next() {
 		if len(s.Events) == 2048 {
-			events.Close()
 			return s, fmt.Errorf("installed export event count exceeds 2048")
 		}
 		e, eErr := scanEvent(events)
 		if eErr != nil {
-			events.Close()
 			return s, eErr
 		}
 		if s.Snapshot == nil && e.Type == "alert.attempting" {
-			events.Close()
 			return s, fmt.Errorf("input event has no installed registration")
 		}
 		s.Events = append(s.Events, e)
 	}
-	err = events.Err()
-	events.Close()
+	err = errors.Join(events.Err(), events.Close())
 	if err != nil {
 		return s, err
 	}

@@ -2,6 +2,7 @@ package snmpload
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -31,8 +32,7 @@ func NewSender(host string, port int, community string) (*Sender, error) {
 		return nil, err
 	}
 	if err = os.WriteFile(filepath.Join(directory, "snmp.conf"), []byte("defCommunity "+community+"\n"), 0600); err != nil {
-		os.RemoveAll(directory)
-		return nil, fmt.Errorf("write private SNMP credential: %w", err)
+		return nil, errors.Join(fmt.Errorf("write private SNMP credential: %w", err), os.RemoveAll(directory))
 	}
 	destination := "udp:" + net.JoinHostPort(host, strconv.Itoa(port))
 	if strings.Contains(host, ":") {
@@ -54,6 +54,7 @@ func (s *Sender) Send(ctx context.Context, e Episode, kind string) error {
 	}
 	sendCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	// #nosec G204 -- fixed snmptrap executable; validated destination and compiled fixture arguments, no shell.
 	cmd := exec.CommandContext(sendCtx, s.executable, args...)
 	for _, v := range os.Environ() {
 		if !strings.HasPrefix(v, "SNMPCONFPATH=") && !strings.HasPrefix(v, "MIBS=") && !strings.HasPrefix(v, "CORRTEST_SNMP_COMMUNITY=") {

@@ -577,7 +577,7 @@ SQLite snapshot (`persistence/sqlite/backup.go`).
 **No Go toolchain on this box** → use the container path for anything that
 compiles.
 
-Container (`Containerfile`): pinned `golang:1.27.0-bookworm` digest builder →
+Container (`Containerfile`): pinned `golang:1.27.3-bookworm` digest builder →
 `FROM scratch` runtime with CA bundle, the binary, a `65532`-owned
 `/var/lib/oscar-corrtest`, `EXPOSE 8787`, `ENTRYPOINT ["/oscar-corrtest"]`,
 `CMD ["help"]` (never starts a listener implicitly).
@@ -589,7 +589,7 @@ podman run --rm -p 8787:8787 -v corrtest-data:/var/lib/oscar-corrtest \
   oscar-corrtest serve --data-dir /var/lib/oscar-corrtest
 
 # run the Go test suite without installing Go
-podman run --rm -v "$PWD":/src -w /src golang:1.27.0-bookworm \
+podman run --rm -v "$PWD":/src -w /src golang:1.27.3-bookworm \
   sh -c 'GOWORK=off go test -count=1 ./...'
 ```
 

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -489,7 +490,7 @@ func verifyInstalledPack(ctx context.Context, reader *zip.ReadCloser) error {
 		if err != nil {
 			return err
 		}
-		if !f.Mode().IsRegular() || f.UncompressedSize64 > uint64(limit) || seen[f.Name] {
+		if limit < 0 || !f.Mode().IsRegular() || f.UncompressedSize64 > uint64(limit) || seen[f.Name] {
 			return fmt.Errorf("unsafe/duplicate installed entry")
 		}
 		seen[f.Name] = true
@@ -542,8 +543,7 @@ func publishInstalledFiles(ctx context.Context, destination string, files map[st
 	sort.Strings(names)
 	for _, n := range names {
 		if err = ctx.Err(); err != nil {
-			z.Close()
-			return Result{}, err
+			return Result{}, errors.Join(err, z.Close())
 		}
 		header := &zip.FileHeader{Name: n, Method: zip.Deflate}
 		header.SetMode(0600)

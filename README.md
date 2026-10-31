@@ -183,7 +183,7 @@ Configuration precedence is flags, `OSCAR_CORRTEST_*` environment variables, a v
 
 Targets persist credential references only. Secret values are resolved in memory for a request and are excluded from SQLite, reports, HTML, SSE, and evidence bundles.
 
-Go 1.27.0 or newer is required only to build from source; released binaries
+Go 1.27.3 or newer is required only to build from source; released binaries
 are CGO-free and need no Go, Python, Node, external database, or OSCAR source
 checkout.
 

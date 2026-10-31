@@ -235,7 +235,7 @@ func fixedZIPEnvelope(raw []byte, f *zip.File) error {
 		return bad()
 	}
 	offset, size := uint64(u32(end[16:])), uint64(u32(end[12:]))
-	if offset+size != uint64(len(raw)-22) || size < 46 {
+	if offset+size != uint64(len(raw))-22 || size < 46 {
 		return bad()
 	}
 	central := raw[offset : offset+size]

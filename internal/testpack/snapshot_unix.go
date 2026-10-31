@@ -3,6 +3,7 @@
 package testpack
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -75,8 +76,7 @@ func snapshotFile(root *os.File, name string, private bool) ([]byte, error) {
 	file := os.NewFile(uintptr(fd), name)
 	s, e := file.Stat()
 	if e != nil || !s.Mode().IsRegular() || (private && (s.Mode().Perm() != 0600 || s.Mode()&(os.ModeSetuid|os.ModeSetgid|os.ModeSticky) != 0)) {
-		file.Close()
-		return nil, fmt.Errorf("bounded regular private file required")
+		return nil, errors.Join(fmt.Errorf("bounded regular private file required"), file.Close())
 	}
 	raw, e := io.ReadAll(io.LimitReader(file, maxBytes+1))
 	closeErr := file.Close()

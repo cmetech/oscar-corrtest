@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -250,48 +251,41 @@ func readInstalledPack(ctx context.Context, tx *sql.Tx, runID string) (Installed
 	if err != nil {
 		return s, zero, err
 	}
+	defer rows.Close()
 	s.Attempts = []InstalledPackAttempt{}
 	for rows.Next() {
 		var index int
 		var evidenceRaw, recorded string
 		var resultRaw, completed sql.NullString
 		if err = rows.Scan(&index, &evidenceRaw, &resultRaw, &recorded, &completed); err != nil {
-			rows.Close()
 			return s, zero, err
 		}
 		if index != len(s.Attempts) || index >= 15 {
-			rows.Close()
 			return s, zero, fmt.Errorf("installed attempt sequence differs")
 		}
 		expected, _, e := m.Prepare(index)
 		if e != nil {
-			rows.Close()
 			return s, zero, e
 		}
 		want, _ := json.Marshal(expected)
 		if evidenceRaw != string(want) {
-			rows.Close()
 			return s, zero, fmt.Errorf("stored installed evidence differs")
 		}
 		at, e := parseInstalledTime(recorded)
 		if e != nil {
-			rows.Close()
 			return s, zero, e
 		}
 		a := InstalledPackAttempt{Evidence: expected, RecordedAt: at}
 		if resultRaw.Valid != completed.Valid {
-			rows.Close()
 			return s, zero, fmt.Errorf("partial installed outcome")
 		}
 		if resultRaw.Valid {
 			var result installedPackResult
 			if decodeInstalled(resultRaw.String, 2<<20, &result) != nil || result.BodySHA256 != expected.Request.BodySHA256 {
-				rows.Close()
 				return s, zero, fmt.Errorf("invalid stored installed outcome")
 			}
 			end, e := parseInstalledTime(completed.String)
 			if e != nil {
-				rows.Close()
 				return s, zero, e
 			}
 			a.Result = &result.Result
@@ -300,8 +294,7 @@ func readInstalledPack(ctx context.Context, tx *sql.Tx, runID string) (Installed
 		}
 		s.Attempts = append(s.Attempts, a)
 	}
-	err = rows.Err()
-	rows.Close()
+	err = errors.Join(rows.Err(), rows.Close())
 	if err != nil {
 		return s, zero, err
 	}

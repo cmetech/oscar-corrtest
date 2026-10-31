@@ -201,6 +201,7 @@ func sendMappedTrap(ctx context.Context, host string, port int, community, oid, 
 		return fmt.Errorf("write private SNMP config: %w", err)
 	}
 	// Net-SNMP reads defCommunity from this private file; keep it out of argv and evidence.
+	// #nosec G204 -- fixed executable and OIDs; validated target/port and generated identities, no shell.
 	cmd := exec.CommandContext(ctx, "snmptrap", "-v", "2c",
 		host+":"+strconv.Itoa(port), "", oid,
 		trapMIBBase+".1.1.1.1."+groupID, "i", groupID,

@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"reflect"
@@ -77,18 +78,15 @@ func (r *Runtime) StartTrapLoad(ctx context.Context, targetID string, o TrapLoad
 	r.activeMu.Lock()
 	defer r.activeMu.Unlock()
 	if r.closing || len(r.active) > 0 {
-		sender.Close()
-		return domain.Run{}, fmt.Errorf("wait for the active run and its cleanup before starting an SNMP load")
+		return domain.Run{}, errors.Join(fmt.Errorf("wait for the active run and its cleanup before starting an SNMP load"), sender.Close())
 	}
 	run, err := r.history.CreateRun(ctx, targetID, "", r.version)
 	if err != nil {
-		sender.Close()
-		return domain.Run{}, err
+		return domain.Run{}, errors.Join(err, sender.Close())
 	}
 	plan, err := snmpload.Compile(run.ID, o)
 	if err != nil {
-		sender.Close()
-		return domain.Run{}, err
+		return domain.Run{}, errors.Join(err, sender.Close())
 	}
 	preflight := []snmpload.Episode{}
 	seen := map[string]bool{}
@@ -96,8 +94,7 @@ func (r *Runtime) StartTrapLoad(ctx context.Context, targetID string, o TrapLoad
 		if !seen[e.Family] {
 			f, err := snmpload.Fixture(run.ID+"-pre", len(preflight), e.Family)
 			if err != nil {
-				sender.Close()
-				return domain.Run{}, err
+				return domain.Run{}, errors.Join(err, sender.Close())
 			}
 			preflight = append(preflight, f)
 			seen[e.Family] = true
@@ -109,8 +106,7 @@ func (r *Runtime) StartTrapLoad(ctx context.Context, targetID string, o TrapLoad
 		TargetHost string             `json:"targetHost"`
 	}{plan, preflight, parsed.Hostname()})
 	if err := r.database.SetRunExecutionDocuments(ctx, run.ID, json.RawMessage(`{"inputPath":"snmp-load"}`), document, time.Now().UTC()); err != nil {
-		sender.Close()
-		return domain.Run{}, err
+		return domain.Run{}, errors.Join(err, sender.Close())
 	}
 	executionCtx, cancel := context.WithCancel(r.rootCtx)
 	r.active[run.ID] = cancel
