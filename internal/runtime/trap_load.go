@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"reflect"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/domain"
@@ -134,7 +135,7 @@ func (r *Runtime) executeTrapLoad(ctx context.Context, run domain.Run, client *o
 	stable := context.WithoutCancel(ctx)
 	start := time.Now().UTC()
 	o := plan.Options
-	report := trapLoadReport{Coverage: map[string]string{"inputPath": "snmp-load", "transport": "UNACKNOWLEDGED_UDP", "rate": "NOMINAL_LOCAL_INVOCATIONS_NOT_WIRE_ARRIVALS", "receiverAdmission": "HISTORY_ONLY", "repeatReceipt": "NOT_PROVEN", "clearAttribution": "NOT_PROVEN_HISTORY_STATE_ONLY", "notificationDelivery": "NOT_TESTED", "capacityQualification": "NOT_TESTED"}}
+	report := trapLoadReport{Coverage: map[string]string{"inputPath": "snmp-load", "transport": "UNACKNOWLEDGED_UDP", "rate": "NOMINAL_LOCAL_INVOCATIONS_NOT_WIRE_ARRIVALS", "receiverAdmission": "HISTORY_ONLY", "repeatReceipt": "NOT_PROVEN", "clearAttribution": "RECEIVER_REPORTED_MATCH_NOT_INDEPENDENT_AUDIT", "notificationDelivery": "NOT_TESTED", "capacityQualification": "NOT_TESTED"}}
 	report.PlannedOffer = plan.OfferPackets
 	report.PlannedTail = len(plan.Packets) - plan.OfferPackets
 	transition := func(state domain.RunStatus, text string) error {
@@ -366,7 +367,7 @@ func (r *Runtime) executeTrapLoad(ctx context.Context, run domain.Run, client *o
 		cleanup = domain.CleanupClean
 	} else {
 		for _, v := range report.Observations {
-			if v.State == "firing" {
+			if v.ProblemFiring {
 				cleanup = domain.CleanupDirty
 			}
 		}
@@ -406,6 +407,7 @@ func waitLoadState(ctx context.Context, client *oscar.Client, episodes []snmploa
 	report.Observations = snmpload.Reconcile(episodes, nil)
 	observeCtx, cancel := context.WithTimeout(ctx, time.Duration(seconds)*time.Second)
 	defer cancel()
+	var settled []snmpload.Observation
 	for {
 		rows := []oscar.HistoryRecord{}
 		seen := map[string]bool{}
@@ -430,8 +432,16 @@ func waitLoadState(ctx context.Context, client *oscar.Client, episodes []snmploa
 				complete = complete && v.State == state
 			}
 			if complete {
-				return true
+				if state != "resolved" || reflect.DeepEqual(settled, report.Observations) {
+					return true
+				}
+				settled = append([]snmpload.Observation{}, report.Observations...)
+			} else {
+				settled = nil
 			}
+		}
+		if !readOK {
+			settled = nil
 		}
 		if !waitTrapUntil(observeCtx, time.Now().Add(2*time.Second)) {
 			return false

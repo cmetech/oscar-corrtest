@@ -60,7 +60,13 @@ elif oid.endswith(('.0.3','.0.4')):
  name='jnx_access_auth_server_status';group='jnxAccessAuthServerStatus';agent='JUNIPER-USER-AAA-MIB';clear='.0.4';severity='critical';key='jnxUserAAAServerName:'+v[0]
 else:
  name='jnx_access_auth_address_pool_threshold_status';group='jnxAccessAuthAddressPoolThresholdStatus';agent='JUNIPER-USER-AAA-MIB';clear='.0.6';key='jnxUserAAAAddressPoolName:'+v[0]
-rows[key]={'id':v[0], 'fingerprint':v[0], 'alertname':name,'original_severity':severity,'severity':severity,'status':'resolved' if oid.endswith(clear) else 'firing','labels':[{'Label':'agent','Value':agent},{'Label':'alert_group','Value':group},{'Label':'alert_key','Value':key}]}
+labels=[{'Label':'agent','Value':agent},{'Label':'alert_group','Value':group.lower()},{'Label':'alert_key','Value':key},{'Label':'correlation_key','Value':v[0]}]
+if oid.endswith(clear):
+ if key in rows:rows[key]['status']='resolved'
+ labels += [{'Label':'is_resolution','Value':'true'},{'Label':'correlation_status','Value':'success'},{'Label':'correlation_resolved_count','Value':'1'},{'Label':'correlation_value','Value':v[0]}]
+ rows[key+'-clear']={'id':v[0]+'-clear','fingerprint':v[0]+'-clear','alertname':name,'original_severity':'info','severity':'info','status':'resolved','labels':labels}
+else:
+ rows[key]={'id':v[0], 'fingerprint':v[0], 'alertname':name,'original_severity':severity,'severity':severity,'status':'firing','labels':labels}
 with open(p+'.tmp','w') as f:json.dump(rows,f)
 os.replace(p+'.tmp',p)
 `
@@ -124,7 +130,7 @@ os.replace(p+'.tmp',p)
 		t.Fatal("concurrent load accepted")
 	}
 	cancelled := false
-	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+	for deadline := time.Now().Add(45 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
 		got, _ := r.GetRun(context.Background(), run.ID)
 		if got.Status != domain.RunCompleted {
 			if mode == "cancel-clear" && !cancelled {
