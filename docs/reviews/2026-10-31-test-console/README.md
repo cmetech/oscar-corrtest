@@ -33,6 +33,8 @@ Port 8787, the installed binary, launchd service, installed configuration and da
 
 Browser checks use local fixtures. Live OSCAR behavior, deployment and other browser engines were not exercised.
 
+Latest update: [custom dropdowns, vertically centered tables and uppercase chips](widgets/README.md).
+
 ## Header, button and form refinement
 
 The subsequent refinement supersedes the original presentation below: header metadata is 14px white Hilda text, Page reference has no question-mark prefix, shared action buttons use a 40px minimum height and intrinsic width, Run test actions have separate rows, explanatory notes span the form, and chips have square corners. Filter actions remain aligned with their inputs. Runtime behavior and form submissions are unchanged.

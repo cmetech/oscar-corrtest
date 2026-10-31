@@ -1,0 +1,410 @@
+[
+  {
+    "theme": "light",
+    "size": "desktop",
+    "dropdown": {
+      "open": true,
+      "appearance": "base-select",
+      "width": 1440,
+      "scroll": 1425
+    },
+    "keyboard": {
+      "value": "flood",
+      "open": false,
+      "submitted": "flood"
+    },
+    "table": {
+      "cells": true,
+      "chips": [
+        {
+          "text": "SNMP-TRAP",
+          "transform": "uppercase"
+        },
+        {
+          "text": "TGT_0D3FZPY8EY61DDXA383SV138HS",
+          "transform": "uppercase"
+        },
+        {
+          "text": "INTERRUPTED",
+          "transform": "uppercase"
+        },
+        {
+          "text": "PENDING",
+          "transform": "uppercase"
+        },
+        {
+          "text": "UNKNOWN",
+          "transform": "uppercase"
+        },
+        {
+          "text": "SNMP-TRAP",
+          "transform": "uppercase"
+        },
+        {
+          "text": "TGT_0D3FZPY8EY61DDXA383SV138HS",
+          "transform": "uppercase"
+        },
+        {
+          "text": "COMPLETED",
+          "transform": "uppercase"
+        },
+        {
+          "text": "INCONCLUSIVE",
+          "transform": "uppercase"
+        },
+        {
+          "text": "UNKNOWN",
+          "transform": "uppercase"
+        },
+        {
+          "text": "SNMP-TRAP",
+          "transform": "uppercase"
+        },
+        {
+          "text": "TGT_0D3FZPY8EY61DDXA383SV138HS",
+          "transform": "uppercase"
+        },
+        {
+          "text": "COMPLETED",
+          "transform": "uppercase"
+        },
+        {
+          "text": "FAIL",
+          "transform": "uppercase"
+        },
+        {
+          "text": "DIRTY",
+          "transform": "uppercase"
+        },
+        {
+          "text": "SNMP-TRAP",
+          "transform": "uppercase"
+        },
+        {
+          "text": "TGT_0D3FZPY8EY61DDXA383SV138HS",
+          "transform": "uppercase"
+        },
+        {
+          "text": "COMPLETED",
+          "transform": "uppercase"
+        },
+        {
+          "text": "PASS",
+          "transform": "uppercase"
+        },
+        {
+          "text": "CLEAN",
+          "transform": "uppercase"
+        }
+      ],
+      "width": 1440,
+      "scroll": 1425
+    }
+  },
+  {
+    "theme": "light",
+    "size": "mobile",
+    "dropdown": {
+      "open": true,
+      "appearance": "base-select",
+      "width": 390,
+      "scroll": 375
+    },
+    "keyboard": {
+      "value": "flood",
+      "open": false,
+      "submitted": "flood"
+    },
+    "table": {
+      "cells": true,
+      "chips": [
+        {
+          "text": "SNMP-TRAP",
+          "transform": "uppercase"
+        },
+        {
+          "text": "TGT_0D3FZPY8EY61DDXA383SV138HS",
+          "transform": "uppercase"
+        },
+        {
+          "text": "INTERRUPTED",
+          "transform": "uppercase"
+        },
+        {
+          "text": "PENDING",
+          "transform": "uppercase"
+        },
+        {
+          "text": "UNKNOWN",
+          "transform": "uppercase"
+        },
+        {
+          "text": "SNMP-TRAP",
+          "transform": "uppercase"
+        },
+        {
+          "text": "TGT_0D3FZPY8EY61DDXA383SV138HS",
+          "transform": "uppercase"
+        },
+        {
+          "text": "COMPLETED",
+          "transform": "uppercase"
+        },
+        {
+          "text": "INCONCLUSIVE",
+          "transform": "uppercase"
+        },
+        {
+          "text": "UNKNOWN",
+          "transform": "uppercase"
+        },
+        {
+          "text": "SNMP-TRAP",
+          "transform": "uppercase"
+        },
+        {
+          "text": "TGT_0D3FZPY8EY61DDXA383SV138HS",
+          "transform": "uppercase"
+        },
+        {
+          "text": "COMPLETED",
+          "transform": "uppercase"
+        },
+        {
+          "text": "FAIL",
+          "transform": "uppercase"
+        },
+        {
+          "text": "DIRTY",
+          "transform": "uppercase"
+        },
+        {
+          "text": "SNMP-TRAP",
+          "transform": "uppercase"
+        },
+        {
+          "text": "TGT_0D3FZPY8EY61DDXA383SV138HS",
+          "transform": "uppercase"
+        },
+        {
+          "text": "COMPLETED",
+          "transform": "uppercase"
+        },
+        {
+          "text": "PASS",
+          "transform": "uppercase"
+        },
+        {
+          "text": "CLEAN",
+          "transform": "uppercase"
+        }
+      ],
+      "width": 390,
+      "scroll": 375
+    }
+  },
+  {
+    "theme": "dark",
+    "size": "desktop",
+    "dropdown": {
+      "open": true,
+      "appearance": "base-select",
+      "width": 1440,
+      "scroll": 1425
+    },
+    "keyboard": {
+      "value": "flood",
+      "open": false,
+      "submitted": "flood"
+    },
+    "table": {
+      "cells": true,
+      "chips": [
+        {
+          "text": "SNMP-TRAP",
+          "transform": "uppercase"
+        },
+        {
+          "text": "TGT_0D3FZPY8EY61DDXA383SV138HS",
+          "transform": "uppercase"
+        },
+        {
+          "text": "INTERRUPTED",
+          "transform": "uppercase"
+        },
+        {
+          "text": "PENDING",
+          "transform": "uppercase"
+        },
+        {
+          "text": "UNKNOWN",
+          "transform": "uppercase"
+        },
+        {
+          "text": "SNMP-TRAP",
+          "transform": "uppercase"
+        },
+        {
+          "text": "TGT_0D3FZPY8EY61DDXA383SV138HS",
+          "transform": "uppercase"
+        },
+        {
+          "text": "COMPLETED",
+          "transform": "uppercase"
+        },
+        {
+          "text": "INCONCLUSIVE",
+          "transform": "uppercase"
+        },
+        {
+          "text": "UNKNOWN",
+          "transform": "uppercase"
+        },
+        {
+          "text": "SNMP-TRAP",
+          "transform": "uppercase"
+        },
+        {
+          "text": "TGT_0D3FZPY8EY61DDXA383SV138HS",
+          "transform": "uppercase"
+        },
+        {
+          "text": "COMPLETED",
+          "transform": "uppercase"
+        },
+        {
+          "text": "FAIL",
+          "transform": "uppercase"
+        },
+        {
+          "text": "DIRTY",
+          "transform": "uppercase"
+        },
+        {
+          "text": "SNMP-TRAP",
+          "transform": "uppercase"
+        },
+        {
+          "text": "TGT_0D3FZPY8EY61DDXA383SV138HS",
+          "transform": "uppercase"
+        },
+        {
+          "text": "COMPLETED",
+          "transform": "uppercase"
+        },
+        {
+          "text": "PASS",
+          "transform": "uppercase"
+        },
+        {
+          "text": "CLEAN",
+          "transform": "uppercase"
+        }
+      ],
+      "width": 1440,
+      "scroll": 1425
+    }
+  },
+  {
+    "theme": "dark",
+    "size": "mobile",
+    "dropdown": {
+      "open": true,
+      "appearance": "base-select",
+      "width": 390,
+      "scroll": 375
+    },
+    "keyboard": {
+      "value": "flood",
+      "open": false,
+      "submitted": "flood"
+    },
+    "table": {
+      "cells": true,
+      "chips": [
+        {
+          "text": "SNMP-TRAP",
+          "transform": "uppercase"
+        },
+        {
+          "text": "TGT_0D3FZPY8EY61DDXA383SV138HS",
+          "transform": "uppercase"
+        },
+        {
+          "text": "INTERRUPTED",
+          "transform": "uppercase"
+        },
+        {
+          "text": "PENDING",
+          "transform": "uppercase"
+        },
+        {
+          "text": "UNKNOWN",
+          "transform": "uppercase"
+        },
+        {
+          "text": "SNMP-TRAP",
+          "transform": "uppercase"
+        },
+        {
+          "text": "TGT_0D3FZPY8EY61DDXA383SV138HS",
+          "transform": "uppercase"
+        },
+        {
+          "text": "COMPLETED",
+          "transform": "uppercase"
+        },
+        {
+          "text": "INCONCLUSIVE",
+          "transform": "uppercase"
+        },
+        {
+          "text": "UNKNOWN",
+          "transform": "uppercase"
+        },
+        {
+          "text": "SNMP-TRAP",
+          "transform": "uppercase"
+        },
+        {
+          "text": "TGT_0D3FZPY8EY61DDXA383SV138HS",
+          "transform": "uppercase"
+        },
+        {
+          "text": "COMPLETED",
+          "transform": "uppercase"
+        },
+        {
+          "text": "FAIL",
+          "transform": "uppercase"
+        },
+        {
+          "text": "DIRTY",
+          "transform": "uppercase"
+        },
+        {
+          "text": "SNMP-TRAP",
+          "transform": "uppercase"
+        },
+        {
+          "text": "TGT_0D3FZPY8EY61DDXA383SV138HS",
+          "transform": "uppercase"
+        },
+        {
+          "text": "COMPLETED",
+          "transform": "uppercase"
+        },
+        {
+          "text": "PASS",
+          "transform": "uppercase"
+        },
+        {
+          "text": "CLEAN",
+          "transform": "uppercase"
+        }
+      ],
+      "width": 390,
+      "scroll": 375
+    }
+  }
+]

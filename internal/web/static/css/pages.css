@@ -191,7 +191,7 @@ pre { overflow: auto; white-space: pre-wrap; }
 .authoring-schema-filter label { min-width: 0; }
 .authoring-schema .data-table-wrapper { width: 100%; max-width: 100%; }
 .authoring-schema table { min-width: 1440px; font-size: 12px; }
-.authoring-schema td { vertical-align: top; }
+.authoring-schema td { vertical-align: middle; }
 .authoring-schema td:nth-child(n+6) { min-width: 145px; }
 .authoring-schema [data-schema-row][hidden] { display: none; }
 .authoring-reference-grid { display: grid; gap: var(--ct-space-3); grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -368,7 +368,7 @@ pre { overflow: auto; white-space: pre-wrap; }
 .workflow-card p { color: var(--ct-fg-muted); }
 .workflow-link { margin-top: auto; color: var(--ct-accent); font-size: 14px; font-weight: 500; }
 th { background: var(--ct-bg); font-weight: 500; text-transform: none; }
-td { vertical-align: top; font-size: 14px; }
+td { vertical-align: middle; font-size: 14px; }
 tbody tr:hover { background: var(--ct-card-hover); }
 tbody tr:last-child td { border-bottom: 0; }
 pre { padding: 16px; border: 1px solid var(--ct-border); border-radius: 4px; background: var(--ct-bg); overflow-wrap: anywhere; font-size: 12px; }
@@ -409,3 +409,42 @@ td { overflow-wrap: anywhere; }
 .primary-button { border: 1px solid transparent; }
 input, select { min-height: 40px; }
 .filter-bar > button, .authoring-controls > button, .authoring-schema-filter > button { align-self: end; }
+
+th { vertical-align: middle; }
+.status-pill, .token, .runtime-badge, .method-badge { text-transform: uppercase; }
+
+/* Keep native form/keyboard semantics while styling the control and supported pickers. */
+select {
+  appearance: none;
+  padding-inline: 12px 40px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ct-fg-muted) 50%), linear-gradient(135deg, var(--ct-fg-muted) 50%, transparent 50%);
+  background-position: calc(100% - 19px) center, calc(100% - 14px) center;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+select:hover:not(:disabled) { border-color: var(--ct-accent); background-color: var(--ct-card-hover); }
+select:focus-visible { border-color: var(--ct-accent); }
+select:disabled { opacity: .6; cursor: not-allowed; }
+select option { background: var(--ct-card); color: var(--ct-fg); }
+/* shortcut: older browsers retain native popups; revisit if custom menus are required there. */
+@supports (appearance: base-select) {
+  select, select::picker(select) { appearance: base-select; }
+  select { align-items: center; gap: 12px; padding-inline: 12px; background-image: none; }
+  select::picker-icon {
+    content: ""; width: 7px; height: 7px; margin-inline-start: auto; flex-shrink: 0;
+    border-right: 2px solid var(--ct-fg-muted); border-bottom: 2px solid var(--ct-fg-muted);
+    transform: translateY(-2px) rotate(45deg);
+  }
+  select:open::picker-icon { transform: translateY(2px) rotate(225deg); }
+  select::picker(select) {
+    margin-block: 6px; padding: 4px; max-height: min(320px, 60vh); max-width: calc(100vw - 32px);
+    overflow: auto; border: 1px solid var(--ct-control-border); border-radius: 4px;
+    background: var(--ct-card); color: var(--ct-fg); box-shadow: 0 8px 24px rgb(0 0 0 / 20%);
+    font-family: var(--ct-font-sans); font-size: 14px;
+  }
+  select option { display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 8px 12px; white-space: normal; cursor: pointer; }
+  select option:checked { background: var(--ct-card-hover); font-weight: 500; }
+  select option:hover, select option:focus { background: var(--ct-card-hover); outline: 2px solid var(--ct-accent); outline-offset: -2px; }
+  select option::checkmark { color: var(--ct-accent); }
+}
