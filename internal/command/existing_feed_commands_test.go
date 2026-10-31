@@ -66,7 +66,7 @@ func (f *ownedFeedCommandRuntime) ExecuteOwnedExistingFeed(_ context.Context, p 
 
 func ownedFeedCommandPlan(t *testing.T) runner.OwnedExistingFeedPlan {
 	t.Helper()
-	snapshot, err := os.ReadFile("../oscar/testdata/existing_feed/splunk.json")
+	snapshot, err := os.ReadFile(filepath.Join("..", "oscar", "testdata", "existing_feed", "splunk.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

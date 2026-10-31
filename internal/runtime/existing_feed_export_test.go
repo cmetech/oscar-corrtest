@@ -41,7 +41,7 @@ func TestOwnedExistingFeedExportRetainsValidatedDurableOutcomes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			snapshot, err := os.ReadFile("../oscar/testdata/existing_feed/splunk.json")
+			snapshot, err := os.ReadFile(filepath.Join("..", "oscar", "testdata", "existing_feed", "splunk.json"))
 			if err != nil {
 				t.Fatal(err)
 			}

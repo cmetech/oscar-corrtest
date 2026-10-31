@@ -37,7 +37,7 @@ func testOwnedExistingFeedRunner(t *testing.T, profile string) {
 				t.Fatal(err)
 			}
 			defer db.Close()
-			snapshot, err := os.ReadFile("../oscar/testdata/existing_feed/" + profile + ".json")
+			snapshot, err := os.ReadFile(filepath.Join("..", "oscar", "testdata", "existing_feed", profile+".json"))
 			if err != nil {
 				t.Fatal(err)
 			}

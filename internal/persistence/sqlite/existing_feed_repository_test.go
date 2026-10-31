@@ -21,7 +21,7 @@ import (
 
 func feedManifest(t *testing.T, origin string) oscar.ExistingFeedManifestSpec {
 	t.Helper()
-	body, err := os.ReadFile("../../oscar/testdata/existing_feed/splunk.json")
+	body, err := os.ReadFile(filepath.Join("..", "..", "oscar", "testdata", "existing_feed", "splunk.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
