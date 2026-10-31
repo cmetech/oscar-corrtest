@@ -22,7 +22,7 @@ No Python, Node, Docker, frontend toolchain, OSCAR source checkout, or CGO is re
 | `vet` | Run `go vet` over every package |
 | `security` | Run the pinned static and vulnerability scanners |
 | `test` | Run the complete test suite without cached results |
-| `test-race` | Run the complete suite with the race detector |
+| `test-race` | Run the complete suite with the race detector (30-minute per-package limit for the expanded SQLite/runner suite) |
 | `plan2-gate` | Run focused configuration, migration/WAL/recovery, artifact/report, backup, runtime, and UI tests |
 | `plan3-gate` … `plan7-gate` | Run focused qualification for each correlation delivery plan |
 | `build` | Build the host binary in `bin/` with linker metadata |
