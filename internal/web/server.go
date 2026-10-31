@@ -116,6 +116,10 @@ type savedRunStarter interface {
 	StartSavedScenario(context.Context, string, string, string) (domain.Run, error)
 }
 
+type trapLoadStarter interface {
+	StartTrapLoad(context.Context, string, appruntime.TrapLoadOptions) (domain.Run, error)
+}
+
 type trapRunStarter interface {
 	StartTrapCheck(context.Context, string, appruntime.TrapCheckOptions) (domain.Run, error)
 }
@@ -539,6 +543,41 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 			return
 		}
 		run, err := starter.StartSavedScenario(r.Context(), r.FormValue("target_id"), r.FormValue("scenario_id"), mode)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+		http.Redirect(w, r, "/runs/"+url.PathEscape(run.ID), http.StatusSeeOther)
+	})
+	mux.HandleFunc("POST /runs/trap-load", func(w http.ResponseWriter, r *http.Request) {
+		starter, ok := data.(trapLoadStarter)
+		if !ok || csrfErr != nil {
+			http.Error(w, "SNMP load execution unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "invalid run form", http.StatusBadRequest)
+			return
+		}
+		if !sameOrigin(r) || !validCSRF(r, csrfSecret) {
+			http.Error(w, "request origin or CSRF token is invalid", http.StatusForbidden)
+			return
+		}
+		options := appruntime.TrapLoadOptions{Profile: r.FormValue("profile")}
+		for key, field := range map[string]*int{"trap_port": &options.Port, "rate": &options.Rate, "duration": &options.Duration, "clear_delay": &options.ClearDelay, "drain_timeout": &options.DrainTimeout} {
+			value, err := strconv.Atoi(r.FormValue(key))
+			if err != nil {
+				http.Error(w, "SNMP load fields must be whole numbers", http.StatusUnprocessableEntity)
+				return
+			}
+			*field = value
+		}
+		if err := options.Validate(); err != nil {
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+		run, err := starter.StartTrapLoad(r.Context(), r.FormValue("target_id"), options)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 			return

@@ -630,6 +630,9 @@ func (r *Runtime) RetryCleanup(ctx context.Context, runID string) (domain.Run, e
 		InputPath string `json:"inputPath"`
 	}
 	_ = json.Unmarshal(run.CompiledPlanJSON, &plan)
+	if plan.InputPath == "snmp-load" || plan.InputPath == "snmp-trap" {
+		return run, fmt.Errorf("SNMP source outcomes require external reconciliation; generic cleanup cannot discharge UDP responsibility")
+	}
 	if run.InputPath() == "installed-test-pack" || plan.InputPath == "installed-test-pack" {
 		return run, fmt.Errorf("installed test-pack requires external reconciliation; generic cleanup cannot delete installed configuration or discharge source responsibility")
 	}

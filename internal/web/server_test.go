@@ -562,6 +562,7 @@ func TestRunTestPageStartsReceiverChecksWithCSRF(t *testing.T) {
 	}{
 		{"/runs/webhook", url.Values{"target_id": {"tgt_lab"}, "pipeline_mode": {"phase_b_dispatch"}}},
 		{"/runs/trap", url.Values{"target_id": {"tgt_lab"}, "trap_port": {"1162"}}},
+		{"/runs/trap-load", url.Values{"target_id": {"tgt_lab"}, "trap_port": {"1162"}, "profile": {"mixed"}, "rate": {"5"}, "duration": {"60"}, "clear_delay": {"30"}, "drain_timeout": {"300"}}},
 	} {
 		test.fields.Set("csrf_token", match[1])
 		post := httptest.NewRequest(http.MethodPost, "http://example.com"+test.path, strings.NewReader(test.fields.Encode()))
@@ -574,7 +575,7 @@ func TestRunTestPageStartsReceiverChecksWithCSRF(t *testing.T) {
 			t.Fatalf("%s: status=%d body=%s", test.path, response.Code, response.Body.String())
 		}
 	}
-	if data.webhookMode != "phase_b_dispatch" || data.trapOptions.Port != 1162 {
+	if data.webhookMode != "phase_b_dispatch" || data.trapOptions.Port != 1162 || data.loadOptions.Rate != 5 || data.loadOptions.Profile != "mixed" {
 		t.Fatalf("receiver args: %+v", data)
 	}
 }
@@ -1578,6 +1579,7 @@ type receiverUIData struct {
 	runUIData
 	webhookMode string
 	trapOptions appruntime.TrapCheckOptions
+	loadOptions appruntime.TrapLoadOptions
 }
 
 func (d *receiverUIData) StartOrdinaryWebhook(_ context.Context, targetID, mode string) (domain.Run, error) {
@@ -1585,6 +1587,17 @@ func (d *receiverUIData) StartOrdinaryWebhook(_ context.Context, targetID, mode 
 		return domain.Run{}, errors.New("wrong target")
 	}
 	d.webhookMode = mode
+	return domain.Run{ID: "crt_ui", ShortToken: "00000001", Status: domain.RunQueued, CleanupStatus: domain.CleanupNotRequired}, nil
+}
+
+func (d *receiverUIData) StartTrapLoad(_ context.Context, targetID string, options appruntime.TrapLoadOptions) (domain.Run, error) {
+	if targetID != "tgt_lab" {
+		return domain.Run{}, errors.New("wrong target")
+	}
+	if err := options.Validate(); err != nil {
+		return domain.Run{}, err
+	}
+	d.loadOptions = options
 	return domain.Run{ID: "crt_ui", ShortToken: "00000001", Status: domain.RunQueued, CleanupStatus: domain.CleanupNotRequired}, nil
 }
 
@@ -1851,4 +1864,53 @@ type deadlineResponseWriter struct {
 func (w *deadlineResponseWriter) SetWriteDeadline(deadline time.Time) error {
 	w.deadlines = append(w.deadlines, deadline)
 	return nil
+}
+
+func TestSNMPLoadRejectsUnsafeOrInvalidForms(t *testing.T) {
+	for _, tc := range []struct {
+		name, field, value, origin string
+		status                     int
+	}{
+		{"csrf", "csrf_token", "wrong", "http://example.com", 403},
+		{"origin", "rate", "5", "http://foreign.example", 403},
+		{"decimal", "rate", "5.5", "http://example.com", 422},
+		{"over-limit", "rate", "26", "http://example.com", 422},
+		{"family", "profile", "unknown", "http://example.com", 422},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := &receiverUIData{}
+			handler := NewHandlerWithData(version.Info{}, data)
+			page := httptest.NewRecorder()
+			handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "http://example.com/run-test", nil))
+			token := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(page.Body.String())[1]
+			fields := url.Values{"csrf_token": {token}, "target_id": {"tgt_lab"}, "trap_port": {"1162"}, "profile": {"mixed"}, "rate": {"5"}, "duration": {"60"}, "clear_delay": {"30"}, "drain_timeout": {"300"}}
+			fields.Set(tc.field, tc.value)
+			req := httptest.NewRequest(http.MethodPost, "http://example.com/runs/trap-load", strings.NewReader(fields.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("Origin", tc.origin)
+			req.AddCookie(page.Result().Cookies()[0])
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, req)
+			if response.Code != tc.status || data.loadOptions.Rate != 0 {
+				t.Fatalf("status %d, dispatched %+v", response.Code, data.loadOptions)
+			}
+		})
+	}
+}
+
+type snmpLoadUIData struct{ runUIData }
+
+func (d *snmpLoadUIData) GetRun(ctx context.Context, id string) (domain.Run, error) {
+	run, err := d.runUIData.GetRun(ctx, id)
+	run.CompiledPlanJSON = []byte(`{"inputPath":"snmp-load"}`)
+	return run, err
+}
+func TestSNMPLoadDetailExplainsItsCoverage(t *testing.T) {
+	handler := NewHandlerWithData(version.Info{}, &snmpLoadUIData{})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://example.com/runs/crt_ui", nil))
+	body := response.Body.String()
+	if response.Code != 200 || !strings.Contains(body, "local send rate") || strings.Contains(body, "bypassing receiver admission") {
+		t.Fatalf("wrong SNMP load coverage: %d", response.Code)
+	}
 }
