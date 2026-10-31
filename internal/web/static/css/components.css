@@ -1,7 +1,7 @@
 .theme-toggle {
   display: inline-grid;
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   place-items: center;
   border: 1px solid rgb(255 255 255 / 45%);
   border-radius: var(--ct-radius-input);
@@ -162,7 +162,7 @@
   .confirm-dialog__actions { padding-inline: var(--ct-space-4); }
   .confirm-dialog__warning { margin-inline: var(--ct-space-4); }
   .confirm-dialog__actions { flex-direction: column-reverse; }
-  .confirm-dialog__actions button { width: 100%; }
+  .confirm-dialog__actions button { width: fit-content; }
 }
 
 .theme-toggle:hover {
@@ -264,3 +264,5 @@ h1 {
 
 h1 { font-weight: 300; }
 h2 { font-size: 20px; font-weight: 500; }
+
+.reference-button { min-height: 40px; padding: 8px 16px; font-size: 14px; font-weight: 500; line-height: 22px; }

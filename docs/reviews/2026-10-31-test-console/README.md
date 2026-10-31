@@ -33,7 +33,17 @@ Port 8787, the installed binary, launchd service, installed configuration and da
 
 Browser checks use local fixtures. Live OSCAR behavior, deployment and other browser engines were not exercised.
 
-## Screenshots
+## Header, button and form refinement
+
+The subsequent refinement supersedes the original presentation below: header metadata is 14px white Hilda text, Page reference has no question-mark prefix, shared action buttons use a 40px minimum height and intrinsic width, Run test actions have separate rows, explanatory notes span the form, and chips have square corners. Filter actions remain aligned with their inputs. Runtime behavior and form submissions are unchanged.
+
+`go test ./internal/web ./internal/command`, preview build and `git diff --check` passed. Sixteen browser layout checks cover Run test, Targets, Runs and Operations in both themes at desktop/mobile widths; see [checks](refinement/checks.json) and [test output](refinement/tests.log).
+
+Updated screenshots: [Run test — dark desktop](refinement/run-test-dark-desktop.png), [Run test — light mobile](refinement/run-test-light-mobile.png), [Runs — light desktop](refinement/runs-light-desktop.png).
+
+The refreshed read-only preview remains on http://127.0.0.1:8797, using `/tmp/oscar-console-preview/preview-refined-final`. No installed service or live OSCAR traffic was used.
+
+## Original screenshots
 
 | Page | Dark desktop | Light desktop | Dark mobile | Light mobile |
 |---|---|---|---|---|

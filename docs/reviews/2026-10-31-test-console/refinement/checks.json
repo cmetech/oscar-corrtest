@@ -1,0 +1,682 @@
+[
+  {
+    "width": 1440,
+    "scroll": 1425,
+    "headerFont": "14px",
+    "reference": "Page reference",
+    "chips": [],
+    "buttons": [
+      {
+        "text": "Start run",
+        "width": 88.125,
+        "height": 40,
+        "parent": 1030
+      },
+      {
+        "text": "Start webhook receiver scenario",
+        "width": 229.125,
+        "height": 40,
+        "parent": 1030
+      },
+      {
+        "text": "Start SNMP receiver check",
+        "width": 193.65625,
+        "height": 40,
+        "parent": 1030
+      },
+      {
+        "text": "Start SNMP load test",
+        "width": 160.875,
+        "height": 40,
+        "parent": 1030
+      }
+    ],
+    "page": "run-test",
+    "theme": "dark",
+    "size": "desktop"
+  },
+  {
+    "width": 1440,
+    "scroll": 1425,
+    "headerFont": "14px",
+    "reference": "Page reference",
+    "chips": [
+      "0px"
+    ],
+    "buttons": [
+      {
+        "text": "Add target",
+        "width": 99.1875,
+        "height": 40,
+        "parent": 1103
+      }
+    ],
+    "page": "targets",
+    "theme": "dark",
+    "size": "desktop"
+  },
+  {
+    "width": 1440,
+    "scroll": 1425,
+    "headerFont": "14px",
+    "reference": "Page reference",
+    "chips": [
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px"
+    ],
+    "buttons": [
+      {
+        "text": "Apply filters",
+        "width": 107.328125,
+        "height": 40,
+        "parent": 1153
+      }
+    ],
+    "page": "runs",
+    "theme": "dark",
+    "size": "desktop"
+  },
+  {
+    "width": 1440,
+    "scroll": 1425,
+    "headerFont": "14px",
+    "reference": "Page reference",
+    "chips": [
+      "0px",
+      "0px"
+    ],
+    "buttons": [
+      {
+        "text": "Save and use for new OSCAR requests",
+        "width": 266.375,
+        "height": 40,
+        "parent": 326
+      },
+      {
+        "text": "Clear managed key",
+        "width": 150.984375,
+        "height": 40,
+        "parent": 326
+      },
+      {
+        "text": "install",
+        "width": 73.21875,
+        "height": 40,
+        "parent": 73.21875
+      },
+      {
+        "text": "start",
+        "width": 64.546875,
+        "height": 40,
+        "parent": 64.546875
+      },
+      {
+        "text": "stop",
+        "width": 62.140625,
+        "height": 40,
+        "parent": 62.140625
+      },
+      {
+        "text": "restart",
+        "width": 79.015625,
+        "height": 40,
+        "parent": 79.015625
+      },
+      {
+        "text": "uninstall",
+        "width": 88.53125,
+        "height": 40,
+        "parent": 88.53125
+      },
+      {
+        "text": "Pause",
+        "width": 71.4375,
+        "height": 40,
+        "parent": 386.15625
+      },
+      {
+        "text": "Clear view",
+        "width": 97.6875,
+        "height": 40,
+        "parent": 386.15625
+      },
+      {
+        "text": "Download application.jsonl",
+        "width": 201.03125,
+        "height": 40,
+        "parent": 386.15625
+      }
+    ],
+    "page": "operations",
+    "theme": "dark",
+    "size": "desktop"
+  },
+  {
+    "width": 390,
+    "scroll": 375,
+    "headerFont": "14px",
+    "reference": "Page reference",
+    "chips": [],
+    "buttons": [
+      {
+        "text": "Start run",
+        "width": 88.125,
+        "height": 40,
+        "parent": 309
+      },
+      {
+        "text": "Start webhook receiver scenario",
+        "width": 229.125,
+        "height": 40,
+        "parent": 309
+      },
+      {
+        "text": "Start SNMP receiver check",
+        "width": 193.65625,
+        "height": 40,
+        "parent": 309
+      },
+      {
+        "text": "Start SNMP load test",
+        "width": 160.875,
+        "height": 40,
+        "parent": 309
+      }
+    ],
+    "page": "run-test",
+    "theme": "dark",
+    "size": "mobile"
+  },
+  {
+    "width": 390,
+    "scroll": 375,
+    "headerFont": "14px",
+    "reference": "Page reference",
+    "chips": [
+      "0px"
+    ],
+    "buttons": [
+      {
+        "text": "Add target",
+        "width": 99.1875,
+        "height": 40,
+        "parent": 309
+      }
+    ],
+    "page": "targets",
+    "theme": "dark",
+    "size": "mobile"
+  },
+  {
+    "width": 390,
+    "scroll": 375,
+    "headerFont": "14px",
+    "reference": "Page reference",
+    "chips": [
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px"
+    ],
+    "buttons": [
+      {
+        "text": "Apply filters",
+        "width": 107.328125,
+        "height": 40,
+        "parent": 343
+      }
+    ],
+    "page": "runs",
+    "theme": "dark",
+    "size": "mobile"
+  },
+  {
+    "width": 390,
+    "scroll": 375,
+    "headerFont": "14px",
+    "reference": "Page reference",
+    "chips": [
+      "0px",
+      "0px"
+    ],
+    "buttons": [
+      {
+        "text": "Save and use for new OSCAR requests",
+        "width": 266.375,
+        "height": 40,
+        "parent": 309
+      },
+      {
+        "text": "Clear managed key",
+        "width": 150.984375,
+        "height": 40,
+        "parent": 309
+      },
+      {
+        "text": "install",
+        "width": 73.21875,
+        "height": 40,
+        "parent": 73.21875
+      },
+      {
+        "text": "start",
+        "width": 64.546875,
+        "height": 40,
+        "parent": 64.546875
+      },
+      {
+        "text": "stop",
+        "width": 62.140625,
+        "height": 40,
+        "parent": 62.140625
+      },
+      {
+        "text": "restart",
+        "width": 79.015625,
+        "height": 40,
+        "parent": 79.015625
+      },
+      {
+        "text": "uninstall",
+        "width": 88.53125,
+        "height": 40,
+        "parent": 88.53125
+      },
+      {
+        "text": "Pause",
+        "width": 71.4375,
+        "height": 40,
+        "parent": 277
+      },
+      {
+        "text": "Clear view",
+        "width": 97.6875,
+        "height": 40,
+        "parent": 277
+      },
+      {
+        "text": "Download application.jsonl",
+        "width": 201.03125,
+        "height": 40,
+        "parent": 277
+      }
+    ],
+    "page": "operations",
+    "theme": "dark",
+    "size": "mobile"
+  },
+  {
+    "width": 1440,
+    "scroll": 1425,
+    "headerFont": "14px",
+    "reference": "Page reference",
+    "chips": [],
+    "buttons": [
+      {
+        "text": "Start run",
+        "width": 88.125,
+        "height": 40,
+        "parent": 1030
+      },
+      {
+        "text": "Start webhook receiver scenario",
+        "width": 229.125,
+        "height": 40,
+        "parent": 1030
+      },
+      {
+        "text": "Start SNMP receiver check",
+        "width": 193.65625,
+        "height": 40,
+        "parent": 1030
+      },
+      {
+        "text": "Start SNMP load test",
+        "width": 160.875,
+        "height": 40,
+        "parent": 1030
+      }
+    ],
+    "page": "run-test",
+    "theme": "light",
+    "size": "desktop"
+  },
+  {
+    "width": 1440,
+    "scroll": 1425,
+    "headerFont": "14px",
+    "reference": "Page reference",
+    "chips": [
+      "0px"
+    ],
+    "buttons": [
+      {
+        "text": "Add target",
+        "width": 99.1875,
+        "height": 40,
+        "parent": 1103
+      }
+    ],
+    "page": "targets",
+    "theme": "light",
+    "size": "desktop"
+  },
+  {
+    "width": 1440,
+    "scroll": 1425,
+    "headerFont": "14px",
+    "reference": "Page reference",
+    "chips": [
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px"
+    ],
+    "buttons": [
+      {
+        "text": "Apply filters",
+        "width": 107.328125,
+        "height": 40,
+        "parent": 1153
+      }
+    ],
+    "page": "runs",
+    "theme": "light",
+    "size": "desktop"
+  },
+  {
+    "width": 1440,
+    "scroll": 1425,
+    "headerFont": "14px",
+    "reference": "Page reference",
+    "chips": [
+      "0px",
+      "0px"
+    ],
+    "buttons": [
+      {
+        "text": "Save and use for new OSCAR requests",
+        "width": 266.375,
+        "height": 40,
+        "parent": 326
+      },
+      {
+        "text": "Clear managed key",
+        "width": 150.984375,
+        "height": 40,
+        "parent": 326
+      },
+      {
+        "text": "install",
+        "width": 73.21875,
+        "height": 40,
+        "parent": 73.21875
+      },
+      {
+        "text": "start",
+        "width": 64.546875,
+        "height": 40,
+        "parent": 64.546875
+      },
+      {
+        "text": "stop",
+        "width": 62.140625,
+        "height": 40,
+        "parent": 62.140625
+      },
+      {
+        "text": "restart",
+        "width": 79.015625,
+        "height": 40,
+        "parent": 79.015625
+      },
+      {
+        "text": "uninstall",
+        "width": 88.53125,
+        "height": 40,
+        "parent": 88.53125
+      },
+      {
+        "text": "Pause",
+        "width": 71.4375,
+        "height": 40,
+        "parent": 386.15625
+      },
+      {
+        "text": "Clear view",
+        "width": 97.6875,
+        "height": 40,
+        "parent": 386.15625
+      },
+      {
+        "text": "Download application.jsonl",
+        "width": 201.03125,
+        "height": 40,
+        "parent": 386.15625
+      }
+    ],
+    "page": "operations",
+    "theme": "light",
+    "size": "desktop"
+  },
+  {
+    "width": 390,
+    "scroll": 375,
+    "headerFont": "14px",
+    "reference": "Page reference",
+    "chips": [],
+    "buttons": [
+      {
+        "text": "Start run",
+        "width": 88.125,
+        "height": 40,
+        "parent": 309
+      },
+      {
+        "text": "Start webhook receiver scenario",
+        "width": 229.125,
+        "height": 40,
+        "parent": 309
+      },
+      {
+        "text": "Start SNMP receiver check",
+        "width": 193.65625,
+        "height": 40,
+        "parent": 309
+      },
+      {
+        "text": "Start SNMP load test",
+        "width": 160.875,
+        "height": 40,
+        "parent": 309
+      }
+    ],
+    "page": "run-test",
+    "theme": "light",
+    "size": "mobile"
+  },
+  {
+    "width": 390,
+    "scroll": 375,
+    "headerFont": "14px",
+    "reference": "Page reference",
+    "chips": [
+      "0px"
+    ],
+    "buttons": [
+      {
+        "text": "Add target",
+        "width": 99.1875,
+        "height": 40,
+        "parent": 309
+      }
+    ],
+    "page": "targets",
+    "theme": "light",
+    "size": "mobile"
+  },
+  {
+    "width": 390,
+    "scroll": 375,
+    "headerFont": "14px",
+    "reference": "Page reference",
+    "chips": [
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px",
+      "0px"
+    ],
+    "buttons": [
+      {
+        "text": "Apply filters",
+        "width": 107.328125,
+        "height": 40,
+        "parent": 343
+      }
+    ],
+    "page": "runs",
+    "theme": "light",
+    "size": "mobile"
+  },
+  {
+    "width": 390,
+    "scroll": 375,
+    "headerFont": "14px",
+    "reference": "Page reference",
+    "chips": [
+      "0px",
+      "0px"
+    ],
+    "buttons": [
+      {
+        "text": "Save and use for new OSCAR requests",
+        "width": 266.375,
+        "height": 40,
+        "parent": 309
+      },
+      {
+        "text": "Clear managed key",
+        "width": 150.984375,
+        "height": 40,
+        "parent": 309
+      },
+      {
+        "text": "install",
+        "width": 73.21875,
+        "height": 40,
+        "parent": 73.21875
+      },
+      {
+        "text": "start",
+        "width": 64.546875,
+        "height": 40,
+        "parent": 64.546875
+      },
+      {
+        "text": "stop",
+        "width": 62.140625,
+        "height": 40,
+        "parent": 62.140625
+      },
+      {
+        "text": "restart",
+        "width": 79.015625,
+        "height": 40,
+        "parent": 79.015625
+      },
+      {
+        "text": "uninstall",
+        "width": 88.53125,
+        "height": 40,
+        "parent": 88.53125
+      },
+      {
+        "text": "Pause",
+        "width": 71.4375,
+        "height": 40,
+        "parent": 277
+      },
+      {
+        "text": "Clear view",
+        "width": 97.6875,
+        "height": 40,
+        "parent": 277
+      },
+      {
+        "text": "Download application.jsonl",
+        "width": 201.03125,
+        "height": 40,
+        "parent": 277
+      }
+    ],
+    "page": "operations",
+    "theme": "light",
+    "size": "mobile"
+  }
+]
