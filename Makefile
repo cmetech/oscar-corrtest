@@ -11,8 +11,8 @@ BUILD_DATE ?= $(shell git show -s --format=%cI HEAD 2>/dev/null || echo unknown)
 SOURCE_DATE_EPOCH ?= $(shell git show -s --format=%ct HEAD 2>/dev/null || echo 0)
 LDFLAGS := -s -w -X github.com/cmetech/oscar-corrtest/internal/version.Version=$(VERSION) -X github.com/cmetech/oscar-corrtest/internal/version.Commit=$(COMMIT) -X github.com/cmetech/oscar-corrtest/internal/version.BuildDate=$(BUILD_DATE)
 GO_BUILD := GOWORK=off CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="$(LDFLAGS)"
-GOSEC_VERSION := v2.28.0
-GOVULNCHECK_VERSION := v1.6.0
+GOSEC_VERSION := v2.30.0
+GOVULNCHECK_VERSION := v1.9.0
 
 .DEFAULT_GOAL := build
 
