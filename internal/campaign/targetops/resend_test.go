@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -124,5 +125,24 @@ func TestResendOther409IsTypedConflictAndDeleteReturnsRevision(t *testing.T) {
 	}
 	if rev, err := Deactivate(context.Background(), c, "p", "n", "ticket", 1); err != nil || rev != 9 {
 		t.Fatal(rev, err)
+	}
+}
+
+func TestListPoliciesQueryAndPaging(t *testing.T) {
+	var queries []string
+	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.RawQuery)
+		if r.URL.Query().Get("offset") == "0" {
+			w.Write([]byte(`{"items":[{"id":"p1","status":"draft","definition":{"name":"Campaign-x-R1"}}],"total":2}`))
+			return
+		}
+		w.Write([]byte(`{"items":[{"id":"p2","status":"active","definition":{"name":"Campaign-x-R1b"}}],"total":2}`))
+	}))
+	got, err := ListPolicies(context.Background(), c, "n1", "notification", "Campaign-x-R1")
+	if err != nil || len(got) != 2 || got[1] != (PolicyItem{ID: "p2", Name: "Campaign-x-R1b", Status: "active"}) {
+		t.Fatal(got, err)
+	}
+	if !strings.Contains(queries[0], "name_filter=Campaign-x-R1") || !strings.Contains(queries[0], "notifier_id=n1") || !strings.Contains(queries[0], "action=notification") {
+		t.Fatalf("query %s", queries[0])
 	}
 }

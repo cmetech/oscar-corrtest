@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -170,4 +171,38 @@ func Preview(ctx context.Context, c *oscar.Client, def PolicyDefinition, sample 
 	}
 	err := c.DoJSON(ctx, http.MethodPost, resendPath+"/preview", nil, map[string]any{"definition": def, "sample_properties": sample}, &resp)
 	return resp.Matched, mapResendErr(err)
+}
+
+// PolicyItem is one row of the resend policy list.
+type PolicyItem struct {
+	ID, Name, Status string // status: draft | active
+}
+
+// ListPolicies lists a notifier/action's policies whose name contains
+// nameFilter (GET /api/v1/resend-policies?notifier_id=&action=&name_filter=).
+func ListPolicies(ctx context.Context, c *oscar.Client, notifierID, action, nameFilter string) ([]PolicyItem, error) {
+	var out []PolicyItem
+	for offset := 0; ; offset += 100 {
+		q := url.Values{"notifier_id": {notifierID}, "action": {action}, "name_filter": {nameFilter},
+			"limit": {"100"}, "offset": {strconv.Itoa(offset)}}
+		var resp struct {
+			Items []struct {
+				ID         string `json:"id"`
+				Status     string `json:"status"`
+				Definition struct {
+					Name string `json:"name"`
+				} `json:"definition"`
+			} `json:"items"`
+			Total int `json:"total"`
+		}
+		if err := c.DoJSON(ctx, http.MethodGet, resendPath, q, nil, &resp); err != nil {
+			return nil, mapResendErr(err)
+		}
+		for _, it := range resp.Items {
+			out = append(out, PolicyItem{ID: it.ID, Name: it.Definition.Name, Status: it.Status})
+		}
+		if len(resp.Items) == 0 || len(out) >= resp.Total || offset >= 100000 {
+			return out, nil
+		}
+	}
 }

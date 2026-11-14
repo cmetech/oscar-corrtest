@@ -1,10 +1,13 @@
 package targetops
 
 import (
+	"slices"
+
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	corr "github.com/cmetech/oscar-corrtest/internal/scenario"
 	"io"
 	"net/http"
 	"net/url"
@@ -177,12 +180,42 @@ func (s *SNOW) OpenCampaignIncidents(ctx context.Context, campaignRun string) ([
 	if !runIDPattern.MatchString(campaignRun) {
 		return nil, fmt.Errorf("invalid campaign run id")
 	}
-	marker := "Campaign-" + campaignRun + "-"
+	return s.openIncidentsWithPrefix(ctx, "Campaign-"+campaignRun+"-")
+}
+
+// shortTokenPattern is a run's 8-character Crockford short token (domain.RunID.Short).
+var shortTokenPattern = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{8}$`)
+
+// OpenCorrTestIncidents lists open incidents for one correlation run's
+// source alerts: short descriptions starting with the compiler's exact
+// "[CORRTEST][<pattern>][TRIGGER|NON-TRIGGER][<TOKEN>]" prefix.
+func (s *SNOW) OpenCorrTestIncidents(ctx context.Context, pattern, shortToken string) ([]Incident, error) {
+	token := strings.ToUpper(shortToken)
+	if !slices.Contains(corr.SupportedPatterns(), pattern) {
+		return nil, fmt.Errorf("unknown correlation pattern %q", pattern)
+	}
+	if !shortTokenPattern.MatchString(token) {
+		return nil, fmt.Errorf("invalid run short token")
+	}
+	var out []Incident
+	for _, kind := range []string{"TRIGGER", "NON-TRIGGER"} {
+		incs, err := s.openIncidentsWithPrefix(ctx, "[CORRTEST]["+pattern+"]["+kind+"]["+token+"]")
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, incs...)
+	}
+	return out, nil
+}
+
+// openIncidentsWithPrefix pages open incidents whose short description
+// starts with prefix, rechecking the prefix client-side.
+func (s *SNOW) openIncidentsWithPrefix(ctx context.Context, prefix string) ([]Incident, error) {
 	const pageSize, maxPages = 500, 20 // hard cap 10,000 rows: error rather than silently truncate
 	out := []Incident{}
 	for page := 0; page < maxPages; page++ {
 		res, err := s.call(ctx, http.MethodGet, "/api/now/table/incident", url.Values{
-			"sysparm_query":  {"short_descriptionSTARTSWITH" + marker + "^stateNOT IN6,7,8^ORDERBYsys_id"},
+			"sysparm_query":  {"short_descriptionSTARTSWITH" + prefix + "^stateNOT IN6,7,8^ORDERBYsys_id"},
 			"sysparm_limit":  {strconv.Itoa(pageSize)},
 			"sysparm_offset": {strconv.Itoa(page * pageSize)},
 			"sysparm_fields": {incidentFields}}, nil)
@@ -194,7 +227,7 @@ func (s *SNOW) OpenCampaignIncidents(ctx context.Context, campaignRun string) ([
 			return nil, fmt.Errorf("malformed incident list")
 		}
 		for _, r := range rows {
-			if strings.HasPrefix(r.ShortDescription, marker) {
+			if strings.HasPrefix(r.ShortDescription, prefix) {
 				out = append(out, r.inc())
 			}
 		}

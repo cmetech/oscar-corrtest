@@ -155,3 +155,40 @@ func TestSnowOpenCampaignIncidentsCapErrors(t *testing.T) {
 		t.Fatal("want cap error")
 	}
 }
+
+func TestSnowOpenCorrTestIncidentsExactPrefixes(t *testing.T) {
+	var queries []string
+	s := newTestSNOW(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query().Get("sysparm_query")
+		queries = append(queries, q)
+		if !strings.Contains(q, "stateNOT IN6,7,8") {
+			t.Errorf("query %q", q)
+		}
+		// The server returns colliding rows too; the client recheck drops them.
+		w.Write([]byte(`{"result":[` +
+			`{"number":"INC1","state":"1","short_description":"[CORRTEST][flood][TRIGGER][AB12CD34] p01: source alert 1 of 3"},` +
+			`{"number":"INC2","state":"1","short_description":"[CORRTEST][flood][NON-TRIGGER][AB12CD34] n01: source alert 1 of 2"},` +
+			`{"number":"INC3","state":"1","short_description":"[CORRTEST][flood][TRIGGER][AB12CD35] other run"},` +
+			`{"number":"INC4","state":"1","short_description":"[CORRTEST][flood2][TRIGGER][AB12CD34] other pattern"}]}`))
+	})
+	got, err := s.OpenCorrTestIncidents(context.Background(), "flood", "ab12cd34")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nums []string
+	for _, i := range got {
+		nums = append(nums, i.Number)
+	}
+	if strings.Join(nums, ",") != "INC1,INC2" {
+		t.Fatalf("incidents %v", nums)
+	}
+	if len(queries) != 2 || !strings.Contains(queries[0], "STARTSWITH[CORRTEST][flood][TRIGGER][AB12CD34]^") ||
+		!strings.Contains(queries[1], "STARTSWITH[CORRTEST][flood][NON-TRIGGER][AB12CD34]^") {
+		t.Fatalf("queries %v", queries)
+	}
+	for _, bad := range [][2]string{{"nosuch", "AB12CD34"}, {"flood", "AB12CD3"}, {"flood", "AB12CD3I"}, {"flood", "AB^2CD34"}} {
+		if _, err := s.OpenCorrTestIncidents(context.Background(), bad[0], bad[1]); err == nil {
+			t.Fatalf("%v should be rejected", bad)
+		}
+	}
+}
