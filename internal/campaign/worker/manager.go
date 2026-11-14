@@ -335,6 +335,7 @@ type ledgerRow struct {
 	Identity      string    `json:"identity"`
 	Severity      string    `json:"severity"`
 	Instance      string    `json:"instance"`
+	Ticket        bool      `json:"ticket"`
 	ScheduledAt   time.Time `json:"scheduledAt"`
 	SentAt        time.Time `json:"sentAt,omitempty"`
 	Done          bool      `json:"done"`
@@ -362,7 +363,7 @@ func (m *Manager) Ledger(ctx context.Context, id string, w io.Writer) error {
 	}
 	enc := json.NewEncoder(w)
 	for _, r := range rows {
-		if err := enc.Encode(ledgerRow{r.Seq, r.Kind, r.Identity, r.Severity, r.Instance, r.ScheduledAt, r.SentAt, r.Done, r.Missed, r.Status, r.ErrorClass, r.LatencyMillis}); err != nil {
+		if err := enc.Encode(ledgerRow{r.Seq, r.Kind, r.Identity, r.Severity, r.Instance, r.Ticket, r.ScheduledAt, r.SentAt, r.Done, r.Missed, r.Status, r.ErrorClass, r.LatencyMillis}); err != nil {
 			return err
 		}
 	}
