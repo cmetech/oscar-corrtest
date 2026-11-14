@@ -86,3 +86,14 @@ func CanTransitionCampaign(from, to CampaignStatus) bool {
 	}
 	return false
 }
+
+// CampaignEvent is one append-only campaign timeline entry.
+type CampaignEvent struct {
+	CampaignID string
+	Sequence   int
+	Type       string
+	Level      string
+	OccurredAt time.Time
+	Summary    string
+	Detail     json.RawMessage
+}

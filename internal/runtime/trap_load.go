@@ -56,6 +56,9 @@ type trapLoadReport struct {
 }
 
 func (r *Runtime) StartTrapLoad(ctx context.Context, targetID string, o TrapLoadOptions) (domain.Run, error) {
+	if r.campaignActive.Load() {
+		return domain.Run{}, ErrCampaignActive
+	}
 	if err := o.Validate(); err != nil {
 		return domain.Run{}, err
 	}
@@ -77,6 +80,9 @@ func (r *Runtime) StartTrapLoad(ctx context.Context, targetID string, o TrapLoad
 	}
 	r.activeMu.Lock()
 	defer r.activeMu.Unlock()
+	if r.campaignActive.Load() {
+		return domain.Run{}, errors.Join(ErrCampaignActive, sender.Close())
+	}
 	if r.closing || len(r.active) > 0 {
 		return domain.Run{}, errors.Join(fmt.Errorf("wait for the active run and its cleanup before starting an SNMP load"), sender.Close())
 	}

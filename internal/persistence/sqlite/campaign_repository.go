@@ -311,3 +311,40 @@ func (l laneLedger) Intent(ctx context.Context, laneID string, e lane.Event, at 
 func (l laneLedger) Outcome(ctx context.Context, laneID string, seq int, o lane.Outcome) error {
 	return l.d.LaneOutcome(ctx, laneID, seq, o)
 }
+
+// GetCampaign returns one campaign or ErrNotFound.
+func (d *Database) GetCampaign(ctx context.Context, id string) (domain.Campaign, error) {
+	list, err := d.queryCampaigns(ctx, ` WHERE id=?`, id)
+	if err != nil {
+		return domain.Campaign{}, err
+	}
+	if len(list) == 0 {
+		return domain.Campaign{}, ErrNotFound
+	}
+	return list[0], nil
+}
+
+// RecentCampaignEvents returns up to limit newest events, oldest first.
+func (d *Database) RecentCampaignEvents(ctx context.Context, id string, limit int) ([]domain.CampaignEvent, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT campaign_id, sequence, type, level, occurred_at, summary, detail_json FROM (
+        SELECT * FROM campaign_events WHERE campaign_id=? ORDER BY sequence DESC LIMIT ?) ORDER BY sequence`, id, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list campaign events: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.CampaignEvent
+	for rows.Next() {
+		var e domain.CampaignEvent
+		var at string
+		var detail sql.NullString
+		if err := rows.Scan(&e.CampaignID, &e.Sequence, &e.Type, &e.Level, &at, &e.Summary, &detail); err != nil {
+			return nil, err
+		}
+		if e.OccurredAt, err = time.Parse(time.RFC3339Nano, at); err != nil {
+			return nil, err
+		}
+		e.Detail = rawJSON(detail)
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
