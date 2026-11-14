@@ -65,6 +65,7 @@ func Slope(pts []Point) float64 {
 type Baseline struct {
 	Rows, Accepted, Missed, Errors int
 	Planned, Offered               int
+	Definite5xx                    int // definite 5xx answers (counted apart from unknown outcomes)
 	ErrorsByClass                  map[string]int
 }
 
@@ -78,6 +79,9 @@ func reconcileBaseline(rows []domain.LaneRow, planned int) Baseline {
 		b.Rows++
 		if r.Seq < planned && !r.Missed && r.ErrorClass != lane.ErrClassMissed {
 			b.Offered++
+		}
+		if r.Done && r.Status >= 500 && r.Status < 600 {
+			b.Definite5xx++
 		}
 		switch {
 		case accepted(r):

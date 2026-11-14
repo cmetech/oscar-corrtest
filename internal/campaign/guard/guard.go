@@ -19,7 +19,10 @@ const (
 	GuardLaneStopped   = "lane_stopped"
 )
 
-const growthWindow = 20 // samples: 5 min at 15 s
+const (
+	growthWindow      = 20 // samples: 5 min at 15 s
+	unknownMinOffered = 500
+)
 
 type Sample struct {
 	At                         time.Time
@@ -54,7 +57,9 @@ func Evaluate(now time.Time, window []Sample, c Counters, baseline Sample) []Tri
 	if now.Sub(c.WorkerHeartbeat) > 30*time.Second {
 		add(GuardHeartbeatLost, "worker heartbeat older than 30s")
 	}
-	if c.Unknown*1000 > c.Offered*5 {
+	// Only sends with no definite answer are unknown (ruling C38); a handful
+	// of sends is no rate, so evaluate from 500 offered.
+	if c.Offered >= unknownMinOffered && c.Unknown*1000 > c.Offered*5 {
 		add(GuardUnknownRate, "unknown %d of %d offered", c.Unknown, c.Offered)
 	}
 	if c.LaneState != "" && c.LaneState != "running" && now.Before(c.BaselineEnd) {

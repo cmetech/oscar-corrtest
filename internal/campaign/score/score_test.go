@@ -330,3 +330,15 @@ func TestBaselineUnderDelivered(t *testing.T) {
 		t.Fatalf("no plan: %s %v", c.Verdict, c.Reasons)
 	}
 }
+
+// Ruling C38: definite 5xx answers are counted separately in the scorecard.
+func TestDefinite5xxReported(t *testing.T) {
+	in := good()
+	in.Ledger = append(in.Ledger,
+		domain.LaneRow{Seq: 2, Kind: "firing", Identity: "b", SentAt: t0, Done: true, Status: 503, ErrorClass: "http"},
+		domain.LaneRow{Seq: 3, Kind: "firing", Identity: "c", SentAt: t0, Done: true, Status: 429, ErrorClass: "http"},
+		domain.LaneRow{Seq: 4, Kind: "firing", Identity: "d", SentAt: t0, Done: true, ErrorClass: "timeout"})
+	if b := Compute(in, lim).Baseline; b.Definite5xx != 1 || b.ErrorsByClass["http"] != 2 || b.ErrorsByClass["timeout"] != 1 {
+		t.Fatalf("baseline %+v", b)
+	}
+}

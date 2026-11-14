@@ -304,3 +304,12 @@ func TestResolveAllIncludesUnknownOutcomeAndTicket(t *testing.T) {
 		t.Fatalf("n=%d err=%v sends=%+v", n, err, snd.sends)
 	}
 }
+
+// Ruling C38: a definite HTTP answer (any status) is Failed, never Unknown.
+func TestSnapshotSeparatesDefiniteFailuresFromUnknown(t *testing.T) {
+	m := &Manager{}
+	s := m.snapshot(&laneState{counts: lane.Counters{Accepted: 5, Failed: 2, Unknown: 1, Missed: 3}})
+	if s.Sent != 5 || s.Failed != 2 || s.Unknown != 1 || s.Missed != 3 {
+		t.Fatalf("snapshot %+v", s)
+	}
+}

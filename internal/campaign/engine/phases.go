@@ -246,7 +246,7 @@ func (r *run) guards(ctx context.Context, stop context.CancelFunc) {
 		}
 		st, _ := r.e.d.Worker.Status(ctx, r.laneID)
 		r.mu.Lock()
-		c := guard.Counters{Offered: st.Sent + st.Failed, Unknown: st.Failed, TicketUnknown: r.ticketUnknown, WorkerHeartbeat: r.lastHeartbeat,
+		c := guard.Counters{Offered: st.Sent + st.Failed + st.Unknown, Unknown: st.Unknown, TicketUnknown: r.ticketUnknown, WorkerHeartbeat: r.lastHeartbeat,
 			LaneState: r.laneState, LaneError: r.laneErr, BaselineEnd: r.at("drain", false)}
 		r.mu.Unlock()
 		trips := guard.Evaluate(r.now(), window, c, baseline)

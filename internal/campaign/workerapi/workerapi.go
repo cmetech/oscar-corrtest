@@ -48,7 +48,8 @@ type LaneStatus struct {
 	ID       string `json:"id"`
 	State    string `json:"state"`
 	Sent     int    `json:"sent"`
-	Failed   int    `json:"failed"`
+	Failed   int    `json:"failed"`  // definite non-2xx answers
+	Unknown  int    `json:"unknown"` // sent, no definite answer (timeout, transport error)
 	Missed   int    `json:"missed"`
 	Resolved int    `json:"resolved"` // accepted resolves sent by ResolveAll (not planned ones)
 	Error    string `json:"error,omitempty"`

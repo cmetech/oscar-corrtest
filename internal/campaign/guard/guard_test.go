@@ -82,6 +82,13 @@ func TestUnknownRateGuardBoundary(t *testing.T) {
 	if has(Evaluate(t0, w, Counters{WorkerHeartbeat: t0}, Sample{}), GuardUnknownRate) {
 		t.Fatal("offered 0 must not trip")
 	}
+	// Ruling C38: no evaluation before 500 sends.
+	if has(Evaluate(t0, w, Counters{Offered: 499, Unknown: 10, WorkerHeartbeat: t0}, Sample{}), GuardUnknownRate) {
+		t.Fatal("fewer than 500 sends must not trip")
+	}
+	if !has(Evaluate(t0, w, Counters{Offered: 500, Unknown: 3, WorkerHeartbeat: t0}, Sample{}), GuardUnknownRate) {
+		t.Fatal("500 sends with 0.6% unknown must trip")
+	}
 }
 
 func TestTicketUnknownAboveThree(t *testing.T) {

@@ -198,7 +198,7 @@ func (m *Manager) get(id string) (*laneState, error) {
 
 func (m *Manager) snapshot(ls *laneState) workerapi.LaneStatus { // m.mu held
 	s := ls.status
-	s.Sent, s.Failed, s.Missed = ls.counts.Accepted, ls.counts.Failed+ls.counts.Unknown, ls.counts.Missed
+	s.Sent, s.Failed, s.Unknown, s.Missed = ls.counts.Accepted, ls.counts.Failed, ls.counts.Unknown, ls.counts.Missed
 	return s
 }
 
