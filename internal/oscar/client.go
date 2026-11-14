@@ -24,6 +24,9 @@ import (
 const maxResponseBytes = 4 << 20
 const maxListPages = 100
 
+// maxLabelHistoryPages bounds HistoryByLabel (40,000 rows at perPage=100).
+const maxLabelHistoryPages = 400
+
 type Options struct {
 	InputPath      string
 	Now            func() time.Time
@@ -297,6 +300,32 @@ func (c *Client) FindHistory(ctx context.Context, query HistoryQuery) ([]History
 			if record.AlertName != query.AlertName {
 				continue
 			}
+			result = append(result, record.normalized())
+		}
+		if listComplete(seen, response.TotalRecords, len(response.Records), response.PerPage) || (response.TotalPages > 0 && page >= response.TotalPages) {
+			return result, nil
+		}
+	}
+	return nil, paginationLimitError("GET /api/v1/alerts/history")
+}
+
+// HistoryByLabel lists History rows whose label key equals value in [start, end].
+func (c *Client) HistoryByLabel(ctx context.Context, key, value string, start, end time.Time) ([]HistoryRecord, error) {
+	filter, _ := json.Marshal(map[string]any{"items": []any{map[string]any{"field": "label:" + key, "operator": "equals", "value": value}}, "logicOperator": "and"})
+	values := url.Values{
+		"perPage": {"100"}, "order": {"asc"}, "column": {"createdAt"},
+		"start_datetime": {formattedTime(start)}, "end_datetime": {formattedTime(end)}, "filter": {string(filter)},
+	}
+	var result []HistoryRecord
+	seen := 0
+	for page := 1; page <= maxLabelHistoryPages; page++ {
+		values.Set("page", strconv.Itoa(page))
+		var response historyListResponse
+		if err := c.doJSON(ctx, http.MethodGet, historyPath, values, nil, &response); err != nil {
+			return nil, err
+		}
+		seen += len(response.Records)
+		for _, record := range response.Records {
 			result = append(result, record.normalized())
 		}
 		if listComplete(seen, response.TotalRecords, len(response.Records), response.PerPage) || (response.TotalPages > 0 && page >= response.TotalPages) {

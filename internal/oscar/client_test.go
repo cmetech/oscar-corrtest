@@ -452,3 +452,23 @@ func TestNoMatchAuditRequiresExplicitNullRuleIdentity(t *testing.T) {
 		})
 	}
 }
+
+func TestHistoryByLabelFiltersAndPages(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("perPage") != "100" || !strings.Contains(q.Get("filter"), `"field":"label:campaign_run"`) || !strings.Contains(q.Get("filter"), `"value":"r1"`) || q.Get("start_datetime") == "" {
+			http.Error(w, "bad query", http.StatusBadRequest)
+			return
+		}
+		rows := `{"id":"a","alertName":"Campaign-r1-1"}`
+		if q.Get("page") == "2" {
+			rows = `{"id":"b","alertName":"Campaign-r1-2"}`
+		}
+		_, _ = w.Write([]byte(`{"total_records":101,"total_pages":2,"page":` + q.Get("page") + `,"per_page":100,"records":[` + rows + `]}`))
+	}))
+	defer server.Close()
+	got, err := newClient(t, server.URL).HistoryByLabel(context.Background(), "campaign_run", "r1", time.Now().Add(-time.Hour), time.Now())
+	if err != nil || len(got) != 2 {
+		t.Fatalf("got %v err %v", got, err)
+	}
+}
