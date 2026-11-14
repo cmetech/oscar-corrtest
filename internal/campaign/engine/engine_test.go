@@ -452,3 +452,42 @@ func TestTicketFirstTriggerCompiles(t *testing.T) {
 		}
 	}
 }
+
+// TestIncidentListingFailureIsDirty: a SNOW listing that never succeeds is
+// not "nothing pending"; cleanup is DIRTY with the reason (ruling C35).
+func TestIncidentListingFailureIsDirty(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.oscar.listErr = -1
+	if err := h.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	c, card := h.scorecard()
+	if c.Cleanup != domain.CleanupDirty || c.Verdict == domain.VerdictPass {
+		t.Fatalf("cleanup %s verdict %s reasons %v", c.Cleanup, c.Verdict, card.Reasons)
+	}
+	evs, _ := h.db.RecentCampaignEvents(context.Background(), h.id, 1000)
+	found := false
+	for _, ev := range evs {
+		found = found || ev.Type == "campaign.cleanup" && strings.Contains(ev.Summary, "incident listing")
+	}
+	if !found {
+		t.Fatal("no cleanup event names the failed incident listing")
+	}
+}
+
+// TestIncidentListingRetried: transient listing failures are retried with
+// backoff until the close deadline (ruling C35).
+func TestIncidentListingRetried(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.oscar.listErr = 2
+	if err := h.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	c, card := h.scorecard()
+	if c.Cleanup != domain.CleanupClean {
+		t.Fatalf("cleanup %s reasons %v", c.Cleanup, card.Reasons)
+	}
+	h.assertRestored()
+}

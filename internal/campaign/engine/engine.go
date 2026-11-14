@@ -169,6 +169,7 @@ type run struct {
 	stopped       bool // operator Stop
 	missing       []string
 	openIncidents []string
+	dirty         []string // cleanup failures that are not open mutations
 	corrTickets   corrTicketStats
 	trip          string // guard name that tripped
 	workerLost    bool

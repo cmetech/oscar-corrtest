@@ -168,8 +168,10 @@ func (r *run) closeIncidents(ctx context.Context) []targetops.Incident {
 	corrSeen := map[string]bool{}
 	closed := map[string]bool{}
 	deadline := r.now().Add(commentWait)
+	backoff := time.Second
 	for retry := 0; ; retry++ {
 		var pending []string
+		var listErr error // a failed listing is never "nothing pending" (ruling C35)
 		visit := func(inc targetops.Incident) {
 			if closed[inc.Number] {
 				return
@@ -188,7 +190,7 @@ func (r *run) closeIncidents(ctx context.Context) []targetops.Incident {
 		}
 		incs, err := r.e.d.SNOW.OpenCampaignIncidents(ctx, r.id)
 		if err != nil {
-			r.noteMissing("incident listing: " + err.Error())
+			listErr = fmt.Errorf("incident listing: %w", err)
 		}
 		for _, inc := range incs {
 			campaign[inc.Number] = inc
@@ -197,16 +199,23 @@ func (r *run) closeIncidents(ctx context.Context) []targetops.Incident {
 		for _, c := range corr {
 			incs, err := r.e.d.SNOW.OpenCorrTestIncidents(ctx, c.pattern, c.token)
 			if err != nil {
-				r.noteMissing("correlation incident listing: " + err.Error())
+				listErr = fmt.Errorf("correlation incident listing: %w", err)
 			}
 			for _, inc := range incs {
 				corrSeen[inc.Number] = true
 				visit(inc)
 			}
 		}
-		if len(pending) == 0 || !r.now().Before(deadline) {
+		if listErr == nil {
+			backoff = time.Second
+		}
+		if len(pending) == 0 && listErr == nil || !r.now().Before(deadline) {
 			r.mu.Lock()
 			r.openIncidents = pending
+			if listErr != nil {
+				r.missing = append(r.missing, listErr.Error())
+				r.dirty = append(r.dirty, listErr.Error()+" (incidents not verified)")
+			}
 			r.corrTickets = corrTicketStats{Runs: len(corr), Incidents: len(corrSeen)}
 			for n := range corrSeen {
 				if closed[n] {
@@ -218,10 +227,14 @@ func (r *run) closeIncidents(ctx context.Context) []targetops.Incident {
 			r.mu.Unlock()
 			break
 		}
-		if retry < resolveRetry {
+		if retry < resolveRetry && len(pending) > 0 {
 			r.reresolveCohorts(ctx)
 		}
-		r.e.clock.SleepUntil(ctx, r.now().Add(guardEvery))
+		wait := guardEvery
+		if listErr != nil { // retry a failed listing with backoff, up to the 15 s cadence
+			wait, backoff = backoff, min(2*backoff, guardEvery)
+		}
+		r.e.clock.SleepUntil(ctx, r.now().Add(wait))
 	}
 	out := make([]targetops.Incident, 0, len(campaign))
 	for _, inc := range campaign {
@@ -244,11 +257,15 @@ func (r *run) cleanup(ctx context.Context) domain.CleanupStatus {
 	open, err := r.store().OpenMutations(ctx, r.id)
 	r.mu.Lock()
 	incidents := append([]string{}, r.openIncidents...)
+	dirty := append([]string{}, r.dirty...)
 	r.mu.Unlock()
 	if len(incidents) > 0 {
 		r.event(ctx, "campaign.cleanup", "error", "incidents still open: "+strings.Join(incidents, ","), incidents)
 	}
-	if err != nil || len(open) > 0 || len(incidents) > 0 {
+	for _, d := range dirty {
+		r.event(ctx, "campaign.cleanup", "error", d, nil)
+	}
+	if err != nil || len(open) > 0 || len(incidents) > 0 || len(dirty) > 0 {
 		return domain.CleanupDirty
 	}
 	return domain.CleanupClean

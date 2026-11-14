@@ -156,6 +156,7 @@ type fakeOSCAR struct {
 	corrInc    []*targetops.Incident // set B source-alert incidents
 	// fault injection
 	withholdComments bool  // resolves never get OSCAR's comment
+	listErr          int   // next N campaign incident listings fail (-1: always)
 	sinkErr          bool  // Receipts fails
 	failEnable       int   // next N notifier enables fail
 	draftErr         error // CreateDraft fails with this
@@ -388,6 +389,12 @@ func (f *fakeOSCAR) History(_ context.Context, run string, _, _ time.Time) ([]os
 func (f *fakeOSCAR) OpenCampaignIncidents(context.Context, string) ([]targetops.Incident, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.listErr != 0 {
+		if f.listErr > 0 {
+			f.listErr--
+		}
+		return nil, errors.New("snow: 503 instance hibernating")
+	}
 	var out []targetops.Incident
 	for name, inc := range f.incidents {
 		if inc.State == "6" || inc.State == "7" {
