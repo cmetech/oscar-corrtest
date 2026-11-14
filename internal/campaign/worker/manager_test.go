@@ -115,6 +115,17 @@ func (c *fakeClock) run(d time.Duration, each func()) {
 	}
 }
 
+// fireN lets the 1/s lane send exactly n firings with no lag: it waits for each
+// firing to be sent before advancing the fake clock to the next one, so no
+// event is ever late enough to be recorded as missed.
+func fireN(t *testing.T, clk *fakeClock, snd *fakeSender, n int) {
+	t.Helper()
+	for k := 1; k <= n; k++ {
+		waitFor(t, "firing", func() bool { return snd.count(lane.Firing) >= k })
+		clk.advance(time.Second)
+	}
+}
+
 func spec(id, url string, dur time.Duration) workerapi.LaneSpec {
 	p, _ := json.Marshal(workerapi.BaselineParams{TargetURL: url, Seed: 1, Duration: dur, Baseline: scenario.BaselineSpec{
 		Rate: 1, UniqueRatio: 1, PoolSize: 1, Instances: 1, Severity: map[string]float64{"critical": 1}, ResolveAfter: time.Hour}})
@@ -138,10 +149,14 @@ func TestOrphanStopAfter30sWithoutHeartbeat(t *testing.T) {
 	if _, err := m.Start(ctx, spec("r1-baseline", "https://oscar.home.arpa:8443/", 10*time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	clk.run(10*time.Second, nil)
-	waitFor(t, "firings", func() bool { return snd.count(lane.Firing) == 10 })
-	clk.run(31*time.Second, nil)
-	waitFor(t, "orphan", func() bool { s, _ := m.Status(ctx, "r1-baseline"); return s.State == "orphan_stopped" })
+	fireN(t, clk, snd, 10)
+	clk.advance(31 * time.Second) // no heartbeat for >30 s
+	// State flips to orphan_stopped before the automatic ResolveAll runs, so wait
+	// for its completion (Resolved is updated last) instead of the state alone.
+	waitFor(t, "orphan resolve-all", func() bool {
+		s, _ := m.Status(ctx, "r1-baseline")
+		return s.State == "orphan_stopped" && s.Resolved == 10
+	})
 	s, _ := m.Status(ctx, "r1-baseline")
 	if s.OrphanStopAt == nil {
 		t.Fatal("no orphan_stop marker")
@@ -186,8 +201,7 @@ func TestResolveAllIdempotent(t *testing.T) {
 	if _, err := m.Start(ctx, spec("r1-baseline", "https://oscar.home.arpa:8443", 5*time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	clk.run(5*time.Second, nil)
-	waitFor(t, "firings", func() bool { return snd.count(lane.Firing) == 5 })
+	fireN(t, clk, snd, 5)
 	if err := m.Stop(ctx, "r1-baseline"); err != nil {
 		t.Fatal(err)
 	}
@@ -224,8 +238,7 @@ func TestLedgerStreamsRows(t *testing.T) {
 	m, clk, _, snd := newMgr(t)
 	ctx := context.Background()
 	_, _ = m.Start(ctx, spec("r1-baseline", "https://oscar.home.arpa:8443", 2*time.Second))
-	clk.run(2*time.Second, nil)
-	waitFor(t, "firings", func() bool { return snd.count(lane.Firing) == 2 })
+	fireN(t, clk, snd, 2)
 	var b safeBuf
 	if err := m.Ledger(ctx, "r1-baseline", &b); err != nil {
 		t.Fatal(err)
@@ -256,8 +269,7 @@ func TestResolveAllRecoversAfterRestart(t *testing.T) {
 	if _, err := m.Start(ctx, spec("r1-baseline", "https://oscar.home.arpa:8443", 3*time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	clk.run(3*time.Second, nil)
-	waitFor(t, "firings", func() bool { return snd.count(lane.Firing) == 3 })
+	fireN(t, clk, snd, 3)
 	_ = m.Stop(ctx, "r1-baseline")
 
 	snd2 := &fakeSender{}
