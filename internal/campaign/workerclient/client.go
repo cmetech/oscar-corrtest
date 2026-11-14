@@ -31,6 +31,7 @@ type Client struct {
 	http      *http.Client
 	// per-call deadlines for the non-streaming calls (shortened in tests)
 	short, medium, long time.Duration
+	maxStream           int
 }
 
 // APIError is returned for every non-2xx JSON error from the worker.
@@ -52,6 +53,12 @@ const (
 	maxStream = 512 << 20
 )
 
+// Ledger cap errors, matchable with errors.Is.
+var (
+	ErrLedgerLineTooLong = errors.New("worker ledger line exceeds 64 KiB")
+	ErrLedgerTooLarge    = errors.New("worker ledger stream exceeds 512 MiB")
+)
+
 // New builds a client. caFile is added to the system roots; empty means system roots only.
 func New(baseURL, tokenFile, caFile string) (*Client, error) {
 	u, err := url.Parse(baseURL)
@@ -71,7 +78,7 @@ func New(baseURL, tokenFile, caFile string) (*Client, error) {
 			return nil, fmt.Errorf("no certificates in worker CA file %s", caFile)
 		}
 	}
-	return &Client{baseURL: strings.TrimRight(baseURL, "/"), tokenFile: tokenFile, short: 10 * time.Second, medium: 30 * time.Second, long: 120 * time.Second, http: &http.Client{
+	return &Client{baseURL: strings.TrimRight(baseURL, "/"), tokenFile: tokenFile, maxStream: maxStream, short: 10 * time.Second, medium: 30 * time.Second, long: 120 * time.Second, http: &http.Client{
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		Transport:     &http.Transport{Proxy: nil, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 15 * time.Second, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}},
 	}}, nil
@@ -217,16 +224,16 @@ func (c *Client) Ledger(ctx context.Context, id string, w io.Writer) error {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		return apiErr(resp.StatusCode, raw)
 	}
-	r := bufio.NewReaderSize(io.LimitReader(resp.Body, maxStream+1), maxLine)
+	r := bufio.NewReaderSize(io.LimitReader(resp.Body, int64(c.maxStream)+1), maxLine)
 	total := 0
 	for {
 		line, err := r.ReadSlice('\n')
 		if errors.Is(err, bufio.ErrBufferFull) {
-			return errors.New("worker ledger line exceeds 64 KiB")
+			return ErrLedgerLineTooLong
 		}
 		total += len(line)
-		if total > maxStream {
-			return errors.New("worker ledger stream exceeds 512 MiB")
+		if total > c.maxStream {
+			return ErrLedgerTooLarge
 		}
 		if len(line) > 0 && line[len(line)-1] == '\n' { // a partial last line is never accepted
 			var end struct {

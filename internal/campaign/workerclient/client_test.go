@@ -278,7 +278,7 @@ func TestLedgerLineCap(t *testing.T) {
 	tok := filepath.Join(dir, "t")
 	_ = os.WriteFile(tok, []byte(token), 0o600)
 	c, _ := workerclient.New(srv.URL, tok, writePEM(t, dir, "ca.pem", srv))
-	if err := c.Ledger(context.Background(), "x", io.Discard); err == nil || !strings.Contains(err.Error(), "64 KiB") {
+	if err := c.Ledger(context.Background(), "x", io.Discard); !errors.Is(err, workerclient.ErrLedgerLineTooLong) {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -294,6 +294,24 @@ func TestBearerRequiredIsTyped(t *testing.T) {
 	_ = os.WriteFile(tok, []byte(token), 0o600)
 	c, _ := workerclient.New(srv.URL, tok, writePEM(t, dir, "ca.pem", srv))
 	if err := c.Heartbeat(context.Background(), "x"); !asCode(err, 401, "bearer_required") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestLedgerTotalCap(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		for i := 0; i < 10; i++ {
+			_, _ = io.WriteString(w, "{\"seq\":0}\n")
+		}
+		_, _ = io.WriteString(w, "{\"type\":\"end\",\"ok\":true}\n")
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	tok := filepath.Join(dir, "t")
+	_ = os.WriteFile(tok, []byte(token), 0o600)
+	c, _ := workerclient.New(srv.URL, tok, writePEM(t, dir, "ca.pem", srv))
+	c.SetMaxStream(30)
+	if err := c.Ledger(context.Background(), "x", io.Discard); !errors.Is(err, workerclient.ErrLedgerTooLarge) {
 		t.Fatalf("got %v", err)
 	}
 }
