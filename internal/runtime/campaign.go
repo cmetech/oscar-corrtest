@@ -18,8 +18,12 @@ import (
 var ErrCampaignActive = errors.New("a campaign is active; other test runs are blocked")
 
 // CampaignEngine executes and recovers campaigns. The real engine arrives in a later task.
+//
+// Run's ctx is cancelled by StopCampaign and by Runtime.Close. Drain and cleanup
+// must therefore run on context.WithoutCancel(ctx). opts carries the full scenario,
+// Acknowledged, PrecheckOnly and RunBy.
 type CampaignEngine interface {
-	Run(ctx context.Context, campaignID string) error
+	Run(ctx context.Context, campaignID string, opts CampaignOptions) error
 	Recover(ctx context.Context, campaignID string) error
 }
 
@@ -57,10 +61,13 @@ func (r *Runtime) gateCampaign(id string, cancel context.CancelFunc) error {
 	}
 	r.campaignActive.Store(true)
 	r.campaignID, r.campaignCancel = id, cancel
+	r.runWG.Add(1)
 	return nil
 }
 
+// releaseCampaign clears the gate and balances gateCampaign's runWG.Add.
 func (r *Runtime) releaseCampaign() {
+	defer r.runWG.Done()
 	r.activeMu.Lock()
 	r.campaignActive.Store(false)
 	r.campaignID, r.campaignCancel = "", nil
@@ -81,6 +88,12 @@ func (r *Runtime) StartCampaign(ctx context.Context, o CampaignOptions) (domain.
 		Trigger: o.Trigger, RunBy: o.RunBy, TriggerIdentity: o.TriggerIdentity, Status: domain.CampaignPrecheck, StartedAt: time.Now().UTC(),
 	}
 	execCtx, cancel := context.WithCancel(r.rootCtx)
+	// A synchronous Execute* run holds runMu; refuse rather than queue behind it.
+	if !r.runMu.TryLock() {
+		cancel()
+		return domain.Campaign{}, errors.New("a synchronous run is active")
+	}
+	r.runMu.Unlock()
 	if err := r.gateCampaign(c.ID, cancel); err != nil {
 		cancel()
 		return domain.Campaign{}, err
@@ -90,17 +103,19 @@ func (r *Runtime) StartCampaign(ctx context.Context, o CampaignOptions) (domain.
 		r.releaseCampaign()
 		return domain.Campaign{}, err
 	}
-	detail, _ := json.Marshal(map[string]any{"acknowledged": o.Acknowledged, "precheckOnly": o.PrecheckOnly})
+	// Audit record only; the engine receives the options directly.
+	detail, _ := json.Marshal(map[string]any{"acknowledged": o.Acknowledged, "precheckOnly": o.PrecheckOnly, "runBy": o.RunBy})
 	if err := r.database.AppendCampaignEvent(ctx, c.ID, "campaign.options", "info", "campaign options recorded", detail, c.StartedAt); err != nil {
-		r.logger.Warn("campaign options event failed", "campaign_id", c.ID, "error", err)
+		_ = r.database.TransitionCampaign(context.WithoutCancel(ctx), c.ID, domain.CampaignInterrupted, time.Now().UTC(), "options audit failed")
+		cancel()
+		r.releaseCampaign()
+		return domain.Campaign{}, fmt.Errorf("record campaign options: %w", err)
 	}
-	r.runWG.Add(1)
 	go func() {
-		defer r.runWG.Done()
-		defer cancel()
 		defer r.releaseCampaign()
+		defer cancel()
 		stable := context.WithoutCancel(execCtx)
-		if err := r.campaignEngine.Run(execCtx, c.ID); err != nil {
+		if err := r.campaignEngine.Run(execCtx, c.ID, o); err != nil {
 			_ = r.database.AppendCampaignEvent(stable, c.ID, "campaign.error", "error", "campaign engine failed: "+err.Error(), nil, time.Now().UTC())
 			// Leave a non-COMPLETED campaign for recovery; invalid transitions (already terminal) are ignored.
 			_ = r.database.TransitionCampaign(stable, c.ID, domain.CampaignInterrupted, time.Now().UTC(), "engine stopped before completion")
@@ -109,8 +124,9 @@ func (r *Runtime) StartCampaign(ctx context.Context, o CampaignOptions) (domain.
 	return c, nil
 }
 
-// StopCampaign marks the active campaign STOPPING and cancels its context; the
-// engine must run drain and cleanup on a context detached from cancellation.
+// StopCampaign always cancels the matching campaign's context. It records STOPPING
+// when that transition is legal, INTERRUPTED from PRECHECK. A status-write failure is
+// returned after the cancel. The engine must drain and clean up on a detached context.
 func (r *Runtime) StopCampaign(ctx context.Context, id string) error {
 	r.activeMu.Lock()
 	cancel, ok := r.campaignCancel, r.campaignActive.Load() && r.campaignID == id
@@ -118,11 +134,16 @@ func (r *Runtime) StopCampaign(ctx context.Context, id string) error {
 	if !ok {
 		return errors.New("campaign is not active in this process")
 	}
-	if err := r.database.TransitionCampaign(ctx, id, domain.CampaignStopping, time.Now().UTC(), "stop requested"); err != nil {
-		return err
+	c, err := r.database.GetCampaign(ctx, id)
+	next := domain.CampaignStopping
+	if err == nil && c.Status == domain.CampaignPrecheck {
+		next = domain.CampaignInterrupted
+	}
+	if err == nil && c.Status != next {
+		err = r.database.TransitionCampaign(ctx, id, next, time.Now().UTC(), "stop requested")
 	}
 	cancel()
-	return nil
+	return err
 }
 
 // CampaignStatus returns a campaign and its recent events.
@@ -169,9 +190,7 @@ func (r *Runtime) recoverCampaigns(ctx context.Context) error {
 		cancel()
 		return err
 	}
-	r.runWG.Add(1)
 	go func() {
-		defer r.runWG.Done()
 		defer cancel()
 		defer r.releaseCampaign()
 		for _, c := range pending {

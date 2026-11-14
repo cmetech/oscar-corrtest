@@ -300,28 +300,17 @@ func (r *Runtime) StartBuiltin(ctx context.Context, targetID, pattern, pipelineM
 	if err != nil {
 		return domain.Run{}, err
 	}
-	run, err := r.history.CreateRun(ctx, targetID, "", r.version)
+	run, executionCtx, release, err := r.createRegisteredRun(ctx, targetID, "")
 	if err != nil {
 		return domain.Run{}, err
 	}
 	plan, err := compiler.Compile(run, scenario.Builtin(pattern), compiler.Capabilities{PipelineMode: pipelineMode})
 	if err != nil {
+		release()
 		return domain.Run{}, err
 	}
-	executionCtx, cancel := context.WithCancel(r.rootCtx)
-	if err := r.registerRun(run.ID, cancel); err != nil {
-		cancel()
-		return domain.Run{}, err
-	}
-	r.runWG.Add(1)
 	go func() {
-		defer r.runWG.Done()
-		defer func() {
-			r.activeMu.Lock()
-			delete(r.active, run.ID)
-			r.activeMu.Unlock()
-			cancel()
-		}()
+		defer release()
 		r.runMu.Lock()
 		defer r.runMu.Unlock()
 		diagnostic := r.diagnose(executionCtx, client, target, run, plan, pipelineMode)
@@ -361,28 +350,17 @@ func (r *Runtime) startScenario(ctx context.Context, targetID, scenarioID string
 	if err != nil {
 		return domain.Run{}, err
 	}
-	run, err := r.history.CreateRun(ctx, targetID, scenarioID, r.version)
+	run, executionCtx, release, err := r.createRegisteredRun(ctx, targetID, scenarioID)
 	if err != nil {
 		return domain.Run{}, err
 	}
 	plan, err := compiler.Compile(run, document, compiler.Capabilities{PipelineMode: pipelineMode})
 	if err != nil {
+		release()
 		return domain.Run{}, err
 	}
-	executionCtx, cancel := context.WithCancel(r.rootCtx)
-	if err := r.registerRun(run.ID, cancel); err != nil {
-		cancel()
-		return domain.Run{}, err
-	}
-	r.runWG.Add(1)
 	go func() {
-		defer r.runWG.Done()
-		defer func() {
-			r.activeMu.Lock()
-			delete(r.active, run.ID)
-			r.activeMu.Unlock()
-			cancel()
-		}()
+		defer release()
 		r.runMu.Lock()
 		defer r.runMu.Unlock()
 		diagnostic := r.diagnose(executionCtx, client, target, run, plan, pipelineMode)
@@ -885,14 +863,31 @@ func ownedRule(rule oscar.Rule, resource domain.Resource, runID string) bool {
 	return rule.ID > 0 && rule.Name == resource.ExternalName && strings.Contains(rule.Description, "run="+runID)
 }
 
-// registerRun records an async run, refusing if a campaign started since the early check.
-// ponytail: that narrow race leaves a queued run row behind; reconcile if it ever matters.
-func (r *Runtime) registerRun(id string, cancel context.CancelFunc) error {
+// createRegisteredRun checks the campaign gate, creates the run row and registers it
+// as active under one activeMu hold, so a campaign cannot start in between and no
+// run row is ever created behind the gate. release unregisters, cancels and calls
+// runWG.Done; call it exactly once.
+func (r *Runtime) createRegisteredRun(ctx context.Context, targetID, scenarioID string) (domain.Run, context.Context, func(), error) {
 	r.activeMu.Lock()
 	defer r.activeMu.Unlock()
-	if r.campaignActive.Load() {
-		return ErrCampaignActive
+	if r.closing {
+		return domain.Run{}, nil, nil, fmt.Errorf("runtime is closing")
 	}
-	r.active[id] = cancel
-	return nil
+	if r.campaignActive.Load() {
+		return domain.Run{}, nil, nil, ErrCampaignActive
+	}
+	run, err := r.history.CreateRun(ctx, targetID, scenarioID, r.version)
+	if err != nil {
+		return domain.Run{}, nil, nil, err
+	}
+	executionCtx, cancel := context.WithCancel(r.rootCtx)
+	r.active[run.ID] = cancel
+	r.runWG.Add(1)
+	return run, executionCtx, func() {
+		r.activeMu.Lock()
+		delete(r.active, run.ID)
+		r.activeMu.Unlock()
+		cancel()
+		r.runWG.Done()
+	}, nil
 }
