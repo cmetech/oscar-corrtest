@@ -2,7 +2,9 @@
 <section class="page-heading"><p class="eyebrow">Alerting day</p><h1>Campaigns</h1><p>Run pre-checks, then start a campaign. <a href="/campaigns/compare">Compare campaigns</a></p></section>
 {{if .Error}}<div class="notice notice--error" role="alert">{{.Error}}</div>{{end}}
 {{with .Campaign}}
-<form method="post" action="/campaigns/prechecks"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><button class="primary-button" type="submit">Run pre-checks</button></form>
+<form method="post" action="/campaigns/prechecks"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+  <label>Scenario <select name="scenario">{{range .Scenarios}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
+  <button class="primary-button" type="submit">Run pre-checks</button></form>
 {{if .Pending}}<p data-autoreload="3000">Pre-checks for <code>{{.PrecheckID}}</code> are running. This page refreshes.</p>{{end}}
 {{if .Checks}}
 <form method="post" action="/campaigns/start" class="stack">

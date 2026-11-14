@@ -127,3 +127,46 @@ func TestSetAContainsAllBuiltinsAndExamples(t *testing.T) {
 		t.Fatalf("ticketed %v", tp)
 	}
 }
+
+// Ruling C39: the bounded live smoke (spec 13.11, plan C19 step 6).
+func TestAlertingDaySmokeV1(t *testing.T) {
+	s := AlertingDaySmokeV1()
+	if s.ID != "alerting-day-smoke" || s.Version != "v1" || !s.Custom {
+		t.Fatalf("identity %s@%s custom=%v (the smoke must be custom: never comparable)", s.ID, s.Version, s.Custom)
+	}
+	if len(s.Phases) != 6 || s.Phase("preflight").Start != -2*time.Minute || s.Phase("drain").End != 10*time.Minute {
+		t.Fatalf("phases %+v", s.Phases)
+	}
+	for _, p := range s.Phases {
+		if p.End-p.Start != 2*time.Minute {
+			t.Errorf("phase %s is %s, want 2m", p.Name, p.End-p.Start)
+		}
+	}
+	if s.Baseline.Rate != 1 || len(s.Resend) != 1 || len(s.Correlation.SetA) != 1 || len(s.Correlation.SetB) != 0 {
+		t.Fatalf("scale: rate %v resend %d setA %d setB %d", s.Baseline.Rate, len(s.Resend), len(s.Correlation.SetA), len(s.Correlation.SetB))
+	}
+	if doc := corr.Builtin(s.Correlation.SetA[0].Pattern); len(doc.Cases) != 2 {
+		t.Fatalf("set A case %+v must hold 2 correlation cases", s.Correlation.SetA[0])
+	}
+	if s.Hash() == goldenHash || AlertingDayV1().Hash() != goldenHash {
+		t.Fatal("the smoke must not share or change the v1 hash")
+	}
+}
+
+func TestLookup(t *testing.T) {
+	for _, ref := range []string{"alerting-day@v1", "alerting-day-smoke@v1"} {
+		s, ok := Lookup(ref)
+		if !ok || s.ID+"@"+s.Version != ref {
+			t.Errorf("%s: %v %s@%s", ref, ok, s.ID, s.Version)
+		}
+		if h, ok := ByHash(s.Hash()); !ok || h.Hash() != s.Hash() {
+			t.Errorf("%s: by hash %v", ref, ok)
+		}
+	}
+	if _, ok := Lookup("alerting-day@v2"); ok {
+		t.Error("unknown scenario resolved")
+	}
+	if _, ok := ByHash(""); ok {
+		t.Error("empty hash resolved")
+	}
+}

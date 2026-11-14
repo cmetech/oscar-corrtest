@@ -165,7 +165,7 @@ func (a *App) campaignStart(ctx context.Context, name string, args []string, pre
 	flags := flag.NewFlagSet(name, flag.ContinueOnError)
 	flags.SetOutput(a.stderr)
 	cf := addCampaignFlags(flags)
-	scenario := flags.String("scenario", "alerting-day@v1", "scenario id@version")
+	scenario := flags.String("scenario", "alerting-day@v1", "scenario id@version: alerting-day@v1 or alerting-day-smoke@v1")
 	ack := flags.String("ack", "", "comma-separated acknowledged warnings, e.g. A1,A3")
 	runBy := flags.String("run-by", "human", "agent or human")
 	wait := flags.Bool("wait", false, "follow status until the campaign finishes")

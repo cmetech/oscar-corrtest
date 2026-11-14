@@ -340,14 +340,14 @@ var helpTopics = map[string]helpTopic{
 	"campaign precheck": {
 		usage:       "oscar-corrtest campaign precheck --server <url> --token-file <file> [options]",
 		description: "Run the campaign pre-checks without starting load.",
-		options:     append([]helpItem{{"--server <url>", "CorrTest base URL (required)."}, {"--token-file <file>", "Bearer token file, re-read per request (required)."}, {"--ca-file <file>", "CA bundle for the server certificate."}, {"--output <format>", "human or json."}}, []helpItem{{"--ack <ids>", "Comma-separated acknowledged warnings."}}...),
+		options:     append([]helpItem{{"--server <url>", "CorrTest base URL (required)."}, {"--token-file <file>", "Bearer token file, re-read per request (required)."}, {"--ca-file <file>", "CA bundle for the server certificate."}, {"--output <format>", "human or json."}}, []helpItem{{"--scenario <id@version>", "Scenario: alerting-day@v1 (default) or alerting-day-smoke@v1."}, {"--ack <ids>", "Comma-separated acknowledged warnings."}}...),
 		examples:    []string{"oscar-corrtest campaign precheck --server https://mini:8443 --token-file ./token"},
 		notes:       []string{"HTTP client of the running service; never opens the data directory. Exit 0 success, 1 runtime error, 2 usage, 3 refused (precheck failed or campaign active), 4 any non-PASS terminal verdict (FAIL, INCONCLUSIVE, ERROR) with --wait."},
 	},
 	"campaign run": {
 		usage:       "oscar-corrtest campaign run --server <url> --token-file <file> [options]",
 		description: "Start the alerting campaign.",
-		options:     append([]helpItem{{"--server <url>", "CorrTest base URL (required)."}, {"--token-file <file>", "Bearer token file, re-read per request (required)."}, {"--ca-file <file>", "CA bundle for the server certificate."}, {"--output <format>", "human or json."}}, []helpItem{{"--scenario <id@version>", "Scenario (default alerting-day@v1)."}, {"--ack <ids>", "Comma-separated acknowledged warnings, e.g. A1,A3."}, {"--run-by <who>", "agent or human (default human)."}, {"--wait", "Poll every 10s until the campaign finishes."}}...),
+		options:     append([]helpItem{{"--server <url>", "CorrTest base URL (required)."}, {"--token-file <file>", "Bearer token file, re-read per request (required)."}, {"--ca-file <file>", "CA bundle for the server certificate."}, {"--output <format>", "human or json."}}, []helpItem{{"--scenario <id@version>", "Scenario: alerting-day@v1 (default) or alerting-day-smoke@v1 (10-minute live smoke, never comparable)."}, {"--ack <ids>", "Comma-separated acknowledged warnings, e.g. A1,A3."}, {"--run-by <who>", "agent or human (default human)."}, {"--wait", "Poll every 10s until the campaign finishes."}}...),
 		examples:    []string{"oscar-corrtest campaign run --server https://mini:8443 --token-file ./token --ack A1,A3 --wait"},
 		notes:       []string{"HTTP client of the running service; never opens the data directory. Exit 0 success, 1 runtime error, 2 usage, 3 refused (precheck failed or campaign active), 4 any non-PASS terminal verdict (FAIL, INCONCLUSIVE, ERROR) with --wait."},
 	},

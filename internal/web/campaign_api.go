@@ -80,9 +80,9 @@ func registerCampaignRoutes(mux *http.ServeMux, data DataSource, workerMode bool
 				if !decodeStrict(w, r, &body) {
 					return
 				}
-				s := campaignscenario.AlertingDayV1()
-				if body.Scenario != s.ID+"@"+s.Version {
-					apiError(w, http.StatusBadRequest, "unknown_scenario", "scenario must be alerting-day@v1")
+				s, ok := campaignscenario.Lookup(body.Scenario)
+				if !ok {
+					apiError(w, http.StatusBadRequest, "unknown_scenario", "scenario must be alerting-day@v1 or alerting-day-smoke@v1")
 					return
 				}
 				if body.RunBy == "" {

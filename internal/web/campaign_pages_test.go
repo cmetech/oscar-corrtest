@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/precheck"
+	campaignscenario "github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/score"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	appruntime "github.com/cmetech/oscar-corrtest/internal/runtime"
@@ -24,9 +25,13 @@ type pageData2 struct {
 }
 
 func (f *pageData2) CampaignStatus(_ context.Context, id string) (appruntime.CampaignView, error) {
-	if id == "pc" {
+	if id == "pc" || id == "pc-smoke" {
 		d, _ := json.Marshal(map[string]any{"results": f.checks})
-		return appruntime.CampaignView{Campaign: domain.Campaign{ID: id, Status: domain.CampaignCompleted},
+		s := campaignscenario.AlertingDayV1()
+		if id == "pc-smoke" {
+			s = campaignscenario.AlertingDaySmokeV1()
+		}
+		return appruntime.CampaignView{Campaign: domain.Campaign{ID: id, Status: domain.CampaignCompleted, ScenarioID: s.ID, ScenarioHash: s.Hash()},
 			Events: []domain.CampaignEvent{{Sequence: 1, Type: precheckEventType, Detail: d}}}, nil
 	}
 	if c, ok := f.campaigns[id]; ok {
@@ -144,5 +149,29 @@ func TestCompareMarksNonComparableRuns(t *testing.T) {
 	api := apiDo(NewHandlerWithData(version.Info{}, f), http.MethodGet, "/api/v1/campaign/compare?ids=a,b", "", false, nil)
 	if api.Code != http.StatusOK {
 		t.Fatalf("api status=%d %s", api.Code, api.Body.String())
+	}
+}
+
+// Ruling C39: the smoke is selectable in the UI. Pre-checks take the chosen
+// scenario; Start runs the scenario its pre-check ran.
+func TestSmokeSelectableInUI(t *testing.T) {
+	f := &pageData2{checks: []precheck.Result{{ID: "B1", Tier: precheck.Blocking, Status: precheck.Pass}}}
+	h := newPagesHandler(f)
+	g := httptest.NewRecorder()
+	h.ServeHTTP(g, httptest.NewRequest(http.MethodGet, "/campaigns", nil))
+	if !strings.Contains(g.Body.String(), `value="alerting-day-smoke@v1"`) {
+		t.Fatal("the pre-check form offers no smoke scenario")
+	}
+	if w := csrfPost(t, h, "/campaigns/prechecks", url.Values{"scenario": {"alerting-day-smoke@v1"}}, true); w.Code != http.StatusSeeOther {
+		t.Fatalf("smoke pre-check status=%d", w.Code)
+	}
+	if w := csrfPost(t, h, "/campaigns/prechecks", url.Values{"scenario": {"nope@v9"}}, true); w.Code != http.StatusBadRequest {
+		t.Fatalf("unknown scenario status=%d", w.Code)
+	}
+	if w := csrfPost(t, h, "/campaigns/start", url.Values{"precheck": {"pc-smoke"}}, true); w.Code != http.StatusSeeOther {
+		t.Fatalf("smoke start status=%d", w.Code)
+	}
+	if len(f.started) != 2 || f.started[0].Scenario.ID != "alerting-day-smoke" || f.started[1].Scenario.ID != "alerting-day-smoke" || f.started[1].PrecheckOnly {
+		t.Fatalf("started %+v", f.started)
 	}
 }

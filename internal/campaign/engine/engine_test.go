@@ -47,6 +47,9 @@ func TestEngineHappyPathPass(t *testing.T) {
 	if c.Verdict != domain.VerdictPass {
 		t.Fatalf("verdict %s, reasons %v", c.Verdict, card.Reasons)
 	}
+	if c.Comparable { // the test scenario is custom (ruling C39: custom never enters the reference)
+		t.Fatal("a custom scenario completed comparable")
+	}
 	h.assertRestored()
 	names := map[string]bool{}
 	for _, hl := range card.Headlines {

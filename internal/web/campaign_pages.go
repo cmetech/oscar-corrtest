@@ -26,6 +26,7 @@ const precheckEventType = "campaign.precheck"
 
 // campaignPage carries everything the three campaign templates need.
 type campaignPage struct {
+	Scenarios  []string // built-in scenario refs (id@version) for the pre-check form
 	Campaigns  []domain.Campaign
 	Campaign   domain.Campaign
 	Events     []domain.CampaignEvent
@@ -92,6 +93,9 @@ func registerCampaignPages(mux *http.ServeMux, info version.Info, data DataSourc
 		}
 		sort.SliceStable(cs, func(i, j int) bool { return cs[i].StartedAt.After(cs[j].StartedAt) })
 		cp := &campaignPage{Campaigns: cs, PrecheckID: precheckID}
+		for _, s := range campaignscenario.Builtins() {
+			cp.Scenarios = append(cp.Scenarios, s.ID+"@"+s.Version)
+		}
 		if cp.PrecheckID == "" && len(cs) > 0 {
 			cp.PrecheckID = cs[0].ID
 		}
@@ -124,9 +128,9 @@ func registerCampaignPages(mux *http.ServeMux, info version.Info, data DataSourc
 		}
 		return true
 	}
-	begin := func(w http.ResponseWriter, r *http.Request, ack []string, only bool) (domain.Campaign, bool) {
+	begin := func(w http.ResponseWriter, r *http.Request, s campaignscenario.Scenario, ack []string, only bool) (domain.Campaign, bool) {
 		c, err := ctl.StartCampaign(r.Context(), appruntime.CampaignOptions{
-			Scenario: campaignscenario.AlertingDayV1(), Trigger: "ui", TriggerIdentity: sessionIdentity(r),
+			Scenario: s, Trigger: "ui", TriggerIdentity: sessionIdentity(r),
 			RunBy: "human", Acknowledged: ack, PrecheckOnly: only,
 		})
 		if errors.Is(err, appruntime.ErrCampaignActive) {
@@ -147,7 +151,16 @@ func registerCampaignPages(mux *http.ServeMux, info version.Info, data DataSourc
 		if !form(w, r) {
 			return
 		}
-		if c, ok := begin(w, r, nil, true); ok {
+		ref := r.PostFormValue("scenario")
+		if ref == "" {
+			ref = "alerting-day@v1"
+		}
+		s, ok := campaignscenario.Lookup(ref)
+		if !ok {
+			list(w, r, "", "Unknown scenario "+ref+".", http.StatusBadRequest)
+			return
+		}
+		if c, ok := begin(w, r, s, nil, true); ok {
 			http.Redirect(w, r, "/campaigns?precheck="+url.QueryEscape(c.ID), http.StatusSeeOther)
 		}
 	})
@@ -176,7 +189,14 @@ func registerCampaignPages(mux *http.ServeMux, info version.Info, data DataSourc
 			}
 			ack = append(ack, c.ID)
 		}
-		if c, ok := begin(w, r, ack, false); ok {
+		// Start runs the scenario its pre-check ran.
+		pv, err := ctl.CampaignStatus(r.Context(), pid)
+		s, ok := campaignscenario.ByHash(pv.Campaign.ScenarioHash)
+		if err != nil || !ok {
+			list(w, r, pid, "The pre-check's scenario is unknown; run pre-checks again.", http.StatusUnprocessableEntity)
+			return
+		}
+		if c, ok := begin(w, r, s, ack, false); ok {
 			http.Redirect(w, r, "/campaigns/"+url.PathEscape(c.ID), http.StatusSeeOther)
 		}
 	})

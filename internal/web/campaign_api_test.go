@@ -166,6 +166,10 @@ func TestCampaignAPIValidation(t *testing.T) {
 	if w.Code != http.StatusAccepted || len(data.started) != 1 || !data.started[0].PrecheckOnly {
 		t.Fatalf("prechecks status=%d started=%+v", w.Code, data.started)
 	}
+	w = apiDo(h, http.MethodPost, "/api/v1/campaign/runs", `{"scenario":"alerting-day-smoke@v1"}`, true, nil)
+	if w.Code != http.StatusAccepted || len(data.started) != 2 || data.started[1].Scenario.ID != "alerting-day-smoke" || !data.started[1].Scenario.Custom {
+		t.Fatalf("smoke start status=%d %s started=%+v", w.Code, w.Body, data.started)
+	}
 	if w := apiDo(h, http.MethodGet, "/api/v1/campaign/runs/camp_1", "", true, nil); w.Code != http.StatusOK {
 		t.Errorf("status=%d", w.Code)
 	}

@@ -244,7 +244,7 @@ func (e *Engine) Run(ctx context.Context, id string, o runtime.CampaignOptions) 
 
 	results := e.d.Precheck(context.WithValue(ctx, campaignIDKey{}, id), o.Scenario)
 	ok, comparable, reason := precheck.Startable(results, o.Acknowledged)
-	r.comparable = comparable
+	r.comparable = comparable && !o.Scenario.Custom // custom (incl. the smoke) never enters the reference
 	detail, _ := json.Marshal(map[string]any{"results": results, "reason": reason, "comparable": comparable})
 	_ = e.d.Store.AppendCampaignEvent(stable, id, precheckEvent, "info", "pre-check results", detail, r.now())
 	if err := e.d.Store.RecordPrecheck(stable, id, domain.PrecheckResult{Passed: ok, Detail: detail, At: r.now()}); err != nil {

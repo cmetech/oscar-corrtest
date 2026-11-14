@@ -146,6 +146,50 @@ func AlertingDayV1() Scenario {
 	}
 }
 
+// AlertingDaySmokeV1 is the bounded live smoke (spec 13.11, plan C19 step 6):
+// about 10 minutes (phases of 2 minutes), baseline 1/s with 2 planned
+// tickets, one resend policy and one set A document of 2 correlation cases
+// (flood: P01 and N01), through the same engine paths as v1. It is Custom,
+// so it is never comparable and never enters the reference or the trend.
+func AlertingDaySmokeV1() Scenario {
+	min := time.Minute
+	n := func(i int) *int { return &i }
+	s := AlertingDayV1() // same limits, pre-check limits, front office and seed
+	s.ID, s.Custom = "alerting-day-smoke", true
+	s.Phases = []Phase{{"preflight", -2 * min, 0}, {"baseline", 0, 2 * min}, {"correlation", 2 * min, 4 * min},
+		{"ticketing", 4 * min, 6 * min}, {"resend", 6 * min, 8 * min}, {"drain", 8 * min, 10 * min}}
+	s.Baseline = BaselineSpec{Rate: 1, UniqueRatio: 0.9, PoolSize: 100, Instances: 50,
+		Severity:     map[string]float64{"critical": 0.05, "major": 0.15, "minor": 0.40, "warning": 0.40},
+		ResolveAfter: min, TicketEveryNth: 100, TicketFrom: 4 * min, TicketTo: 8 * min} // seed 20261113: 2 tickets
+	s.Correlation = CorrelationSpec{SetA: []CaseRef{{Pattern: "flood", Level: "builtin"}}, TicketedPatterns: []string{"flood", "threshold"}}
+	s.Resend = []PolicySpec{{"R1", "notification", "time", 50 * time.Second, 0, n(2), false, 2, "CAMPAIGN_SINK"}}
+	s.ResendUntil = 7*min + 48*time.Second // v1 stops cohorts 2 min before drain; scaled
+	return s
+}
+
+// Builtins are the built-in campaign scenarios.
+func Builtins() []Scenario { return []Scenario{AlertingDayV1(), AlertingDaySmokeV1()} }
+
+// Lookup returns the built-in scenario named "id@version".
+func Lookup(ref string) (Scenario, bool) {
+	for _, s := range Builtins() {
+		if s.ID+"@"+s.Version == ref {
+			return s, true
+		}
+	}
+	return Scenario{}, false
+}
+
+// ByHash returns the built-in scenario with this content hash.
+func ByHash(h string) (Scenario, bool) {
+	for _, s := range Builtins() {
+		if h != "" && s.Hash() == h {
+			return s, true
+		}
+	}
+	return Scenario{}, false
+}
+
 // Phase returns the named phase, or the zero Phase.
 func (s Scenario) Phase(name string) Phase {
 	for _, p := range s.Phases {
