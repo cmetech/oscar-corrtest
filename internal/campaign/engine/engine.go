@@ -302,14 +302,20 @@ func (e *Engine) Recover(ctx context.Context, id string) error {
 			return err
 		}
 	}
-	r.t0 = c.StartedAt
 	r.opts = runtime.CampaignOptions{Trigger: c.Trigger, RunBy: c.RunBy}
 	if s, ok := r.recordedScenario(ctx); ok {
 		r.s = s
 	}
-	if t0, ok := r.recordedT0(ctx); ok {
-		r.t0 = t0
+	// T0 is recorded before the lane start; with no T0 the lane never
+	// started, so there is no traffic to drain or score (ruling C41).
+	if _, err := r.store().RecentCampaignEvents(ctx, id, 1); err != nil {
+		return err // never guess "no traffic" from an unreadable event log
 	}
+	t0, ok := r.recordedT0(ctx)
+	if !ok {
+		return r.finishAfterDrain(ctx, domain.VerdictInconclusive, "no traffic: interrupted before the lane started")
+	}
+	r.t0 = t0
 	return r.finish(ctx, "interrupted: recovered after restart")
 }
 

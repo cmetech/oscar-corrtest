@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -619,5 +620,37 @@ func TestCleanupCompletedCampaign(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("no audit event for the cleanup re-run")
+	}
+}
+
+// Ruling C41: recovering a campaign that never reached traffic skips the
+// lane, the queue wait and scoring, completes INCONCLUSIVE "no traffic",
+// still restores its mutations, and exports without a ledger.
+func TestRecoverWithoutTraffic(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	// isolation ran (one notifier disabled), then the process died before T0
+	if _, err := h.db.RecordMutation(ctx, domain.CampaignMutation{CampaignID: h.id, Kind: kindNotifier, ObjectID: "n1",
+		Prior: mustJSON(notifierPrior{"EMAIL", "enabled"}), RecordedAt: h.clock.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	h.oscar.notifiers["n1"].Status = "disabled"
+	m := &queueMetrics{depths: []float64{500}} // never idle: a queue wait would poll for 30 min
+	h.deps.Metrics = m
+	h.worker.down.Store(true) // a lane resolve would retry for 15 min
+	e := New(h.deps, h.clock)
+	if err := e.Recover(ctx, h.id); err != nil {
+		t.Fatal(err)
+	}
+	c, card := h.scorecard()
+	if c.Status != domain.CampaignCompleted || c.Verdict != domain.VerdictInconclusive || !hasReason(card.Reasons, "no traffic") {
+		t.Fatalf("status %s verdict %s reasons %v", c.Status, c.Verdict, card.Reasons)
+	}
+	if c.Cleanup != domain.CleanupClean || m.calls != 0 || h.worker.resolves.Load() != 0 {
+		t.Fatalf("cleanup %s queue polls %d resolve-all calls %d", c.Cleanup, m.calls, h.worker.resolves.Load())
+	}
+	h.assertRestored()
+	if _, err := e.ExportCampaign(ctx, h.id, filepath.Join(t.TempDir(), "c.zip")); err != nil {
+		t.Fatalf("export without a ledger: %v", err)
 	}
 }
