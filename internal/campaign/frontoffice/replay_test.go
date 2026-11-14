@@ -2,10 +2,12 @@ package frontoffice
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -42,7 +44,7 @@ func replay(t *testing.T, h http.HandlerFunc, users []User, d time.Duration) []A
 	defer srv.Close()
 	t0 := time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)
 	var res []ActionResult
-	Run(context.Background(), srv.URL, srv.Client(), users, 7, spec, &fakeClock{now: t0, limit: t0.Add(d)}, func(r ActionResult) { res = append(res, r) })
+	Run(context.Background(), srv.URL, srv.Client(), users, 5, 7, spec, &fakeClock{now: t0, limit: t0.Add(d)}, func(r ActionResult) { res = append(res, r) })
 	return res
 }
 
@@ -122,6 +124,26 @@ func TestActionsMatchScorecard(t *testing.T) {
 		if !got[a] {
 			t.Fatalf("never emitted %s", a)
 		}
+	}
+}
+
+func TestInstanceFilterLabels(t *testing.T) {
+	re := regexp.MustCompile(`^campaign-host-(\d\d)$`)
+	n := 0
+	replay(t, func(w http.ResponseWriter, r *http.Request) {
+		if f := r.URL.Query().Get("filter"); f != "" {
+			var v struct{ Items []struct{ Value string } }
+			json.Unmarshal([]byte(f), &v)
+			m := re.FindStringSubmatch(v.Items[0].Value)
+			if m == nil || m[1] < "01" || m[1] > "05" {
+				t.Errorf("bad instance %q", v.Items[0].Value)
+			}
+			n++
+		}
+		ok(w, r)
+	}, []User{{"fo-01", "k"}}, time.Hour)
+	if n == 0 {
+		t.Fatal("no instance_filter seen")
 	}
 }
 

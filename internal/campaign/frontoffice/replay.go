@@ -57,13 +57,12 @@ func LoadUsers(dir string, n int) ([]User, error) {
 
 var (
 	severities = []string{"critical", "warning", "info"}
-	instances  = []string{"campaign-0", "campaign-1", "campaign-2", "campaign-3"}
 	// every scorecard action except search, which is scheduled by SearchEvery.
 	rotating = slices.DeleteFunc(slices.Clone(score.FOActions), func(a string) bool { return a == "search" })
 )
 
 // Run blocks until ctx is cancelled or the clock stops. Calls to out are serialized.
-func Run(ctx context.Context, base string, client *http.Client, users []User, seed int64, spec scenario.FrontOfficeSpec, clock lane.Clock, out func(ActionResult)) {
+func Run(ctx context.Context, base string, client *http.Client, users []User, instances int, seed int64, spec scenario.FrontOfficeSpec, clock lane.Clock, out func(ActionResult)) {
 	var mu sync.Mutex
 	emit := func(r ActionResult) { mu.Lock(); defer mu.Unlock(); out(r) }
 	var wg sync.WaitGroup
@@ -71,13 +70,13 @@ func Run(ctx context.Context, base string, client *http.Client, users []User, se
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			runUser(ctx, base, client, u, rand.New(rand.NewSource(seed+int64(i)*7919)), spec, clock, emit)
+			runUser(ctx, base, client, u, rand.New(rand.NewSource(seed+int64(i)*7919)), instances, spec, clock, emit)
 		}()
 	}
 	wg.Wait()
 }
 
-func runUser(ctx context.Context, base string, client *http.Client, u User, rng *rand.Rand, spec scenario.FrontOfficeSpec, clock lane.Clock, emit func(ActionResult)) {
+func runUser(ctx context.Context, base string, client *http.Client, u User, rng *rand.Rand, instances int, spec scenario.FrontOfficeSpec, clock lane.Clock, emit func(ActionResult)) {
 	due := clock.Now()
 	nextSearch := due
 	for ctx.Err() == nil && clock.SleepUntil(ctx, due) {
@@ -87,8 +86,13 @@ func runUser(ctx context.Context, base string, client *http.Client, u User, rng 
 		} else {
 			action = rotating[rng.Intn(len(rotating))]
 		}
-		for _, q := range queries(action, rng, due) {
-			emit(call(ctx, client, base, u, action, q, clock))
+		// paging contributes two samples (pages 2 and 3).
+		for _, q := range queries(action, rng, instances, due) {
+			r := call(ctx, client, base, u, action, q, clock)
+			if ctx.Err() != nil {
+				return // cancelled mid-request: not a real sample
+			}
+			emit(r)
 		}
 		due = due.Add(spec.Interval)
 		if spec.Jitter > 0 {
@@ -98,7 +102,7 @@ func runUser(ctx context.Context, base string, client *http.Client, u User, rng 
 }
 
 // queries returns "path?query" strings for the action (paging makes two).
-func queries(action string, rng *rand.Rand, now time.Time) []string {
+func queries(action string, rng *rand.Rand, instances int, now time.Time) []string {
 	const hist = "/alerts/history"
 	h := func(kv ...string) string {
 		v := url.Values{"page": {"1"}, "perPage": {"50"}, "view_status": {"firing"}}
@@ -117,7 +121,7 @@ func queries(action string, rng *rand.Rand, now time.Time) []string {
 	case "paging":
 		return []string{h("page", "2"), h("page", "3")}
 	case "instance_filter":
-		f, _ := json.Marshal(map[string]any{"items": []map[string]string{{"field": "label:instance", "operator": "equals", "value": instances[rng.Intn(len(instances))]}}, "logicOperator": "and"})
+		f, _ := json.Marshal(map[string]any{"items": []map[string]string{{"field": "label:instance", "operator": "equals", "value": lane.InstanceName(rng.Intn(instances) + 1)}}, "logicOperator": "and"})
 		return []string{h("filter", string(f))}
 	case "search":
 		v := url.Values{"q": {"Campaign"}, "limit": {"50"}, "search_mode": {"fulltext"},
@@ -143,6 +147,7 @@ func call(ctx context.Context, client *http.Client, base string, u User, action,
 		resp.Body.Close()
 		res.Status = resp.StatusCode
 	}
+	// latency is wall time, independent of the injected clock.
 	res.LatencyMillis = time.Since(start).Milliseconds()
 	switch {
 	case err != nil && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)):

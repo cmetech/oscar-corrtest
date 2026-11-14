@@ -76,7 +76,7 @@ func Compile(runID string, seed int64, spec scenario.BaselineSpec, duration time
 				break
 			}
 		}
-		e.Instance = fmt.Sprintf("campaign-host-%02d", rng.IntN(spec.Instances)+1)
+		e.Instance = InstanceName(rng.IntN(spec.Instances) + 1)
 		// Pool identities keep the labels of their first draw (RNG use is unchanged),
 		// so every firing and resolve of one identity is the same Alertmanager alert.
 		if l, ok := poolLabels[e.Identity]; ok {
@@ -137,3 +137,6 @@ func Compile(runID string, seed int64, spec scenario.BaselineSpec, duration time
 	}
 	return p
 }
+
+// InstanceName is the campaign host label for 1-based index i.
+func InstanceName(i int) string { return fmt.Sprintf("campaign-host-%02d", i) }
