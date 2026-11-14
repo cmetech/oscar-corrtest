@@ -40,7 +40,11 @@ func Expect(p scenario.PolicySpec, ds []Delivery) (Expected, error) {
 		return e, nil
 	}
 	e.InitialAt = ds[0].At
-	last, count, handled := ds[0].At, 1, 0 // count includes the initial firing (occurrence 1)
+	last, count := ds[0].At, 1 // count includes the initial firing (occurrence 1)
+	handled := 0
+	if p.Every > 0 {
+		handled = count / p.Every // OSCAR sets handled_count = distinct count when the initial settles
+	}
 	capped := func() bool { return p.MaxResends != nil && len(e.Resends) >= *p.MaxResends }
 	byTime := p.Mode == "time" || p.Mode == "either"
 	byOcc := p.Mode == "occurrences" || p.Mode == "either"

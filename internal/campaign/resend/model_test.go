@@ -92,3 +92,31 @@ func TestUnknownModeErrors(t *testing.T) {
 		t.Fatal("want error")
 	}
 }
+
+func TestEveryOneInitialHandled(t *testing.T) {
+	p := scenario.PolicySpec{Mode: "occurrences", Every: 1}
+	check(t, run(p, func(i int) bool { return i == 0 }), nil, false)
+	all := make([]int, 28)
+	for i := range all {
+		all[i] = i + 1
+	}
+	check(t, run(p, allFresh), mins(all...), false)
+}
+
+// Time resend at count 4 (between multiples of 3) must not consume the
+// multiple at count 6, which still fires on its own delivery.
+// Note: with +1 counting, `>` and `==` are indistinguishable through Expect;
+// occDue's own test pins `>`.
+func TestEitherTimeResendThenCrossing(t *testing.T) {
+	p := scenario.PolicySpec{Mode: "either", Interval: 90 * time.Second, Every: 3}
+	var ds []Delivery
+	for i := 0; i < 8; i++ {
+		ds = append(ds, Delivery{At: time.Duration(i) * 60 * time.Second, Fresh: true})
+	}
+	got, _ := Expect(p, ds)
+	// 2m: count3 (+time); 4m: time, count5; 5m: count6; 7m: time(120s), count8
+	want := mins(2, 4, 5, 7)
+	if !reflect.DeepEqual(got.Resends, want) {
+		t.Fatalf("got %v want %v", got.Resends, want)
+	}
+}
