@@ -147,3 +147,22 @@ func TestPoolEpisodeSingleResolve(t *testing.T) {
 		t.Fatalf("%d unresolved episodes", len(open))
 	}
 }
+
+func TestTieOrdersResolveBeforeFiring(t *testing.T) {
+	// One identity firing every 1s with ResolveAfter 1s: each resolve ties the next firing.
+	s := scenario.BaselineSpec{Rate: 1, PoolSize: 1, Instances: 1, Severity: map[string]float64{"warning": 1}, ResolveAfter: time.Second}
+	p := Compile("t", 1, s, 5*time.Second)
+	ties := 0
+	for i := 1; i < len(p.Events); i++ {
+		a, b := p.Events[i-1], p.Events[i]
+		if a.At == b.At {
+			ties++
+			if a.Kind != Resolve || b.Kind != Firing {
+				t.Fatalf("tie at %v ordered %s then %s", a.At, a.Kind, b.Kind)
+			}
+		}
+	}
+	if ties == 0 {
+		t.Fatal("no ties produced")
+	}
+}

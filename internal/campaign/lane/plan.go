@@ -79,7 +79,7 @@ func Compile(runID string, seed int64, spec scenario.BaselineSpec, duration time
 	}
 	// A firing gets a resolve only if its identity does not fire again within
 	// ResolveAfter, so each episode closes once, at its last firing + ResolveAfter.
-	all := append([]Event(nil), fires...) // firings first: stable sort keeps them ahead on ties
+	all := append([]Event(nil), fires...) // firings first; the sort below puts resolves ahead on At ties
 	nextAt := map[string]time.Duration{}
 	var resolves []Event
 	for i := len(fires) - 1; i >= 0; i-- {
@@ -97,7 +97,13 @@ func Compile(runID string, seed int64, spec scenario.BaselineSpec, duration time
 	for i := range idx {
 		idx[i] = i
 	}
-	sort.SliceStable(idx, func(a, b int) bool { return all[idx[a]].At < all[idx[b]].At })
+	sort.SliceStable(idx, func(a, b int) bool {
+		x, y := all[idx[a]], all[idx[b]]
+		if x.At != y.At {
+			return x.At < y.At
+		}
+		return x.Kind == Resolve && y.Kind == Firing // tie: resolve first so an old episode's resolve cannot close a new one
+	})
 	seqOf := make([]int, n) // firing index -> final Seq
 	for s, o := range idx {
 		if o < n {
