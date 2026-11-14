@@ -90,6 +90,9 @@ func (m *Manager) Start(ctx context.Context, s workerapi.LaneSpec) (workerapi.La
 	if err := json.Unmarshal(s.Params, &p); err != nil {
 		return workerapi.LaneStatus{}, fmt.Errorf("lane params: %w", err)
 	}
+	if s.ID != s.CampaignID+"-baseline" {
+		return workerapi.LaneStatus{}, fmt.Errorf("lane id %q must be <campaignId>-baseline (%q)", s.ID, s.CampaignID+"-baseline")
+	}
 	want, err := hostOf(m.target.BaseURL)
 	if err != nil {
 		return workerapi.LaneStatus{}, err
@@ -103,6 +106,11 @@ func (m *Manager) Start(ctx context.Context, s workerapi.LaneSpec) (workerapi.La
 	snd, err := m.newSender()
 	if err != nil {
 		return workerapi.LaneStatus{}, err
+	}
+	if rows, err := m.store.LaneLedger(ctx, s.ID); err != nil {
+		return workerapi.LaneStatus{}, err
+	} else if len(rows) > 0 {
+		return workerapi.LaneStatus{}, fmt.Errorf("%w: lane %s already has %d ledger rows; use a new campaign id", workerapi.ErrLaneExists, s.ID, len(rows))
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -237,40 +245,51 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 	}
 }
 
-// ResolveAll resolves every identity whose last accepted event is a firing,
-// derived from the ledger alone (rows are in seq order and appended resolves
-// sit after all planned seqs). Idempotent. The lane must not be running.
+// ResolveAll resolves every firing that was attempted and not missed (intent
+// present, so a timed-out send that reached OSCAR counts) whose identity has no
+// later accepted resolve. It derives this from the ledger alone (rows are in seq
+// order; appended resolves sit after all planned seqs), so it also works for a
+// lane this process no longer holds in memory (worker restart). Idempotent. A
+// lane still running in this process must be stopped first.
 func (m *Manager) ResolveAll(ctx context.Context, id string) (int, error) {
 	m.resolveMu.Lock()
 	defer m.resolveMu.Unlock()
 	m.mu.Lock()
-	ls, err := m.get(id)
-	if err == nil && ls.status.State == "running" {
-		err = fmt.Errorf("lane %s is still running; stop it first", id)
+	ls := m.lanes[id]
+	if ls != nil && ls.status.State == "running" {
+		m.mu.Unlock()
+		return 0, fmt.Errorf("lane %s is still running; stop it first", id)
 	}
 	m.mu.Unlock()
+	if ls != nil {
+		<-ls.done
+	}
+	rows, err := m.store.LaneLedger(ctx, id)
 	if err != nil {
 		return 0, err
 	}
-	<-ls.done
-	rows, err := m.store.LaneLedger(ctx, id)
-	if err != nil {
+	if len(rows) == 0 {
+		return 0, workerapi.ErrLaneNotFound
+	}
+	var snd lane.Sender
+	runID := strings.TrimSuffix(id, "-baseline")
+	if ls != nil {
+		snd, runID = ls.sender, ls.runID
+	} else if snd, err = m.newSender(); err != nil {
 		return 0, err
 	}
 	open := map[string]domain.LaneRow{}
 	next := 0
 	for _, r := range rows {
 		next = max(next, r.Seq+1)
-		if !r.Done || r.Status < 200 || r.Status > 299 {
-			continue
-		}
-		if r.Kind == string(lane.Firing) {
+		switch {
+		case r.Kind == string(lane.Firing) && !r.Missed:
 			open[r.Identity] = r
-		} else {
+		case r.Kind == string(lane.Resolve) && r.Done && r.Status >= 200 && r.Status <= 299:
 			delete(open, r.Identity)
 		}
 	}
-	// Send in firing-seq order so a retry after a partial failure is deterministic.
+	// todo follows ledger (seq) order, so a retry after a partial failure resends in the same order.
 	todo := make([]domain.LaneRow, 0, len(open))
 	for _, r := range rows {
 		if o, ok := open[r.Identity]; ok && o.Seq == r.Seq {
@@ -280,13 +299,13 @@ func (m *Manager) ResolveAll(ctx context.Context, id string) (int, error) {
 	n := 0
 	var firstErr error
 	for _, r := range todo {
-		e := lane.Event{Seq: next, Kind: lane.Resolve, Identity: r.Identity, Severity: r.Severity, Instance: r.Instance, FiringSeq: r.Seq}
+		e := lane.Event{Seq: next, Kind: lane.Resolve, Identity: r.Identity, Severity: r.Severity, Instance: r.Instance, Ticket: r.Ticket, FiringSeq: r.Seq}
 		next++
 		now := m.clock.Now()
 		if err := m.store.Intent(ctx, id, e, now); err != nil {
 			return n, err
 		}
-		status, serr := ls.sender.Send(ctx, e, ls.runID, id)
+		status, serr := snd.Send(ctx, e, runID, id)
 		o := lane.Outcome{SentAt: now, Status: status, LatencyMillis: m.clock.Now().Sub(now).Milliseconds()}
 		switch {
 		case serr != nil:
@@ -302,9 +321,11 @@ func (m *Manager) ResolveAll(ctx context.Context, id string) (int, error) {
 			return n, err
 		}
 	}
-	m.mu.Lock()
-	ls.status.Resolved += n
-	m.mu.Unlock()
+	if ls != nil {
+		m.mu.Lock()
+		ls.status.Resolved += n
+		m.mu.Unlock()
+	}
 	return n, firstErr
 }
 
@@ -367,11 +388,22 @@ func (RealClock) SleepUntil(ctx context.Context, t time.Time) bool {
 	}
 }
 
-// Shutdown cancels every running lane without resolving (process exit).
+// Shutdown cancels every running lane without resolving (process exit) and
+// waits up to 10 s for the lane goroutines so their last ledger write lands.
 func (m *Manager) Shutdown() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	var dones []chan struct{}
 	for _, ls := range m.lanes {
 		ls.cancel()
+		dones = append(dones, ls.done)
+	}
+	m.mu.Unlock()
+	deadline := time.After(10 * time.Second)
+	for _, d := range dones {
+		select {
+		case <-d:
+		case <-deadline:
+			return
+		}
 	}
 }

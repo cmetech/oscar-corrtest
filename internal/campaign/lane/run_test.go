@@ -205,6 +205,7 @@ func TestAlertmanagerPayload(t *testing.T) {
 	}{
 		{Event{Kind: Firing, Identity: "A1", Severity: "critical", Instance: "h1", Ticket: true}, "snow", false},
 		{Event{Kind: Resolve, Identity: "A1", Severity: "critical", Instance: "h1"}, "false", true},
+		{Event{Kind: Resolve, Identity: "A1", Severity: "critical", Instance: "h1", Ticket: true}, "snow", true},
 	} {
 		got = nil
 		if st, err := s.Send(context.Background(), tc.e, "run1", "baseline"); err != nil || st != 202 {

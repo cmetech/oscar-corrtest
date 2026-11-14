@@ -245,8 +245,8 @@ func (d *Database) LaneIntent(ctx context.Context, laneID string, e lane.Event, 
 	if err := d.Ready(); err != nil {
 		return fmt.Errorf("database is read-only: %w", err)
 	}
-	_, err := d.db.ExecContext(ctx, `INSERT INTO campaign_lane_ledger(lane_id, seq, kind, identity, severity, instance, scheduled_at) VALUES(?, ?, ?, ?, ?, ?, ?)`,
-		laneID, e.Seq, string(e.Kind), e.Identity, e.Severity, e.Instance, formatTime(at))
+	_, err := d.db.ExecContext(ctx, `INSERT INTO campaign_lane_ledger(lane_id, seq, kind, identity, severity, instance, ticket, scheduled_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+		laneID, e.Seq, string(e.Kind), e.Identity, e.Severity, e.Instance, e.Ticket, formatTime(at))
 	if err != nil {
 		return fmt.Errorf("lane intent: %w", err)
 	}
@@ -269,7 +269,7 @@ func (d *Database) LaneOutcome(ctx context.Context, laneID string, seq int, o la
 }
 
 func (d *Database) LaneLedger(ctx context.Context, laneID string) ([]domain.LaneRow, error) {
-	rows, err := d.db.QueryContext(ctx, `SELECT lane_id, seq, kind, identity, severity, instance, scheduled_at, sent_at, status, error_class, latency_ms, missed
+	rows, err := d.db.QueryContext(ctx, `SELECT lane_id, seq, kind, identity, severity, instance, ticket, scheduled_at, sent_at, status, error_class, latency_ms, missed
         FROM campaign_lane_ledger WHERE lane_id=? ORDER BY seq`, laneID)
 	if err != nil {
 		return nil, fmt.Errorf("lane ledger: %w", err)
@@ -281,7 +281,7 @@ func (d *Database) LaneLedger(ctx context.Context, laneID string) ([]domain.Lane
 		var sched string
 		var sent, class sql.NullString
 		var status, lat, missed sql.NullInt64
-		if err := rows.Scan(&r.LaneID, &r.Seq, &r.Kind, &r.Identity, &r.Severity, &r.Instance, &sched, &sent, &status, &class, &lat, &missed); err != nil {
+		if err := rows.Scan(&r.LaneID, &r.Seq, &r.Kind, &r.Identity, &r.Severity, &r.Instance, &r.Ticket, &sched, &sent, &status, &class, &lat, &missed); err != nil {
 			return nil, err
 		}
 		if r.ScheduledAt, err = time.Parse(time.RFC3339Nano, sched); err != nil {

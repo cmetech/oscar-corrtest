@@ -64,6 +64,7 @@ CREATE TABLE campaign_lane_ledger (
     identity TEXT NOT NULL,
     severity TEXT NOT NULL,
     instance TEXT NOT NULL,
+    ticket INTEGER NOT NULL DEFAULT 0 CHECK (ticket IN (0,1)),
     scheduled_at TEXT NOT NULL,
     sent_at TEXT,
     status INTEGER,

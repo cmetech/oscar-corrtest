@@ -29,6 +29,9 @@ func (r *Runtime) EnableCampaignWorker(ctx context.Context) error {
 	if len(targets) == 0 {
 		return errors.New("campaign worker: no target is configured; create a target first")
 	}
+	if len(targets) > 1 {
+		r.logger.WarnContext(ctx, "campaign worker: several targets configured; using the first", "target", targets[0].ID, "count", len(targets))
+	}
 	r.worker = worker.NewManager(workerStore{Ledger: storage.NewLaneLedger(r.database), db: r.database}, targets[0], worker.RealClock{}, workerHeartbeatTimeout)
 	return nil
 }

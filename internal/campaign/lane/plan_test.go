@@ -93,6 +93,24 @@ func TestTicketsOnlyNewIdentitiesInWindow(t *testing.T) {
 	}
 }
 
+func TestResolveTicketMatchesFiring(t *testing.T) {
+	p := Compile("r1", 1, spec(), two)
+	n := 0
+	for _, e := range p.Events {
+		if e.Kind == Resolve {
+			if f := p.Events[e.FiringSeq]; e.Ticket != f.Ticket {
+				t.Fatalf("resolve %d ticket=%v firing ticket=%v", e.Seq, e.Ticket, f.Ticket)
+			}
+			if e.Ticket {
+				n++
+			}
+		}
+	}
+	if n == 0 {
+		t.Fatal("no ticketed resolves")
+	}
+}
+
 func TestDeterministicBySeed(t *testing.T) {
 	a, b, c := Compile("r", 7, spec(), time.Hour), Compile("r", 7, spec(), time.Hour), Compile("r", 8, spec(), time.Hour)
 	same := true

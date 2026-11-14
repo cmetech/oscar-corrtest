@@ -61,6 +61,7 @@ type LaneRow struct {
 	Seq                 int
 	Kind, Identity      string
 	Severity, Instance  string
+	Ticket              bool
 	ScheduledAt, SentAt time.Time
 	Done, Missed        bool
 	Status              int

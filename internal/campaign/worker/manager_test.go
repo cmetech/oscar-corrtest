@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -49,7 +49,7 @@ func (s *memStore) Intent(_ context.Context, id string, e lane.Event, at time.Ti
 	if s.rows[id][e.Seq] != nil {
 		return errors.New("duplicate")
 	}
-	s.rows[id][e.Seq] = &domain.LaneRow{LaneID: id, Seq: e.Seq, Kind: string(e.Kind), Identity: e.Identity, Severity: e.Severity, Instance: e.Instance, ScheduledAt: at}
+	s.rows[id][e.Seq] = &domain.LaneRow{LaneID: id, Seq: e.Seq, Kind: string(e.Kind), Identity: e.Identity, Severity: e.Severity, Instance: e.Instance, Ticket: e.Ticket, ScheduledAt: at}
 	return nil
 }
 func (s *memStore) Outcome(_ context.Context, id string, seq int, o lane.Outcome) error {
@@ -118,7 +118,7 @@ func (c *fakeClock) run(d time.Duration, each func()) {
 func spec(id, url string, dur time.Duration) workerapi.LaneSpec {
 	p, _ := json.Marshal(workerapi.BaselineParams{TargetURL: url, Seed: 1, Duration: dur, Baseline: scenario.BaselineSpec{
 		Rate: 1, UniqueRatio: 1, PoolSize: 1, Instances: 1, Severity: map[string]float64{"critical": 1}, ResolveAfter: time.Hour}})
-	return workerapi.LaneSpec{ID: id, CampaignID: "r1", Kind: "baseline", Params: p}
+	return workerapi.LaneSpec{ID: id, CampaignID: strings.TrimSuffix(id, "-baseline"), Kind: "baseline", Params: p}
 }
 
 func waitFor(t *testing.T, what string, f func() bool) {
@@ -236,7 +236,6 @@ func TestLedgerStreamsRows(t *testing.T) {
 	if _, err := m.Status(ctx, "nope"); !errors.Is(err, workerapi.ErrLaneNotFound) {
 		t.Fatal(err)
 	}
-	_ = fmt.Sprint()
 }
 
 type safeBuf struct{ b []byte }
@@ -249,4 +248,47 @@ func (s *safeBuf) lines() (n int) {
 		}
 	}
 	return
+}
+
+func TestResolveAllRecoversAfterRestart(t *testing.T) {
+	m, clk, st, snd := newMgr(t)
+	ctx := context.Background()
+	if _, err := m.Start(ctx, spec("r1-baseline", "https://oscar.home.arpa:8443", 3*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	clk.run(3*time.Second, nil)
+	waitFor(t, "firings", func() bool { return snd.count(lane.Firing) == 3 })
+	_ = m.Stop(ctx, "r1-baseline")
+
+	snd2 := &fakeSender{}
+	m2 := NewManager(st, domain.Target{BaseURL: "https://oscar.home.arpa:8443"}, clk, 30*time.Second)
+	m2.newSender = func() (lane.Sender, error) { return snd2, nil }
+	if _, err := m2.ResolveAll(ctx, "nope-baseline"); !errors.Is(err, workerapi.ErrLaneNotFound) {
+		t.Fatalf("err=%v", err)
+	}
+	if n, err := m2.ResolveAll(ctx, "r1-baseline"); err != nil || n != 3 {
+		t.Fatalf("n=%d err=%v", n, err)
+	}
+	if n, _ := m2.ResolveAll(ctx, "r1-baseline"); n != 0 {
+		t.Fatalf("second n=%d", n)
+	}
+	if _, err := m2.Start(ctx, spec("r1-baseline", "https://oscar.home.arpa:8443", time.Hour)); !errors.Is(err, workerapi.ErrLaneExists) {
+		t.Fatalf("reused lane id err=%v", err)
+	}
+	if _, err := m2.Start(ctx, workerapi.LaneSpec{ID: "x", CampaignID: "y", Kind: "baseline"}); err == nil {
+		t.Fatal("lane id must be <campaign>-baseline")
+	}
+}
+
+func TestResolveAllIncludesUnknownOutcomeAndTicket(t *testing.T) {
+	m, clk, st, snd := newMgr(t)
+	ctx := context.Background()
+	_ = st.Intent(ctx, "r1-baseline", lane.Event{Seq: 0, Kind: lane.Firing, Identity: "A", Severity: "critical", Instance: "h", Ticket: true}, clk.Now())
+	_ = st.Outcome(ctx, "r1-baseline", 0, lane.Outcome{SentAt: clk.Now(), ErrorClass: lane.ErrClassTimeout})
+	_ = st.Intent(ctx, "r1-baseline", lane.Event{Seq: 1, Kind: lane.Firing, Identity: "B", Severity: "critical", Instance: "h"}, clk.Now())
+	_ = st.Outcome(ctx, "r1-baseline", 1, lane.Outcome{SentAt: clk.Now(), ErrorClass: lane.ErrClassMissed, Missed: true})
+	n, err := m.ResolveAll(ctx, "r1-baseline")
+	if err != nil || n != 1 || len(snd.sends) != 1 || !snd.sends[0].Ticket || snd.sends[0].Identity != "A" {
+		t.Fatalf("n=%d err=%v sends=%+v", n, err, snd.sends)
+	}
 }

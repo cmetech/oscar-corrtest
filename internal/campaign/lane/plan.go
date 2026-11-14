@@ -94,7 +94,7 @@ func Compile(runID string, seed int64, spec scenario.BaselineSpec, duration time
 	for i := len(fires) - 1; i >= 0; i-- {
 		f, at := fires[i], fires[i].At
 		if nx, ok := nextAt[f.Identity]; !ok || nx >= f.At+spec.ResolveAfter {
-			f.Kind, f.At, f.Ticket, f.FiringSeq = Resolve, f.At+spec.ResolveAfter, false, i
+			f.Kind, f.At, f.FiringSeq = Resolve, f.At+spec.ResolveAfter, i // Ticket is kept so the resolve matches the firing's labels
 			resolves = append(resolves, f)
 		}
 		nextAt[f.Identity] = at
