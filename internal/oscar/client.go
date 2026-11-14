@@ -641,3 +641,8 @@ type notificationWire struct {
 	CreatedAt        flexTime          `json:"created_at"`
 	Labels           map[string]string `json:"labels"`
 }
+
+// DoJSON is the exported form of doJSON so sibling packages reuse TLS, credentials and response caps.
+func (c *Client) DoJSON(ctx context.Context, method, path string, query url.Values, in, out any) error {
+	return c.doJSON(ctx, method, path, query, in, out)
+}
