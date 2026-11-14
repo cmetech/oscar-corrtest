@@ -43,6 +43,8 @@ CREATE TABLE campaign_runs (
     PRIMARY KEY (campaign_id, run_id)
 ) STRICT;
 
+CREATE INDEX campaign_runs_run_idx ON campaign_runs(run_id);
+
 CREATE TABLE campaign_mutations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     campaign_id TEXT NOT NULL REFERENCES campaigns(id) ON DELETE RESTRICT,
@@ -65,7 +67,7 @@ CREATE TABLE campaign_lane_ledger (
     scheduled_at TEXT NOT NULL,
     sent_at TEXT,
     status INTEGER,
-    error_class TEXT CHECK (error_class IS NULL OR error_class IN ('', 'http', 'timeout', 'network', 'missed')),
+    error_class TEXT CHECK (error_class IS NULL OR error_class IN ('', 'http', 'timeout', 'network', 'missed', 'cancelled')),
     latency_ms INTEGER,
     missed INTEGER CHECK (missed IS NULL OR missed IN (0, 1)),
     PRIMARY KEY (lane_id, seq),

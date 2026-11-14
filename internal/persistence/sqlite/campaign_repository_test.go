@@ -3,8 +3,10 @@ package sqlite
 import (
 	"context"
 	"encoding/json"
+	"io/fs"
 	"path/filepath"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/lane"
@@ -33,10 +35,45 @@ func newCampaign(t *testing.T, d *Database, id string) {
 }
 
 func TestMigration0006AppliesOnTopOf0005(t *testing.T) {
-	d := openCampaignDB(t)
-	var n int
-	if err := d.db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 6 {
+	ctx := context.Background()
+	db := openTestSQL(t)
+	old := fstest.MapFS{}
+	entries, err := fs.ReadDir(embeddedMigrations, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() < "0006" {
+			data, _ := embeddedMigrations.ReadFile("migrations/" + e.Name())
+			old["migrations/"+e.Name()] = &fstest.MapFile{Data: data}
+		}
+	}
+	if err := migrate(ctx, db, old); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO targets(id, display_name, base_url, created_at, updated_at) VALUES('t','T','http://x','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')`,
+		`INSERT INTO runs(id, short_token, target_id, status, cleanup_status, harness_version, created_at, updated_at) VALUES('r','tok','t','QUEUED','NOT_REQUIRED','v','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := migrate(ctx, db, embeddedMigrations); err != nil {
+		t.Fatal(err)
+	}
+	var n, runs int
+	if err := db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 6 {
 		t.Fatalf("n=%d err=%v", n, err)
+	}
+	if err := db.QueryRow(`SELECT count(*) FROM runs`).Scan(&runs); err != nil || runs != 1 {
+		t.Fatalf("runs=%d err=%v", runs, err)
+	}
+	for _, table := range []string{"campaigns", "campaign_events", "campaign_prechecks", "campaign_runs", "campaign_mutations", "campaign_lane_ledger"} {
+		var c int
+		if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&c); err != nil || c != 1 {
+			t.Errorf("table %s missing", table)
+		}
 	}
 }
 
@@ -44,10 +81,13 @@ func TestCampaignTransitions(t *testing.T) {
 	ctx, now := context.Background(), time.Now()
 	d := openCampaignDB(t)
 	newCampaign(t, d, "c1")
-	for _, next := range []domain.CampaignStatus{domain.CampaignRunning, domain.CampaignStopping, domain.CampaignDraining, domain.CampaignCleaningUp, domain.CampaignCompleted} {
+	for _, next := range []domain.CampaignStatus{domain.CampaignRunning, domain.CampaignStopping, domain.CampaignDraining, domain.CampaignCleaningUp} {
 		if err := d.TransitionCampaign(ctx, "c1", next, now, "to "+string(next)); err != nil {
 			t.Fatalf("%s: %v", next, err)
 		}
+	}
+	if err := d.CompleteCampaign(ctx, "c1", domain.VerdictPass, domain.CleanupClean, true, nil, nil, now); err != nil {
+		t.Fatal(err)
 	}
 	if err := d.TransitionCampaign(ctx, "c1", domain.CampaignRunning, now, "x"); err == nil {
 		t.Fatal("COMPLETED->RUNNING accepted")
@@ -131,7 +171,61 @@ func TestInterruptedCampaignsListsRunningOnes(t *testing.T) {
 	if err != nil || len(all) != 2 {
 		t.Fatalf("all=%d err=%v", len(all), err)
 	}
-	if all[0].ID != "done" && all[1].Verdict != domain.VerdictPass && all[0].Verdict != domain.VerdictPass {
-		t.Fatal("verdict lost")
+	done, _ := d.ListCampaigns(ctx, domain.CampaignFilter{Status: domain.CampaignCompleted})
+	if len(done) != 1 || done[0].ID != "done" || done[0].Verdict != domain.VerdictPass || done[0].EndedAt.IsZero() {
+		t.Fatalf("done=%+v", done)
+	}
+}
+
+func TestInterruptedCampaignsIncludesInterruptedAndRecovering(t *testing.T) {
+	ctx, now := context.Background(), time.Now()
+	d := openCampaignDB(t)
+	newCampaign(t, d, "i")
+	newCampaign(t, d, "r")
+	_ = d.TransitionCampaign(ctx, "i", domain.CampaignInterrupted, now, "x")
+	_ = d.TransitionCampaign(ctx, "r", domain.CampaignInterrupted, now, "x")
+	if err := d.TransitionCampaign(ctx, "r", domain.CampaignRecovering, now, "x"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := d.InterruptedCampaigns(ctx)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("got=%+v err=%v", got, err)
+	}
+}
+
+func TestTransitionToCompletedRejected(t *testing.T) {
+	ctx := context.Background()
+	d := openCampaignDB(t)
+	newCampaign(t, d, "c1")
+	if err := d.TransitionCampaign(ctx, "c1", domain.CampaignCompleted, time.Now(), "x"); err == nil {
+		t.Fatal("TransitionCampaign accepted COMPLETED")
+	}
+}
+
+func TestMutationRestoredTwiceIsDistinctFromNotFound(t *testing.T) {
+	ctx, now := context.Background(), time.Now()
+	d := openCampaignDB(t)
+	newCampaign(t, d, "c1")
+	id, _ := d.RecordMutation(ctx, domain.CampaignMutation{CampaignID: "c1", Kind: "sink_enable", ObjectID: "k"})
+	_ = d.MarkMutationRestored(ctx, id, now)
+	if err := d.MarkMutationRestored(ctx, id, now); err == nil || err == ErrNotFound {
+		t.Fatalf("err=%v", err)
+	}
+	if err := d.MarkMutationRestored(ctx, 999, now); err != ErrNotFound {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestLaneLedgerAcceptsEveryEmittedErrorClass(t *testing.T) {
+	ctx, now := context.Background(), time.Now()
+	d := openCampaignDB(t)
+	l := NewLaneLedger(d)
+	for i, class := range append([]string{""}, lane.ErrClasses...) {
+		if err := l.Intent(ctx, "L", lane.Event{Seq: i, Kind: lane.Firing}, now); err != nil {
+			t.Fatal(err)
+		}
+		if err := l.Outcome(ctx, "L", i, lane.Outcome{SentAt: now, ErrorClass: class, Missed: class == lane.ErrClassMissed}); err != nil {
+			t.Fatalf("class %q: %v", class, err)
+		}
 	}
 }

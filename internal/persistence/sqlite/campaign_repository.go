@@ -68,6 +68,9 @@ func (d *Database) campaignTx(ctx context.Context, fn func(*sql.Tx) error) error
 }
 
 func (d *Database) TransitionCampaign(ctx context.Context, id string, next domain.CampaignStatus, at time.Time, summary string) error {
+	if next == domain.CampaignCompleted {
+		return fmt.Errorf("campaign completes only through CompleteCampaign")
+	}
 	return d.campaignTx(ctx, func(tx *sql.Tx) error {
 		var current domain.CampaignStatus
 		if err := tx.QueryRowContext(ctx, `SELECT status FROM campaigns WHERE id=?`, id).Scan(&current); err != nil {
@@ -130,6 +133,10 @@ func (d *Database) MarkMutationRestored(ctx context.Context, id int64, at time.T
 			return fmt.Errorf("mark mutation restored: %w", err)
 		}
 		if n, _ := res.RowsAffected(); n != 1 {
+			var one int
+			if tx.QueryRowContext(ctx, `SELECT 1 FROM campaign_mutations WHERE id=?`, id).Scan(&one) == nil {
+				return fmt.Errorf("mutation %d already restored", id)
+			}
 			return ErrNotFound
 		}
 		return nil

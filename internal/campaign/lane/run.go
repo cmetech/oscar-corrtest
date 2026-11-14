@@ -18,7 +18,18 @@ type Ledger interface {
 	Outcome(ctx context.Context, laneID string, seq int, o Outcome) error
 }
 
-// Outcome.ErrorClass is "", "http", "timeout", "network" or "missed".
+// Outcome.ErrorClass is "" or one of the ErrClass* constants.
+const (
+	ErrClassHTTP      = "http"
+	ErrClassTimeout   = "timeout"
+	ErrClassNetwork   = "network"
+	ErrClassMissed    = "missed"
+	ErrClassCancelled = "cancelled"
+)
+
+// ErrClasses lists every non-empty class the lane can emit.
+var ErrClasses = []string{ErrClassHTTP, ErrClassTimeout, ErrClassNetwork, ErrClassMissed, ErrClassCancelled}
+
 type Outcome struct {
 	SentAt        time.Time
 	Status        int
@@ -68,7 +79,7 @@ func Run(ctx context.Context, laneID string, plan Plan, start time.Time, s Sende
 		var o Outcome
 		if lag > max(time.Second, e.At/20) {
 			cnt.Missed++
-			o = Outcome{SentAt: now, ErrorClass: "missed", Missed: true}
+			o = Outcome{SentAt: now, ErrorClass: ErrClassMissed, Missed: true}
 		} else {
 			last[e.Kind] = now
 			status, err := s.Send(ctx, e, plan.RunID, laneID)
@@ -76,19 +87,19 @@ func Run(ctx context.Context, laneID string, plan Plan, start time.Time, s Sende
 			switch {
 			case err != nil:
 				cnt.Unknown++
-				o.ErrorClass = "network"
+				o.ErrorClass = ErrClassNetwork
 				if errors.Is(err, context.Canceled) {
-					o.ErrorClass = "cancelled"
+					o.ErrorClass = ErrClassCancelled
 				}
 				var ne net.Error
 				if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()) {
-					o.ErrorClass = "timeout"
+					o.ErrorClass = ErrClassTimeout
 				}
 			case status >= 200 && status < 300:
 				cnt.Accepted++
 			default:
 				cnt.Failed++
-				o.ErrorClass = "http"
+				o.ErrorClass = ErrClassHTTP
 			}
 		}
 		werr := l.Outcome(stable, laneID, e.Seq, o)
