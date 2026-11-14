@@ -120,6 +120,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return a.runScenario(ctx, args[1:])
 	case "plan":
 		return a.runPlan(ctx, args[1:])
+	case "campaign":
+		return a.runCampaign(ctx, args[1:])
 	case "run":
 		return a.runCorrelation(ctx, args[1:])
 	default:
