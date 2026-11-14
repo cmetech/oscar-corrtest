@@ -37,8 +37,12 @@ type Plan struct {
 	Firings, Resolves, Tickets int
 }
 
-// Compile builds the baseline plan: firings every 1/Rate seconds for duration,
-// each resolved ResolveAfter later. Events are sorted by At, then Seq.
+// Compile builds the baseline plan: firings every 1/Rate seconds for duration.
+// Resolves follow the episode rule: an episode is a run of firings of one
+// identity whose gaps are each < ResolveAfter, and it gets exactly one resolve
+// at lastFiringAt + ResolveAfter (FiringSeq points at that last firing). New
+// identities fire once, so they resolve once. Plan.Resolves counts episodes.
+// Events are sorted by At, then Seq.
 func Compile(runID string, seed int64, spec scenario.BaselineSpec, duration time.Duration) Plan {
 	rng := rand.New(rand.NewPCG(uint64(seed), 0x9e3779b97f4a7c15))
 	// Sorted keys so the severity pick is deterministic despite map order.
@@ -73,41 +77,48 @@ func Compile(runID string, seed int64, spec scenario.BaselineSpec, duration time
 		e.Instance = fmt.Sprintf("campaign-host-%02d", rng.IntN(spec.Instances)+1)
 		fires = append(fires, e)
 	}
-	// Firings precede resolves; the stable sort keeps that order on ties.
-	all := append([]Event(nil), fires...)
-	for i, f := range fires {
-		f.Kind, f.At, f.Ticket, f.FiringSeq = Resolve, f.At+spec.ResolveAfter, false, i
-		all = append(all, f)
+	// A firing gets a resolve only if its identity does not fire again within
+	// ResolveAfter, so each episode closes once, at its last firing + ResolveAfter.
+	all := append([]Event(nil), fires...) // firings first: stable sort keeps them ahead on ties
+	nextAt := map[string]time.Duration{}
+	var resolves []Event
+	for i := len(fires) - 1; i >= 0; i-- {
+		f, at := fires[i], fires[i].At
+		if nx, ok := nextAt[f.Identity]; !ok || nx >= f.At+spec.ResolveAfter {
+			f.Kind, f.At, f.Ticket, f.FiringSeq = Resolve, f.At+spec.ResolveAfter, false, i
+			resolves = append(resolves, f)
+		}
+		nextAt[f.Identity] = at
 	}
-	for i := range all {
-		all[i].FiringSeq = map[bool]int{true: i, false: all[i].FiringSeq}[all[i].Kind == Firing]
+	for i := len(resolves) - 1; i >= 0; i-- { // restore firing order before the stable sort
+		all = append(all, resolves[i])
 	}
-	idx := make([]int, len(all)) // original index = firing index for firings
+	idx := make([]int, len(all))
 	for i := range idx {
 		idx[i] = i
 	}
 	sort.SliceStable(idx, func(a, b int) bool { return all[idx[a]].At < all[idx[b]].At })
-	pos := make(map[int]int, n) // firing index -> final Seq
+	seqOf := make([]int, n) // firing index -> final Seq
 	for s, o := range idx {
 		if o < n {
-			pos[o] = s
+			seqOf[o] = s
 		}
 	}
 	p.Events = make([]Event, len(all))
 	for s, o := range idx {
 		e := all[o]
 		e.Seq = s
-		e.FiringSeq = pos[e.FiringSeq]
-		p.Events[s] = e
-		switch {
-		case e.Kind == Resolve:
-			p.Resolves++
-		default:
+		if e.Kind == Firing {
+			e.FiringSeq = s
 			p.Firings++
 			if e.Ticket {
 				p.Tickets++
 			}
+		} else {
+			e.FiringSeq = seqOf[e.FiringSeq]
+			p.Resolves++
 		}
+		p.Events[s] = e
 	}
 	return p
 }

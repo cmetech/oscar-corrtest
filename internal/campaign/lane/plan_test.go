@@ -15,8 +15,24 @@ const two = 120 * time.Minute
 
 func TestCompileCountsForTwoHours(t *testing.T) {
 	p := Compile("r1", 1, spec(), two)
-	if p.Firings != 25200 || p.Resolves != p.Firings {
-		t.Fatalf("firings=%d resolves=%d", p.Firings, p.Resolves)
+	if p.Firings != 25200 {
+		t.Fatalf("firings=%d", p.Firings)
+	}
+	rs, last, inst := 0, map[string]time.Duration{}, map[string]bool{}
+	for _, e := range p.Events {
+		if e.Kind == "firing" {
+			inst[e.Instance] = true
+			if l, ok := last[e.Identity]; !ok || e.At-l >= spec().ResolveAfter {
+				rs++ // episode start
+			}
+			last[e.Identity] = e.At
+		}
+	}
+	if p.Resolves != rs || p.Resolves >= p.Firings {
+		t.Fatalf("resolves=%d episodes=%d", p.Resolves, rs)
+	}
+	if len(inst) != 50 {
+		t.Fatalf("instances=%d", len(inst))
 	}
 	at := map[int]time.Duration{}
 	for _, e := range p.Events {
@@ -25,7 +41,7 @@ func TestCompileCountsForTwoHours(t *testing.T) {
 		}
 	}
 	for _, e := range p.Events {
-		if e.Kind == "resolve" && e.At != at[e.FiringSeq]+15*time.Minute {
+		if e.Kind == "resolve" && e.At != at[e.FiringSeq]+spec().ResolveAfter {
 			t.Fatalf("resolve %d at %v, firing at %v", e.Seq, e.At, at[e.FiringSeq])
 		}
 	}
@@ -105,5 +121,29 @@ func TestSeverityDistribution(t *testing.T) {
 		if got := float64(cnt[k]) / float64(p.Firings); math.Abs(got-w) > 0.02 {
 			t.Fatalf("%s share %v want %v", k, got, w)
 		}
+	}
+}
+
+func TestPoolEpisodeSingleResolve(t *testing.T) {
+	p := Compile("r1", 1, spec(), two)
+	ra := spec().ResolveAfter
+	open := map[string]time.Duration{} // identity -> last firing At while episode open
+	for _, e := range p.Events {
+		switch e.Kind {
+		case "firing":
+			if l, ok := open[e.Identity]; ok && e.At-l >= ra {
+				t.Fatalf("%s fired after episode should have resolved", e.Identity)
+			}
+			open[e.Identity] = e.At
+		case "resolve":
+			l, ok := open[e.Identity]
+			if !ok || e.At != l+ra {
+				t.Fatalf("%s resolve at %v, open=%v/%v", e.Identity, e.At, l, ok)
+			}
+			delete(open, e.Identity)
+		}
+	}
+	if len(open) != 0 {
+		t.Fatalf("%d unresolved episodes", len(open))
 	}
 }
