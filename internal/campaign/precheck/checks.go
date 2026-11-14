@@ -30,8 +30,9 @@ const (
 	gib              = 1 << 30
 )
 
-// b9Jobs are the homelab pack's jobs; each needs a success in the last hour.
-var b9Jobs = []string{
+// HomelabJobs are the homelab pack's jobs (B9: each needs a success in the
+// last hour; the scorecard reports their runs).
+var HomelabJobs = []string{
 	"monitor:check_connection:homelab",
 	"monitor:check_processes:homelab_lan",
 	"monitor:check_processes:homelab_k8s",
@@ -457,7 +458,7 @@ func b8(ctx context.Context, d Deps) Result {
 
 func b9(ctx context.Context, d Deps) Result {
 	end := d.Now()
-	runs, err := d.TaskRuns(ctx, b9Jobs, end.Add(-b9Window), end)
+	runs, err := d.TaskRuns(ctx, HomelabJobs, end.Add(-b9Window), end)
 	if err != nil {
 		return errRes("B9", Blocking, "task history", err)
 	}
@@ -468,12 +469,12 @@ func b9(ctx context.Context, d Deps) Result {
 		}
 	}
 	var probs []string
-	for _, j := range b9Jobs {
+	for _, j := range HomelabJobs {
 		if !ok[j] {
 			probs = append(probs, "no successful run in 60m: "+j)
 		}
 	}
-	return res("B9", Blocking, true, fmt.Sprintf("%d/%d jobs ok", len(b9Jobs)-len(probs), len(b9Jobs)), probs)
+	return res("B9", Blocking, true, fmt.Sprintf("%d/%d jobs ok", len(HomelabJobs)-len(probs), len(HomelabJobs)), probs)
 }
 
 func b10(ctx context.Context, d Deps) Result {

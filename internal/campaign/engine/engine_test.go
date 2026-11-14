@@ -76,6 +76,9 @@ func TestEngineHappyPathPass(t *testing.T) {
 	if card.Baseline.Planned == 0 || card.Baseline.Offered < card.Baseline.Planned*98/100 {
 		t.Errorf("baseline planned %d offered %d", card.Baseline.Planned, card.Baseline.Offered)
 	}
+	if hl := card.Homelab; !hl.Collected || hl.Completed != 2 || hl.Failed != 1 || hl.PreP95 == 0 {
+		t.Errorf("homelab task stats %+v", hl)
+	}
 	h.oscar.mu.Lock()
 	defer h.oscar.mu.Unlock()
 	tokens := map[string]int{}
@@ -337,12 +340,16 @@ func TestMissingEvidenceIsNotPass(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	h.oscar.sinkErr = true
+	h.deps.TaskRuns = nil // no task history client: "not collected", never 0/0
 	if err := h.run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	c, card := h.scorecard()
 	if c.Verdict == domain.VerdictPass || !hasReason(card.Reasons, "missing evidence: sink receipts") {
 		t.Fatalf("verdict %s reasons %v", c.Verdict, card.Reasons)
+	}
+	if card.Homelab.Collected || card.Homelab.NotCollected == "" {
+		t.Fatalf("homelab %+v", card.Homelab)
 	}
 }
 

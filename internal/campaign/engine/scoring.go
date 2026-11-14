@@ -47,8 +47,10 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 	}
 	in := score.Inputs{PlannedBaseline: r.plannedBaseline(), ScenarioHash: r.s.Hash(), Trigger: r.opts.Trigger, RunBy: r.opts.RunBy, Comparable: r.comparable, CleanupClean: clean,
 		Start: r.t0, End: end, Phases: r.s.Phases, Ledger: ledger, Correlation: r.corrRuns, NotRun: r.notRun,
-		PlannedCorrelation: r.plannedCorr, FrontOffice: r.fo, PreTasks: r.preTasks,
+		PlannedCorrelation: r.plannedCorr, FrontOffice: r.fo,
 		GuardStopped: trip != "" && !lost, Precheck: r.s.Precheck}
+	in.Tasks, in.PreTasks, in.TasksNotCollected = r.taskRuns(ctx, end)
+	in.TasksCollected = in.TasksNotCollected == ""
 	var err error
 	if in.History, err = r.e.d.Target.History(ctx, r.id, r.t0, end); err != nil {
 		r.noteMissing("history: " + err.Error())
@@ -105,6 +107,22 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 	}
 	report["reasons"] = card.Reasons
 	return card, mustJSON(report)
+}
+
+// taskRuns reads the homelab pack's runs for the campaign window and for the
+// hour before T0, or says why they were not collected.
+func (r *run) taskRuns(ctx context.Context, end time.Time) (during, pre []targetops.TaskRun, notCollected string) {
+	if r.e.d.TaskRuns == nil {
+		return nil, nil, "no task history client"
+	}
+	pre, err := r.e.d.TaskRuns(ctx, r.t0.Add(-time.Hour), r.t0)
+	if err == nil {
+		during, err = r.e.d.TaskRuns(ctx, r.t0, end)
+	}
+	if err != nil {
+		return nil, nil, "task history: " + err.Error()
+	}
+	return during, pre, ""
 }
 
 // laneGrace: plan events due this close to the lane stop may have been in

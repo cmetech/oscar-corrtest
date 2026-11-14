@@ -107,6 +107,9 @@ func NewFromConfig(ctx context.Context, cfg campaign.Config, host Host) (*Engine
 	d := Deps{ReportDir: reportDir, Store: db, Worker: wc, Target: oscarTarget{oc}, SNOW: snow, Sink: sink, Metrics: metrics, Probe: probe,
 		Correlate: host.ExecuteScenarioForCampaign, ExportRun: host.ExportRun, TargetID: target.ID, IngestURL: root, CampaignNotifier: notifier,
 		FrontOfficeURL: root, FrontOfficeHTTP: targetHTTP, FrontOfficeUsers: users}
+	d.TaskRuns = func(ctx context.Context, start, end time.Time) ([]targetops.TaskRun, error) {
+		return targetops.TaskRuns(ctx, oc, precheck.HomelabJobs, start, end)
+	}
 	d.Precheck = func(ctx context.Context, s scenario.Scenario) []precheck.Result {
 		a := &PrecheckAdapter{ID: campaignIDFrom(ctx), Clock: clock, Oscar: oc, Metrics: metrics, ProbeFn: probe, WorkerInfoFn: wc.Info,
 			Store: db, Sink: sink, SinkHealthURL: cfg.SinkURL + "/healthz", SinkHTTP: sinkHTTP, SNOW: snow, Users: users,

@@ -122,6 +122,9 @@ type Deps struct {
 	Probe   func(ctx context.Context) (targetops.ProbeResult, error)
 	// Precheck runs the C10 checks (precheck.Run with the real adapter).
 	Precheck func(ctx context.Context, s scenario.Scenario) []precheck.Result
+	// TaskRuns reads the homelab pack's task runs in [start, end) from the
+	// OSCAR task history; nil means not collected.
+	TaskRuns func(ctx context.Context, start, end time.Time) ([]targetops.TaskRun, error)
 	// Correlate is the runtime's executeScenarioForCampaign.
 	Correlate func(ctx context.Context, targetID string, s corr.Scenario, mode string) (domain.Run, error)
 
@@ -187,7 +190,6 @@ type run struct {
 	notRun        []string
 	plannedCorr   int
 	fo            map[string][]score.FOSample
-	preTasks      []targetops.TaskRun
 }
 
 type policyState struct {

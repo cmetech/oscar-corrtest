@@ -363,3 +363,20 @@ func TestDrainedAtIdleDepth(t *testing.T) {
 		t.Fatal("a queue above the idle depth is not drained")
 	}
 }
+
+// Homelab task stats are reported, or reported as not collected; never a
+// silent 0/0.
+func TestHomelabTaskStats(t *testing.T) {
+	in := good()
+	in.TasksCollected = true
+	in.Tasks = []targetops.TaskRun{{Job: "j", Status: "SUCCESS", Duration: 2 * time.Second}, {Job: "j", Status: "FAILURE", Duration: 4 * time.Second}}
+	in.PreTasks = []targetops.TaskRun{{Job: "j", Status: "SUCCESS", Duration: time.Second}}
+	if h := Compute(in, lim).Homelab; !h.Collected || h.Completed != 1 || h.Failed != 1 || h.DurationP95 != 4 || h.PreP95 != 1 {
+		t.Fatalf("collected %+v", h)
+	}
+	in = good()
+	in.TasksNotCollected = "task history: HTTP 503"
+	if h := Compute(in, lim).Homelab; h.Collected || h.NotCollected != "task history: HTTP 503" {
+		t.Fatalf("not collected %+v", h)
+	}
+}

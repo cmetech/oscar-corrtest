@@ -85,7 +85,7 @@ func good() *fake {
 		disk:       50 << 30, diskPct: 40, mem: 60, historyNotif: 1,
 		external: []targetops.Notifier{{ID: "n1", Name: "email", Status: "enabled"}},
 	}
-	for _, j := range b9Jobs {
+	for _, j := range HomelabJobs {
 		f.taskRuns = append(f.taskRuns, targetops.TaskRun{Job: j, Status: "SUCCESS", StartedAt: t0.Add(-10 * time.Minute)})
 	}
 	f.receipts = []targetops.Receipt{{ReceivedAt: t0, Alerts: []targetops.SinkAlert{{Labels: map[string]string{"campaign_run": "camp-001-precheck"}}}}}

@@ -672,6 +672,14 @@ func newHarness(t *testing.T) *harness {
 		Precheck: func(context.Context, scenario.Scenario) []precheck.Result {
 			return []precheck.Result{{ID: "B1", Tier: precheck.Blocking, Status: precheck.Pass}}
 		},
+		TaskRuns: func(_ context.Context, start, end time.Time) ([]targetops.TaskRun, error) {
+			if end.Sub(start) == time.Hour { // the pre-run hour
+				return []targetops.TaskRun{{Job: "monitor:check_connection:homelab", Status: "SUCCESS", Duration: time.Second}}, nil
+			}
+			return []targetops.TaskRun{{Job: "monitor:check_connection:homelab", Status: "SUCCESS", Duration: 2 * time.Second},
+				{Job: "monitor:check_connection:homelab", Status: "SUCCESS", Duration: 3 * time.Second},
+				{Job: "monitor:check_filesystem_space:homelab", Status: "FAILURE", Duration: time.Second}}, nil
+		},
 		Correlate: f.correlate, TargetID: "t1", IngestURL: f.srv.URL, FrontOfficeURL: f.srv.URL, FrontOfficeHTTP: f.srv.Client(),
 		FrontOfficeUsers: []frontoffice.User{{Name: "fo-01", APIKey: "k1"}, {Name: "fo-02", APIKey: "k2"}}, ReportDir: t.TempDir()}
 	if err := db.CreateCampaign(ctx, domain.Campaign{ID: h.id, ScenarioID: s.ID, ScenarioHash: s.Hash(), Custom: true, Trigger: "cli",
@@ -708,6 +716,12 @@ func (h *harness) scorecard() (c domain.Campaign, card struct {
 	Headlines []struct{ Name string }
 	Tickets   struct{ Expected, Succeeded, Unknown int }
 	Baseline  struct{ Planned, Offered int }
+	Homelab   struct {
+		Completed, Failed int
+		PreP95            float64
+		Collected         bool
+		NotCollected      string
+	}
 }) {
 	c = h.campaign()
 	if c.Verdict != domain.VerdictPass {

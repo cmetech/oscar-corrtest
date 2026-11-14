@@ -97,10 +97,15 @@ type LatencyStats struct {
 
 type ContainerMem struct{ SlopeMiBh, NetMiB float64 }
 
+// TaskStats are the homelab pack's task runs in the window (reported, not
+// gated). Collected is false, with NotCollected saying why, when the task
+// history was unavailable: never a silent 0/0.
 type TaskStats struct {
 	Completed, Failed int
 	DurationP95       float64
 	PreP95            float64
+	Collected         bool
+	NotCollected      string `json:",omitempty"`
 }
 
 type Scorecard struct {
@@ -141,12 +146,14 @@ type Inputs struct {
 	PlannedTickets, PlannedResend, PlannedCorrelation int
 	// PlannedBaseline is the number of lane plan events (seqs 0..n-1, sorted
 	// by schedule) inside the window the lane actually ran; 0 = unknown.
-	PlannedBaseline int
-	FrontOffice     map[string][]FOSample // API-level only
-	Tasks, PreTasks []targetops.TaskRun
-	GuardStopped    bool
-	Precheck        scenario.PrecheckLimits // QueueIdle decides drained (ruling C37)
-	NotRun          []string
+	PlannedBaseline   int
+	FrontOffice       map[string][]FOSample // API-level only
+	Tasks, PreTasks   []targetops.TaskRun
+	TasksCollected    bool   // Tasks/PreTasks came from the task history
+	TasksNotCollected string // why they did not
+	GuardStopped      bool
+	Precheck          scenario.PrecheckLimits // QueueIdle decides drained (ruling C37)
+	NotRun            []string
 }
 
 func pcts(xs []float64) Percentiles {
@@ -370,6 +377,10 @@ func Compute(in Inputs, lim scenario.Limits) Scorecard {
 			limitHeadline("frontoffice.p99", "s", Percentile(pooled, 99), lim.FrontOfficeP99.Seconds(), false))
 	}
 
+	c.Homelab.Collected, c.Homelab.NotCollected = in.TasksCollected, in.TasksNotCollected
+	if !in.TasksCollected && c.Homelab.NotCollected == "" {
+		c.Homelab.NotCollected = "task history not collected"
+	}
 	var td, pd []float64
 	for _, t := range in.Tasks {
 		if s := strings.ToLower(t.Status); strings.Contains(s, "fail") || strings.Contains(s, "error") {

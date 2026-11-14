@@ -313,7 +313,7 @@ func TestNewFromConfig(t *testing.T) {
 			if tc.ok != (err == nil) {
 				t.Fatalf("err %v", err)
 			}
-			if tc.ok && (e.d.CampaignNotifier != "CAMPAIGN_SINK" || e.d.IngestURL != "https://oscar.home.arpa" || len(e.d.FrontOfficeUsers) != 4 || e.d.Precheck == nil) {
+			if tc.ok && (e.d.CampaignNotifier != "CAMPAIGN_SINK" || e.d.IngestURL != "https://oscar.home.arpa" || len(e.d.FrontOfficeUsers) != 4 || e.d.Precheck == nil || e.d.TaskRuns == nil) {
 				t.Fatalf("deps %+v", e.d)
 			}
 			if tc.ok {
