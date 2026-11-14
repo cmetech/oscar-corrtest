@@ -87,3 +87,8 @@ func SetNotifierStatus(ctx context.Context, c *oscar.Client, id string, enabled 
 	}
 	return Notifier{}, fmt.Errorf("notifier %s missing on readback", id)
 }
+
+// ListNotifiers returns every notifier on the target, any status.
+func ListNotifiers(ctx context.Context, c *oscar.Client) ([]Notifier, error) {
+	return listNotifiers(ctx, c)
+}

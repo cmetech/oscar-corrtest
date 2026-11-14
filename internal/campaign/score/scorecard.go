@@ -21,7 +21,7 @@ var Roles = []string{"alertmanager", "taskmanager", "notifier", "history", "hand
 var FOActions = []string{"firing_page1", "severity_filter", "status_filter", "paging", "instance_filter", "search", "active_alerts"}
 
 const (
-	metricStep = 60 * time.Second
+	metricStep = 15 * time.Second
 	maxGap     = 4 * metricStep
 )
 
