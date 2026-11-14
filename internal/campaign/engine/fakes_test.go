@@ -155,12 +155,13 @@ type fakeOSCAR struct {
 	ambiguous  string                // first cohort post of this alertname has an unknown outcome
 	corrInc    []*targetops.Incident // set B source-alert incidents
 	// fault injection
-	withholdComments bool  // resolves never get OSCAR's comment
-	listErr          int   // next N campaign incident listings fail (-1: always)
-	failResolves     bool  // cohort resolve posts get HTTP 500
-	sinkErr          bool  // Receipts fails
-	failEnable       int   // next N notifier enables fail
-	draftErr         error // CreateDraft fails with this
+	withholdComments bool   // resolves never get OSCAR's comment
+	listErr          int    // next N campaign incident listings fail (-1: always)
+	failResolves     bool   // cohort resolve posts get HTTP 500
+	onSetNotifier    func() // called before each notifier change
+	sinkErr          bool   // Receipts fails
+	failEnable       int    // next N notifier enables fail
+	draftErr         error  // CreateDraft fails with this
 	db               *storage.Database
 	correlates       atomic.Int32
 	slow             time.Duration
@@ -246,7 +247,13 @@ func (f *fakeOSCAR) Notifiers(context.Context) ([]targetops.Notifier, error) {
 	return out, nil
 }
 
-func (f *fakeOSCAR) SetNotifier(_ context.Context, id string, on bool) (targetops.Notifier, error) {
+func (f *fakeOSCAR) SetNotifier(ctx context.Context, id string, on bool) (targetops.Notifier, error) {
+	if f.onSetNotifier != nil {
+		f.onSetNotifier()
+	}
+	if ctx.Err() != nil { // like the real client: a cancelled request fails
+		return targetops.Notifier{}, ctx.Err()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	n := f.notifiers[id]

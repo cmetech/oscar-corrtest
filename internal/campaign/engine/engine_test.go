@@ -661,3 +661,36 @@ func TestRecoverWithoutTraffic(t *testing.T) {
 		t.Fatalf("export without a ledger: %v", err)
 	}
 }
+
+// Finding 12: an operator stop before traffic (here: during isolation) is
+// INCONCLUSIVE "stopped before traffic", not ERROR, and cleanup still runs.
+func TestStopBeforeTrafficIsInconclusive(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	var once sync.Once
+	h.oscar.onSetNotifier = func() {
+		once.Do(func() { // what runtime.StopCampaign does: STOPPING, then cancel
+			if err := h.db.TransitionCampaign(context.Background(), h.id, domain.CampaignStopping, h.clock.Now(), "stop requested"); err != nil {
+				t.Error(err)
+			}
+			cancel()
+		})
+	}
+	if err := h.run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	c, card := h.scorecard()
+	if c.Verdict != domain.VerdictInconclusive || len(card.Reasons) == 0 || card.Reasons[0] != "stopped before traffic" {
+		t.Fatalf("verdict %s reasons %v", c.Verdict, card.Reasons)
+	}
+	if c.Cleanup != domain.CleanupClean {
+		t.Fatalf("cleanup %s", c.Cleanup)
+	}
+	h.assertRestored()
+	h.oscar.mu.Lock()
+	defer h.oscar.mu.Unlock()
+	if len(h.oscar.laneFires) != 0 {
+		t.Fatalf("%d lane firings after a stop before traffic", len(h.oscar.laneFires))
+	}
+}

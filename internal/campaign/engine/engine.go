@@ -384,17 +384,17 @@ func (r *run) execute(ctx context.Context) error {
 	phaseCtx, stopPhases := context.WithCancel(ctx)
 	defer stopPhases()
 
-	if err := r.isolate(phaseCtx); err != nil {
-		r.event(stable, "campaign.error", "error", "isolation failed: "+err.Error(), nil)
-		return r.abort(ctx, "isolation failed")
-	}
-	if err := r.createDrafts(phaseCtx); err != nil {
-		r.event(stable, "campaign.error", "error", "policy drafts failed: "+err.Error(), nil)
-		return r.abort(ctx, "policy drafts failed")
-	}
-	if err := r.startLane(phaseCtx); err != nil {
-		r.event(stable, "campaign.error", "error", "lane start failed: "+err.Error(), nil)
-		return r.abort(ctx, "lane start failed")
+	for _, step := range []struct {
+		name string
+		do   func(context.Context) error
+	}{{"isolation", r.isolate}, {"policy drafts", r.createDrafts}, {"lane start", r.startLane}} {
+		if ctx.Err() != nil { // stopped or closing: never start the next step
+			return r.abort(ctx, step.name+" not started")
+		}
+		if err := step.do(phaseCtx); err != nil {
+			r.event(stable, "campaign.error", "error", step.name+" failed: "+err.Error(), nil)
+			return r.abort(ctx, step.name+" failed")
+		}
 	}
 
 	// On Stop, Close or a guard trip, halt the lane the moment phaseCtx ends
@@ -443,14 +443,22 @@ func (r *run) execute(ctx context.Context) error {
 	return r.drainAndFinish(stable, ctx.Err() != nil || r.tripped() != "")
 }
 
-// abort ends a campaign that failed before traffic: no lane, straight to cleanup.
+// abort ends a campaign that failed before traffic: no lane, straight to
+// cleanup. A stop (or close) before traffic is INCONCLUSIVE, not ERROR.
 func (r *run) abort(ctx context.Context, why string) error {
 	stable := context.WithoutCancel(ctx)
+	verdict := domain.VerdictError
+	if ctx.Err() != nil {
+		verdict, why = domain.VerdictInconclusive, "interrupted before traffic"
+		if c, err := r.store().GetCampaign(stable, r.id); err == nil && c.Status == domain.CampaignStopping {
+			why = "stopped before traffic"
+		}
+	}
 	if err := r.transition(stable, domain.CampaignDraining, why); err != nil {
 		return err
 	}
 	if !r.t0.IsZero() { // the lane start was attempted
 		r.resolveLane(stable)
 	}
-	return r.finishAfterDrain(stable, domain.VerdictError, why)
+	return r.finishAfterDrain(stable, verdict, why)
 }
