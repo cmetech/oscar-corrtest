@@ -25,6 +25,7 @@ import (
 
 	"github.com/cmetech/oscar-corrtest/internal/applog"
 	"github.com/cmetech/oscar-corrtest/internal/authoring"
+	"github.com/cmetech/oscar-corrtest/internal/campaign"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/evidence"
 	"github.com/cmetech/oscar-corrtest/internal/operations"
@@ -57,6 +58,10 @@ type Options struct {
 	TLSCertFile   string
 	TLSKeyFile    string
 	Logger        *slog.Logger
+	// CampaignWorker enables the /api/v1/campaign-worker routes (needs a data source that implements campaignWorker).
+	CampaignWorker bool
+	// CampaignConfig is the validated --campaign-config; the campaign engine consumes it.
+	CampaignConfig *campaign.Config
 }
 
 type pageData struct {
@@ -177,10 +182,15 @@ func NewHandlerWithData(info version.Info, data DataSource) http.Handler {
 
 // NewHandlerWithOptions applies the explicit remote authentication policy.
 func NewHandlerWithOptions(info version.Info, data DataSource, security Security) (http.Handler, error) {
+	return NewHandlerWithCampaign(info, data, security, false)
+}
+
+// NewHandlerWithCampaign is NewHandlerWithOptions plus the campaign worker routes when workerMode is set.
+func NewHandlerWithCampaign(info version.Info, data DataSource, security Security, workerMode bool) (http.Handler, error) {
 	if err := security.validate(); err != nil {
 		return nil, err
 	}
-	base := newHandlerWithData(info, data, parsedTemplates, staticHandler, generateNonce)
+	base := buildHandler(info, data, parsedTemplates, staticHandler, generateNonce, workerMode)
 	if security.Mode == SecurityNone {
 		return base, nil
 	}
@@ -192,6 +202,10 @@ func newHandler(info version.Info, tmpl *template.Template, static http.Handler,
 }
 
 func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Template, static http.Handler, nonce nonceFunc) http.Handler {
+	return buildHandler(info, data, tmpl, static, nonce, false)
+}
+
+func buildHandler(info version.Info, data DataSource, tmpl *template.Template, static http.Handler, nonce nonceFunc, workerMode bool) http.Handler {
 	csrfSecret := make([]byte, 32)
 	_, csrfErr := rand.Read(csrfSecret)
 	mux := http.NewServeMux()
@@ -206,6 +220,7 @@ func newHandlerWithData(info version.Info, data DataSource, tmpl *template.Templ
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
+	registerCampaignRoutes(mux, data, workerMode)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", noCache(static)))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
 		render(w, tmpl, nonce, pageData{Version: info, Page: "dashboard", Readiness: readiness(data)})
@@ -1240,7 +1255,7 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
-	handler, err := NewHandlerWithOptions(opts.Version, opts.Data, opts.Security)
+	handler, err := NewHandlerWithCampaign(opts.Version, opts.Data, opts.Security, opts.CampaignWorker)
 	if err != nil {
 		_ = listener.Close()
 		return err

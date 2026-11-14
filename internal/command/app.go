@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/cmetech/oscar-corrtest/internal/campaign"
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/service"
@@ -139,6 +140,8 @@ func (a *App) runServe(ctx context.Context, args []string) int {
 	trustedProxy := flags.String("trusted-proxy", "", "comma-separated trusted proxy CIDRs")
 	tlsCert := flags.String("tls-cert", "", "TLS certificate file")
 	tlsKey := flags.String("tls-key", "", "TLS private key file")
+	campaignConfig := flags.String("campaign-config", "", "campaign configuration JSON file")
+	campaignWorker := flags.Bool("campaign-worker", false, "serve the campaign worker API (/api/v1/campaign-worker)")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -150,6 +153,15 @@ func (a *App) runServe(ctx context.Context, args []string) int {
 	if err != nil {
 		fmt.Fprintf(a.stderr, "serve: %v\n", err)
 		return 2
+	}
+	var campaignSettings *campaign.Config
+	if *campaignConfig != "" {
+		loaded, err := campaign.LoadConfig(*campaignConfig)
+		if err != nil {
+			fmt.Fprintf(a.stderr, "serve: %v\n", err)
+			return 2
+		}
+		campaignSettings = &loaded
 	}
 	security, err := a.resolveServingSecurity(settings.ListenAddress, *remoteMode, secretFlags{env: *authTokenEnv, file: *authTokenFile, systemd: *authTokenSystemd}, *proxyHeader, *proxyValue, *trustedProxy, *tlsCert, *tlsKey)
 	if err != nil {
@@ -177,7 +189,7 @@ func (a *App) runServe(ctx context.Context, args []string) int {
 		scheme = "https"
 	}
 	fmt.Fprintf(a.stdout, "listening on %s://%s\n", scheme, settings.ListenAddress)
-	if err := a.serve(ctx, web.Options{ListenAddress: settings.ListenAddress, Version: a.info, Data: application, Security: security, TLSCertFile: *tlsCert, TLSKeyFile: *tlsKey, Logger: a.logger}); err != nil {
+	if err := a.serve(ctx, web.Options{ListenAddress: settings.ListenAddress, Version: a.info, Data: application, Security: security, TLSCertFile: *tlsCert, TLSKeyFile: *tlsKey, Logger: a.logger, CampaignWorker: *campaignWorker, CampaignConfig: campaignSettings}); err != nil {
 		fmt.Fprintf(a.stderr, "serve: %v\n", err)
 		return 1
 	}

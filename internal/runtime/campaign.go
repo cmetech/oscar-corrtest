@@ -11,11 +11,18 @@ import (
 
 	campaignscenario "github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
+	storage "github.com/cmetech/oscar-corrtest/internal/persistence/sqlite"
 	"github.com/cmetech/oscar-corrtest/internal/scenario"
 )
 
 // ErrCampaignActive is returned by every other mutation run while a campaign owns the target.
 var ErrCampaignActive = errors.New("a campaign is active; other test runs are blocked")
+
+// ErrCampaignNotActive is returned by StopCampaign when the id is not the running campaign.
+var ErrCampaignNotActive = errors.New("campaign is not active in this process")
+
+// ErrCampaignNotFound is returned by CampaignStatus for an unknown id.
+var ErrCampaignNotFound = errors.New("campaign not found")
 
 // CampaignEngine executes and recovers campaigns. The real engine arrives in a later task.
 //
@@ -132,7 +139,7 @@ func (r *Runtime) StopCampaign(ctx context.Context, id string) error {
 	cancel, ok := r.campaignCancel, r.campaignActive.Load() && r.campaignID == id
 	r.activeMu.Unlock()
 	if !ok {
-		return errors.New("campaign is not active in this process")
+		return ErrCampaignNotActive
 	}
 	c, err := r.database.GetCampaign(ctx, id)
 	next := domain.CampaignStopping
@@ -149,6 +156,9 @@ func (r *Runtime) StopCampaign(ctx context.Context, id string) error {
 // CampaignStatus returns a campaign and its recent events.
 func (r *Runtime) CampaignStatus(ctx context.Context, id string) (CampaignView, error) {
 	c, err := r.database.GetCampaign(ctx, id)
+	if errors.Is(err, storage.ErrNotFound) {
+		return CampaignView{}, ErrCampaignNotFound
+	}
 	if err != nil {
 		return CampaignView{}, err
 	}
@@ -157,6 +167,11 @@ func (r *Runtime) CampaignStatus(ctx context.Context, id string) (CampaignView, 
 		return CampaignView{}, err
 	}
 	return CampaignView{Campaign: c, Events: events}, nil
+}
+
+// ListCampaigns returns campaigns matching f.
+func (r *Runtime) ListCampaigns(ctx context.Context, f domain.CampaignFilter) ([]domain.Campaign, error) {
+	return r.database.ListCampaigns(ctx, f)
 }
 
 // executeScenarioForCampaign is the engine's internal scenario run: it bypasses the
