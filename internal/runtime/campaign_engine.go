@@ -13,6 +13,9 @@ import (
 // CampaignDatabase exposes the store the campaign engine records into.
 func (r *Runtime) CampaignDatabase() *storage.Database { return r.database }
 
+// CampaignDataDir is the data directory campaign ledgers live under.
+func (r *Runtime) CampaignDataDir() string { return r.settings.DataDir }
+
 // CampaignTarget resolves a target and its OSCAR client for the engine.
 func (r *Runtime) CampaignTarget(ctx context.Context, targetID string) (domain.Target, *oscar.Client, error) {
 	t, err := r.GetTarget(ctx, targetID)

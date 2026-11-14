@@ -98,8 +98,14 @@ func (e *Engine) ExportCampaign(ctx context.Context, id, destination string) (ev
 	if err != nil {
 		return evidence.Result{}, err
 	}
+	var missing []string
+	note := func(what string, err error) {
+		if err != nil {
+			missing = append(missing, what+": "+err.Error())
+		}
+	}
 	var report map[string]json.RawMessage
-	_ = json.Unmarshal(c.Report, &report)
+	note("campaign report", json.Unmarshal(c.Report, &report))
 	var scenarioDoc json.RawMessage = json.RawMessage("null")
 	var prechecks json.RawMessage = json.RawMessage("null")
 	var guards []json.RawMessage
@@ -128,7 +134,6 @@ func (e *Engine) ExportCampaign(ctx context.Context, id, destination string) (ev
 
 	// Child correlation bundles, one per distinct linked run.
 	var children []string
-	var childErrors []string
 	seen := map[string]bool{}
 	for _, l := range links {
 		if seen[l.RunID] {
@@ -137,7 +142,7 @@ func (e *Engine) ExportCampaign(ctx context.Context, id, destination string) (ev
 		seen[l.RunID] = true
 		content, err := e.childBundle(ctx, l.RunID)
 		if err != nil {
-			childErrors = append(childErrors, l.RunID+": "+err.Error())
+			missing = append(missing, "correlation bundle "+l.RunID+": "+err.Error())
 			continue
 		}
 		children = append(children, l.RunID)
@@ -151,9 +156,6 @@ func (e *Engine) ExportCampaign(ctx context.Context, id, destination string) (ev
 		}
 		return json.RawMessage("null")
 	}
-	put(jsonAtt("campaign.json", map[string]any{"campaign": c.ID, "scenario": c.ScenarioID, "scenarioHash": c.ScenarioHash, "plan": scenarioDoc,
-		"seed": seedOf(scenarioDoc), "trigger": c.Trigger, "runBy": c.RunBy, "status": c.Status, "verdict": c.Verdict, "cleanup": c.Cleanup,
-		"comparable": c.Comparable, "startedAt": c.StartedAt, "endedAt": c.EndedAt, "correlationRuns": children, "correlationBundleErrors": childErrors}))
 	put(jsonAtt("prechecks.json", prechecks))
 	put(jsonAtt("guards.json", guards))
 	put(jsonAtt("metrics.json", raw("metrics")))
@@ -167,13 +169,13 @@ func (e *Engine) ExportCampaign(ctx context.Context, id, destination string) (ev
 
 	var cohorts []any
 	var cm []json.RawMessage
-	_ = json.Unmarshal(raw("cohorts"), &cm)
+	note("cohorts", json.Unmarshal(raw("cohorts"), &cm))
 	for _, m := range cm {
 		cohorts = append(cohorts, m)
 	}
 	put(ndjsonAtt("cohorts.ndjson", cohorts))
 	var fo map[string][]score.FOSample
-	_ = json.Unmarshal(raw("frontoffice"), &fo)
+	note("front-office samples", json.Unmarshal(raw("frontoffice"), &fo))
 	actions := make([]string, 0, len(fo))
 	for a := range fo {
 		actions = append(actions, a)
@@ -187,17 +189,33 @@ func (e *Engine) ExportCampaign(ctx context.Context, id, destination string) (ev
 	}
 	put(ndjsonAtt("frontoffice.ndjson", foRows))
 
-	ledger, _ := os.ReadFile(filepath.Join(e.reportDir(), id+"-baseline.ledger.jsonl"))
-	put(ledgerAttachment(ledger, maxAttachment))
+	var tr struct {
+		LaneID string
+		T0     time.Time
+	}
+	_ = json.Unmarshal(c.Report, &tr)
+	if tr.LaneID != "" && !tr.T0.IsZero() { // traffic ran, so the ledger must exist
+		ledger, err := os.ReadFile(filepath.Join(e.reportDir(), tr.LaneID+".ledger.jsonl"))
+		if err != nil {
+			return evidence.Result{}, fmt.Errorf("lane ledger unavailable: %w", err)
+		}
+		put(ledgerAttachment(ledger, maxAttachment))
+	}
 
+	var sc score.Scorecard
+	if len(c.Scorecard) > 0 {
+		note("scorecard", json.Unmarshal(c.Scorecard, &sc))
+	}
+	put(jsonAtt("campaign.json", map[string]any{"campaign": c.ID, "scenario": c.ScenarioID, "scenarioHash": c.ScenarioHash, "plan": scenarioDoc,
+		"seed": seedOf(scenarioDoc), "trigger": c.Trigger, "runBy": c.RunBy, "status": c.Status, "verdict": c.Verdict, "cleanup": c.Cleanup,
+		"comparable": c.Comparable, "startedAt": c.StartedAt, "endedAt": c.EndedAt, "correlationRuns": children,
+		"complete": len(missing) == 0, "missing": append([]string{}, missing...)}))
 	var html bytes.Buffer
-	var card2 score.Scorecard
-	_ = json.Unmarshal(c.Scorecard, &card2)
 	cardPretty, _ := json.MarshalIndent(json.RawMessage(card), "", "  ")
 	guardsPretty, _ := json.MarshalIndent(guards, "", "  ")
 	if err := campaignReport.Execute(&html, map[string]any{"ID": c.ID, "Scenario": c.ScenarioID, "Hash": c.ScenarioHash, "Status": c.Status,
-		"Verdict": c.Verdict, "Cleanup": c.Cleanup, "Comparable": c.Comparable, "RunBy": c.RunBy, "Trigger": c.Trigger,
-		"Reasons": card2.Reasons, "Headlines": card2.Headlines, "Guards": string(guardsPretty), "Scorecard": string(cardPretty), "Runs": children}); err != nil {
+		"Verdict": c.Verdict, "Cleanup": c.Cleanup, "Comparable": c.Comparable, "RunBy": c.RunBy, "Trigger": c.Trigger, "Missing": missing,
+		"Reasons": sc.Reasons, "Headlines": sc.Headlines, "Guards": string(guardsPretty), "Scorecard": string(cardPretty), "Runs": children}); err != nil {
 		return evidence.Result{}, err
 	}
 	put(attach("campaign-report.html", html.Bytes()), nil)

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign"
@@ -30,6 +31,7 @@ import (
 type Host interface {
 	CampaignDatabase() *storage.Database
 	CampaignTarget(ctx context.Context, targetID string) (domain.Target, *oscar.Client, error)
+	CampaignDataDir() string
 	ExportRun(ctx context.Context, runID, destination string) (evidence.Result, error)
 	ExecuteScenarioForCampaign(ctx context.Context, targetID string, s corr.Scenario, mode string) (domain.Run, error)
 }
@@ -92,7 +94,14 @@ func NewFromConfig(ctx context.Context, cfg campaign.Config, host Host) (*Engine
 	if notifier == "" {
 		notifier = "CAMPAIGN_SINK"
 	}
-	d := Deps{Store: db, Worker: wc, Target: oscarTarget{oc}, SNOW: snow, Sink: sink, Metrics: metrics, Probe: probe,
+	if host.CampaignDataDir() == "" {
+		return nil, errors.New("campaign data directory is not set")
+	}
+	reportDir := filepath.Join(host.CampaignDataDir(), "campaigns")
+	if err := os.MkdirAll(reportDir, 0o700); err != nil {
+		return nil, fmt.Errorf("campaign report directory: %w", err)
+	}
+	d := Deps{ReportDir: reportDir, Store: db, Worker: wc, Target: oscarTarget{oc}, SNOW: snow, Sink: sink, Metrics: metrics, Probe: probe,
 		Correlate: host.ExecuteScenarioForCampaign, ExportRun: host.ExportRun, TargetID: target.ID, IngestURL: root, CampaignNotifier: notifier,
 		FrontOfficeURL: root, FrontOfficeHTTP: targetHTTP, FrontOfficeUsers: users}
 	d.Precheck = func(ctx context.Context, s scenario.Scenario) []precheck.Result {

@@ -7,11 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/cmetech/oscar-corrtest/internal/evidence"
 	"time"
 
 	campaignscenario "github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
+	"github.com/cmetech/oscar-corrtest/internal/evidence"
 	storage "github.com/cmetech/oscar-corrtest/internal/persistence/sqlite"
 	"github.com/cmetech/oscar-corrtest/internal/scenario"
 )

@@ -239,10 +239,14 @@ func TestPostAlertUnknownOutcomeIsStatusZero(t *testing.T) {
 }
 
 type stubHost struct {
-	db  *storage.Database
-	url string
-	err error
+	db      *storage.Database
+	url     string
+	err     error
+	dataDir string
+	apiKey  string
 }
+
+func (h stubHost) CampaignDataDir() string { return h.dataDir }
 
 func (h stubHost) CampaignDatabase() *storage.Database { return h.db }
 func (h stubHost) CampaignTarget(context.Context, string) (domain.Target, *oscar.Client, error) {
@@ -250,7 +254,12 @@ func (h stubHost) CampaignTarget(context.Context, string) (domain.Target, *oscar
 		return domain.Target{}, nil, h.err
 	}
 	t := domain.Target{ID: "t1", APIProfile: "public-v1", BaseURL: h.url + "/ext/mw"}
-	c, err := oscar.New(t, oscar.Options{Getenv: func(string) string { return "k" }})
+	c, err := oscar.New(t, oscar.Options{Getenv: func(string) string {
+		if h.apiKey != "" {
+			return h.apiKey
+		}
+		return "k"
+	}})
 	return t, c, err
 }
 func (stubHost) ExportRun(context.Context, string, string) (evidence.Result, error) {
@@ -280,7 +289,8 @@ func TestNewFromConfig(t *testing.T) {
 		SinkAdminTokenFile: token, MetricsURL: "https://vm:8428", MetricsCredentialFile: token, SNOWInstanceURL: "https://dev.service-now.com",
 		SNOWCredentialFile: cred, FrontOfficeDir: fo, ProbeHost: "oscar", ProbeKeyFile: token}
 	db := testDB(t)
-	host := stubHost{db: db, url: "https://oscar.home.arpa"}
+	data := t.TempDir()
+	host := stubHost{db: db, url: "https://oscar.home.arpa", dataDir: data}
 	for _, tc := range []struct {
 		name string
 		edit func(*campaign.Config)
@@ -288,7 +298,7 @@ func TestNewFromConfig(t *testing.T) {
 		ok   bool
 	}{
 		{"valid", func(*campaign.Config) {}, host, true},
-		{"unknown target", func(*campaign.Config) {}, stubHost{db: db, err: errors.New("not found")}, false},
+		{"unknown target", func(*campaign.Config) {}, stubHost{db: db, dataDir: data, err: errors.New("not found")}, false},
 		{"missing worker token", func(c *campaign.Config) { c.WorkerTokenFile = filepath.Join(dir, "nope") }, host, false},
 		{"missing snow credential", func(c *campaign.Config) { c.SNOWCredentialFile = filepath.Join(dir, "nope") }, host, false},
 		{"short front-office dir", func(c *campaign.Config) { c.FrontOfficeDir = dir }, host, false},
@@ -303,6 +313,12 @@ func TestNewFromConfig(t *testing.T) {
 			}
 			if tc.ok && (e.d.CampaignNotifier != "CAMPAIGN_SINK" || e.d.IngestURL != "https://oscar.home.arpa" || len(e.d.FrontOfficeUsers) != 4 || e.d.Precheck == nil) {
 				t.Fatalf("deps %+v", e.d)
+			}
+			if tc.ok {
+				want := filepath.Join(data, "campaigns")
+				if fi, err := os.Stat(want); e.d.ReportDir != want || err != nil || fi.Mode().Perm() != 0o700 {
+					t.Fatalf("ReportDir %q (%v), want %q mode 0700", e.d.ReportDir, err, want)
+				}
 			}
 		})
 	}

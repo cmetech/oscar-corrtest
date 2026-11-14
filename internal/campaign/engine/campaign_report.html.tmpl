@@ -6,6 +6,7 @@ dl{display:grid;grid-template-columns:max-content 1fr;gap:.5rem 1rem}dt{font-wei
 pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f4f6fa;padding:1rem;border-radius:.5rem}
 @media(prefers-color-scheme:dark){body{color:#edf2ff;background:#111827}pre{background:#1f2937}}
 </style></head><body><h1>OSCAR campaign evidence</h1>
+{{if .Missing}}<section style="border:2px solid #b42318;padding:.5rem 1rem"><h2>Evidence incomplete</h2><ul>{{range .Missing}}<li>{{.}}</li>{{end}}</ul></section>{{end}}
 <dl><dt>Campaign</dt><dd>{{.ID}}</dd><dt>Scenario</dt><dd>{{.Scenario}} ({{.Hash}})</dd><dt>Status</dt><dd>{{.Status}}</dd><dt>Verdict</dt><dd>{{.Verdict}}</dd>
 <dt>Cleanup</dt><dd>{{.Cleanup}}</dd><dt>Comparable</dt><dd>{{.Comparable}}</dd><dt>Run by</dt><dd>{{.RunBy}} via {{.Trigger}}</dd></dl>
 {{if .Reasons}}<h2>Reasons</h2><ul>{{range .Reasons}}<li>{{.}}</li>{{end}}</ul>{{end}}
