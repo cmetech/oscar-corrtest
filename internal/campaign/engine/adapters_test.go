@@ -298,6 +298,8 @@ func TestNewFromConfig(t *testing.T) {
 		ok   bool
 	}{
 		{"valid", func(*campaign.Config) {}, host, true},
+		{"no metrics credential (optional)", func(c *campaign.Config) { c.MetricsCredentialFile = "" }, host, true},
+		{"missing probe key", func(c *campaign.Config) { c.ProbeKeyFile = "" }, host, false},
 		{"unknown target", func(*campaign.Config) {}, stubHost{db: db, dataDir: data, err: errors.New("not found")}, false},
 		{"missing worker token", func(c *campaign.Config) { c.WorkerTokenFile = filepath.Join(dir, "nope") }, host, false},
 		{"missing snow credential", func(c *campaign.Config) { c.SNOWCredentialFile = filepath.Join(dir, "nope") }, host, false},

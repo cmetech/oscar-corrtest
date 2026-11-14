@@ -42,6 +42,9 @@ const ingestPath = "/ext/alertmanager/api/v2/alerts"
 func NewFromConfig(ctx context.Context, cfg campaign.Config, host Host) (*Engine, error) {
 	for name, path := range map[string]string{"worker token": cfg.WorkerTokenFile, "sink admin token": cfg.SinkAdminTokenFile,
 		"metrics credential": cfg.MetricsCredentialFile, "SNOW credential": cfg.SNOWCredentialFile, "probe key": cfg.ProbeKeyFile} {
+		if path == "" && name == "metrics credential" { // optional (campaign.Config)
+			continue
+		}
 		if _, err := os.Stat(path); err != nil { // fail at startup, not mid-campaign
 			return nil, fmt.Errorf("%s file is not readable", name)
 		}
