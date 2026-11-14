@@ -175,6 +175,7 @@ type run struct {
 	openIncidents []string
 	dirty         []string // cleanup failures that are not open mutations
 	corrTickets   corrTicketStats
+	corrTicketed  []corrTicket
 	trip          string // guard name that tripped
 	workerLost    bool
 	lastHeartbeat time.Time

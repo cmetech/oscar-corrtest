@@ -227,7 +227,19 @@ func (r *run) ticketInputs(ledger []domain.LaneRow, hist []oscar.HistoryRecord, 
 			in.Expected = append(in.Expected, m.alert.Name)
 		}
 	}
-	for _, id := range in.Expected {
+	r.mu.Lock()
+	corr := append([]corrTicket(nil), r.corrTicketed...)
+	r.mu.Unlock()
+	expected := in.Expected
+	in.Expected = append([]string(nil), expected...)
+	for _, c := range corr { // set B tickets count in the rate; a missing one is a miss
+		in.Expected = append(in.Expected, c.id)
+		in.Bound[c.id] = true // the incident carries the run token: OSCAR bound it
+		if !c.unknown {
+			in.Incidents[c.id] = c.incidents
+		}
+	}
+	for _, id := range expected {
 		for _, inc := range incs {
 			if mentions(inc.ShortDescription, id) {
 				in.Incidents[id] = append(in.Incidents[id], inc)

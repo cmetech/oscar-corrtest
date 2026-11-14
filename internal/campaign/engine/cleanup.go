@@ -169,6 +169,16 @@ type corrTicketStats struct {
 
 type corrRun struct{ pattern, token string }
 
+// corrTicket is one ticketed set B run's expected incident for the ticket
+// score: the incidents found for its token (none = a miss), or unknown when
+// its listing never succeeded. Set B refs are single-case (P01), so each
+// run expects exactly one incident (ticketFirstTrigger).
+type corrTicket struct {
+	id        string
+	incidents []targetops.Incident
+	unknown   bool
+}
+
 // ticketedRuns re-derives the ticketed set B runs from the link rows, so
 // recovery finds them too.
 func (r *run) ticketedRuns(ctx context.Context) []corrRun {
@@ -204,6 +214,8 @@ func (r *run) closeIncidents(ctx context.Context) []targetops.Incident {
 	corr := r.ticketedRuns(ctx)
 	campaign := map[string]targetops.Incident{}
 	corrSeen := map[string]bool{}
+	corrBy := map[string]map[string]targetops.Incident{} // run token -> number -> last copy read
+	corrErr := map[string]bool{}                         // run token -> its last listing failed
 	closed := map[string]bool{}
 	deadline := r.now().Add(commentWait)
 	backoff := time.Second
@@ -236,11 +248,16 @@ func (r *run) closeIncidents(ctx context.Context) []targetops.Incident {
 		}
 		for _, c := range corr {
 			incs, err := r.e.d.SNOW.OpenCorrTestIncidents(ctx, c.pattern, c.token)
+			corrErr[c.token] = err != nil
 			if err != nil {
 				listErr = fmt.Errorf("correlation incident listing: %w", err)
 			}
 			for _, inc := range incs {
 				corrSeen[inc.Number] = true
+				if corrBy[c.token] == nil {
+					corrBy[c.token] = map[string]targetops.Incident{}
+				}
+				corrBy[c.token][inc.Number] = inc
 				visit(inc)
 			}
 		}
@@ -255,6 +272,14 @@ func (r *run) closeIncidents(ctx context.Context) []targetops.Incident {
 				r.dirty = append(r.dirty, listErr.Error()+" (incidents not verified)")
 			}
 			r.corrTickets = corrTicketStats{Runs: len(corr), Incidents: len(corrSeen)}
+			r.corrTicketed = nil
+			for _, c := range corr {
+				t := corrTicket{id: "setB:" + c.pattern + ":" + c.token, unknown: corrErr[c.token] && len(corrBy[c.token]) == 0}
+				for _, inc := range corrBy[c.token] {
+					t.incidents = append(t.incidents, inc)
+				}
+				r.corrTicketed = append(r.corrTicketed, t)
+			}
 			for n := range corrSeen {
 				if closed[n] {
 					r.corrTickets.Closed++

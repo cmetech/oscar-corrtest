@@ -701,3 +701,18 @@ func TestStopBeforeTrafficIsInconclusive(t *testing.T) {
 		t.Fatalf("%d lane firings after a stop before traffic", len(h.oscar.laneFires))
 	}
 }
+
+// Finding 12c: a ticketed set B run whose incident never appears is a miss
+// in the ticket success rate, not just a separate figure.
+func TestMissingSetBTicketIsAMiss(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.oscar.corrNoTicket = true
+	if err := h.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	c, card := h.scorecard()
+	if card.Tickets.Failed == 0 || c.Verdict != domain.VerdictFail || !hasReason(card.Reasons, "tickets.success") {
+		t.Fatalf("verdict %s tickets %+v reasons %v", c.Verdict, card.Tickets, card.Reasons)
+	}
+}

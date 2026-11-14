@@ -160,6 +160,7 @@ type fakeOSCAR struct {
 	listErr          int    // next N campaign incident listings fail (-1: always)
 	failResolves     bool   // cohort resolve posts get HTTP 500
 	onSetNotifier    func() // called before each notifier change
+	corrNoTicket     bool   // ticketed set B runs never open their incident
 	sinkErr          bool   // Receipts fails
 	failEnable       int    // next N notifier enables fail
 	draftErr         error  // CreateDraft fails with this
@@ -561,7 +562,7 @@ func (f *fakeOSCAR) correlate(ctx context.Context, _ string, doc corr.Scenario, 
 	f.mu.Lock()
 	for _, c := range doc.Cases {
 		for _, e := range c.Events {
-			if e.Labels["create_ticket"] == "snow" {
+			if e.Labels["create_ticket"] == "snow" && !f.corrNoTicket {
 				inc := &targetops.Incident{Number: fmt.Sprintf("INC9%06d", len(f.corrInc)+1), State: "1",
 					ShortDescription: fmt.Sprintf("[CORRTEST][%s][TRIGGER][%s] %s: source alert 1 of 2", doc.Pattern, short, c.Name)}
 				f.corrInc = append(f.corrInc, inc)
@@ -725,7 +726,7 @@ func (h *harness) scorecard() (c domain.Campaign, card struct {
 	Verdict   domain.Verdict
 	Reasons   []string
 	Headlines []struct{ Name string }
-	Tickets   struct{ Expected, Succeeded, Unknown int }
+	Tickets   struct{ Expected, Succeeded, Failed, Unknown int }
 	Baseline  struct{ Planned, Offered int }
 	Homelab   struct {
 		Completed, Failed int
