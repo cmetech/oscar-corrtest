@@ -29,7 +29,28 @@ type Client struct {
 	baseURL   string
 	tokenFile string
 	http      *http.Client
+	// per-call deadlines for the non-streaming calls (shortened in tests)
+	short, medium, long time.Duration
 }
+
+// APIError is returned for every non-2xx JSON error from the worker.
+type APIError struct {
+	Status        int
+	Code, Message string
+	sentinel      error
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("worker returned %d %s: %s", e.Status, e.Code, e.Message)
+}
+
+// Unwrap exposes workerapi.ErrLaneNotFound / ErrLaneExists for errors.Is.
+func (e *APIError) Unwrap() error { return e.sentinel }
+
+const (
+	maxLine   = 64 << 10
+	maxStream = 512 << 20
+)
 
 // New builds a client. caFile is added to the system roots; empty means system roots only.
 func New(baseURL, tokenFile, caFile string) (*Client, error) {
@@ -50,9 +71,9 @@ func New(baseURL, tokenFile, caFile string) (*Client, error) {
 			return nil, fmt.Errorf("no certificates in worker CA file %s", caFile)
 		}
 	}
-	return &Client{baseURL: strings.TrimRight(baseURL, "/"), tokenFile: tokenFile, http: &http.Client{
+	return &Client{baseURL: strings.TrimRight(baseURL, "/"), tokenFile: tokenFile, short: 10 * time.Second, medium: 30 * time.Second, long: 120 * time.Second, http: &http.Client{
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		Transport:     &http.Transport{Proxy: nil, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}},
+		Transport:     &http.Transport{Proxy: nil, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: 15 * time.Second, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}},
 	}}, nil
 }
 
@@ -89,7 +110,9 @@ func (c *Client) do(ctx context.Context, method, path string, body any) (*http.R
 }
 
 // call sends a request and decodes the {"data":…} envelope into out (may be nil).
-func (c *Client) call(ctx context.Context, method, path string, in, out any) error {
+func (c *Client) call(ctx context.Context, d time.Duration, method, path string, in, out any) error {
+	ctx, cancel := context.WithTimeout(ctx, d)
+	defer cancel()
 	resp, err := c.do(ctx, method, path, in)
 	if err != nil {
 		return err
@@ -119,14 +142,20 @@ func apiErr(status int, raw []byte) error {
 		Error struct{ Code, Message string } `json:"error"`
 	}
 	_ = json.Unmarshal(raw, &e)
-	msg := fmt.Sprintf("worker returned %d %s: %s", status, e.Error.Code, e.Error.Message)
-	switch e.Error.Code {
-	case "lane_not_found":
-		return fmt.Errorf("%s: %w", msg, workerapi.ErrLaneNotFound)
-	case "lane_exists":
-		return fmt.Errorf("%s: %w", msg, workerapi.ErrLaneExists)
+	ae := &APIError{Status: status, Code: e.Error.Code, Message: e.Error.Message}
+	if ae.Code == "" { // non-JSON body, e.g. the auth middleware's plain-text 401
+		ae.Code = "http_" + http.StatusText(status)
+		if status == http.StatusUnauthorized {
+			ae.Code = "unauthorized"
+		}
 	}
-	return errors.New(msg)
+	switch ae.Code {
+	case "lane_not_found":
+		ae.sentinel = workerapi.ErrLaneNotFound
+	case "lane_exists":
+		ae.sentinel = workerapi.ErrLaneExists
+	}
+	return ae
 }
 
 func (c *Client) Info(ctx context.Context) (workerapi.Info, error) {
@@ -134,7 +163,7 @@ func (c *Client) Info(ctx context.Context) (workerapi.Info, error) {
 		Version string `json:"version"`
 		Now     string `json:"now"`
 	}
-	if err := c.call(ctx, http.MethodGet, "/info", nil, &d); err != nil {
+	if err := c.call(ctx, c.short, http.MethodGet, "/info", nil, &d); err != nil {
 		return workerapi.Info{}, err
 	}
 	now, err := time.Parse(time.RFC3339Nano, d.Now)
@@ -146,23 +175,23 @@ func (c *Client) Info(ctx context.Context) (workerapi.Info, error) {
 
 func (c *Client) Start(ctx context.Context, s workerapi.LaneSpec) (workerapi.LaneStatus, error) {
 	var st workerapi.LaneStatus
-	err := c.call(ctx, http.MethodPost, "/lanes", s, &st)
+	err := c.call(ctx, c.medium, http.MethodPost, "/lanes", s, &st)
 	return st, err
 }
 
 func (c *Client) Heartbeat(ctx context.Context, id string) error {
-	return c.call(ctx, http.MethodPost, "/lanes/"+url.PathEscape(id)+"/heartbeat", nil, nil)
+	return c.call(ctx, c.short, http.MethodPost, "/lanes/"+url.PathEscape(id)+"/heartbeat", nil, nil)
 }
 
 func (c *Client) Status(ctx context.Context, id string) (workerapi.LaneStatus, error) {
 	var st workerapi.LaneStatus
-	err := c.call(ctx, http.MethodGet, "/lanes/"+url.PathEscape(id), nil, &st)
+	err := c.call(ctx, c.short, http.MethodGet, "/lanes/"+url.PathEscape(id), nil, &st)
 	return st, err
 }
 
 func (c *Client) Stop(ctx context.Context, id string) (workerapi.LaneStatus, error) {
 	var st workerapi.LaneStatus
-	err := c.call(ctx, http.MethodPost, "/lanes/"+url.PathEscape(id)+"/stop", nil, &st)
+	err := c.call(ctx, c.medium, http.MethodPost, "/lanes/"+url.PathEscape(id)+"/stop", nil, &st)
 	return st, err
 }
 
@@ -170,13 +199,14 @@ func (c *Client) ResolveAll(ctx context.Context, id string) (int, error) {
 	var d struct {
 		Resolved int `json:"resolved"`
 	}
-	err := c.call(ctx, http.MethodPost, "/lanes/"+url.PathEscape(id)+"/resolve-all", nil, &d)
+	err := c.call(ctx, c.long, http.MethodPost, "/lanes/"+url.PathEscape(id)+"/resolve-all", nil, &d)
 	return d.Resolved, err
 }
 
 // Ledger streams the lane's NDJSON rows to w, excluding the terminal end record.
-// It fails if the stream has no end record (truncated) or the end says ok:false;
-// rows already written stay written.
+// It fails if the stream has no end record (truncated), the end says ok:false, a
+// line exceeds 64 KiB, or the stream exceeds 512 MiB. Rows written before an
+// error remain in w, so callers must write to a temp file and rename only on nil.
 func (c *Client) Ledger(ctx context.Context, id string, w io.Writer) error {
 	resp, err := c.do(ctx, http.MethodGet, "/lanes/"+url.PathEscape(id)+"/ledger", nil)
 	if err != nil {
@@ -187,9 +217,17 @@ func (c *Client) Ledger(ctx context.Context, id string, w io.Writer) error {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		return apiErr(resp.StatusCode, raw)
 	}
-	r := bufio.NewReaderSize(resp.Body, 1<<20)
+	r := bufio.NewReaderSize(io.LimitReader(resp.Body, maxStream+1), maxLine)
+	total := 0
 	for {
-		line, err := r.ReadBytes('\n')
+		line, err := r.ReadSlice('\n')
+		if errors.Is(err, bufio.ErrBufferFull) {
+			return errors.New("worker ledger line exceeds 64 KiB")
+		}
+		total += len(line)
+		if total > maxStream {
+			return errors.New("worker ledger stream exceeds 512 MiB")
+		}
 		if len(line) > 0 && line[len(line)-1] == '\n' { // a partial last line is never accepted
 			var end struct {
 				Type  string `json:"type"`
@@ -213,4 +251,9 @@ func (c *Client) Ledger(ctx context.Context, id string, w io.Writer) error {
 			return fmt.Errorf("worker ledger stream: %w", err)
 		}
 	}
+}
+
+// SetTimeouts overrides the per-call deadlines (short, medium, long); for tests.
+func (c *Client) SetTimeouts(short, medium, long time.Duration) {
+	c.short, c.medium, c.long = short, medium, long
 }

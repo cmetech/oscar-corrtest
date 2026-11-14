@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"io"
 	"log"
 	"log/slog"
@@ -109,7 +110,7 @@ func TestClientRoundTrip(t *testing.T) {
 	c, oscarURL, _, _ := setup(t)
 	ctx := context.Background()
 	info, err := c.Info(ctx)
-	if err != nil || info.Version == "" && info.Now.IsZero() || time.Since(info.Now) > time.Minute {
+	if err != nil || info.Now.IsZero() || time.Since(info.Now) > time.Minute {
 		t.Fatalf("info %+v err %v", info, err)
 	}
 	params, _ := json.Marshal(workerapi.BaselineParams{TargetURL: oscarURL, Seed: 1, Duration: time.Second,
@@ -120,7 +121,7 @@ func TestClientRoundTrip(t *testing.T) {
 	if err != nil || st.ID != spec.ID {
 		t.Fatalf("start %+v %v", st, err)
 	}
-	if _, err := c.Start(ctx, spec); err == nil || !strings.Contains(err.Error(), "lane_exists") {
+	if _, err := c.Start(ctx, spec); !errors.Is(err, workerapi.ErrLaneExists) || !asCode(err, 409, "lane_exists") {
 		t.Fatalf("second start: %v", err)
 	}
 	if err := c.Heartbeat(ctx, spec.ID); err != nil {
@@ -162,13 +163,14 @@ func TestClientRoundTrip(t *testing.T) {
 	if ticketed == 0 {
 		t.Fatalf("no ticketed firing survived the SQLite round trip:\n%s", buf.String())
 	}
-	if _, err := c.Status(ctx, "nope"); !errorsIs(err, workerapi.ErrLaneNotFound) {
+	if _, err := c.Status(ctx, "nope"); !errors.Is(err, workerapi.ErrLaneNotFound) {
 		t.Fatalf("want ErrLaneNotFound, got %v", err)
 	}
 }
 
-func errorsIs(err, target error) bool {
-	return err != nil && strings.Contains(err.Error(), target.Error())
+func asCode(err error, status int, code string) bool {
+	var ae *workerclient.APIError
+	return errors.As(err, &ae) && ae.Status == status && ae.Code == code
 }
 
 func TestClientRejectsUntrustedCert(t *testing.T) {
@@ -202,8 +204,8 @@ func TestClientNeverLogsToken(t *testing.T) {
 	_, e1 := c.Status(context.Background(), "nope")
 	errs = append(errs, e1.Error())
 	err = badTok.Heartbeat(context.Background(), "x")
-	if err == nil {
-		t.Fatal("wrong token accepted")
+	if !asCode(err, 401, "unauthorized") {
+		t.Fatalf("want 401 unauthorized, got %v", err)
 	}
 	errs = append(errs, err.Error())
 	for _, e := range errs {
@@ -248,5 +250,50 @@ func TestLedgerTruncatedAndFailedEnd(t *testing.T) {
 	var buf bytes.Buffer
 	if err := c.Ledger(context.Background(), "x", &buf); err != nil || buf.String() != "{\"seq\":0}\n" {
 		t.Fatalf("%q %v", buf.String(), err)
+	}
+}
+
+func TestHeartbeatTimesOut(t *testing.T) {
+	block := make(chan struct{})
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-block }))
+	defer srv.Close()
+	defer close(block)
+	dir := t.TempDir()
+	tok := filepath.Join(dir, "t")
+	_ = os.WriteFile(tok, []byte(token), 0o600)
+	c, _ := workerclient.New(srv.URL, tok, writePEM(t, dir, "ca.pem", srv))
+	c.SetTimeouts(200*time.Millisecond, time.Second, time.Second)
+	start := time.Now()
+	if err := c.Heartbeat(context.Background(), "x"); err == nil || time.Since(start) > 2*time.Second {
+		t.Fatalf("want quick timeout error, got %v after %v", err, time.Since(start))
+	}
+}
+
+func TestLedgerLineCap(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, strings.Repeat("x", 70<<10)+"\n")
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	tok := filepath.Join(dir, "t")
+	_ = os.WriteFile(tok, []byte(token), 0o600)
+	c, _ := workerclient.New(srv.URL, tok, writePEM(t, dir, "ca.pem", srv))
+	if err := c.Ledger(context.Background(), "x", io.Discard); err == nil || !strings.Contains(err.Error(), "64 KiB") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestBearerRequiredIsTyped(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(401)
+		_, _ = io.WriteString(w, `{"error":{"code":"bearer_required","message":"m"}}`)
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	tok := filepath.Join(dir, "t")
+	_ = os.WriteFile(tok, []byte(token), 0o600)
+	c, _ := workerclient.New(srv.URL, tok, writePEM(t, dir, "ca.pem", srv))
+	if err := c.Heartbeat(context.Background(), "x"); !asCode(err, 401, "bearer_required") {
+		t.Fatalf("got %v", err)
 	}
 }
