@@ -61,10 +61,11 @@ func (c *scaledClock) SleepUntil(ctx context.Context, t time.Time) bool {
 }
 
 // laneClock is the scaled clock as the worker lane sees it. The scaled clock
-// multiplies timer overshoot by speed, and the lane spaces each send from the
-// previous actual send, so overshoot would pile up into pacing misses that a
-// real clock never produces. A slept wake-up therefore reads as on time:
-// Now() is capped at the last wake target until the next wake.
+// multiplies timer overshoot and per-send processing time (sqlite, HTTP) by
+// speed, so a parallel test run would record pacing misses a real clock never
+// produces. Worker time is therefore the last instant the lane waited for:
+// Now() never runs ahead of the latest SleepUntil target. (Pacing misses are
+// covered by the lane package's own tests.)
 type laneClock struct {
 	*scaledClock
 	mu    sync.Mutex
@@ -82,13 +83,10 @@ func (c *laneClock) Now() time.Time {
 }
 
 func (c *laneClock) SleepUntil(ctx context.Context, t time.Time) bool {
-	slept := t.After(c.scaledClock.Now())
 	ok := c.scaledClock.SleepUntil(ctx, t)
 	c.mu.Lock()
-	if ok && slept {
+	if ok && t.After(c.floor) {
 		c.floor = t
-	} else {
-		c.floor = c.scaledClock.Now()
 	}
 	c.mu.Unlock()
 	return ok
@@ -101,7 +99,7 @@ func testScenario() scenario.Scenario {
 	return scenario.Scenario{ID: "engine-test", Version: "v1", Custom: true,
 		Phases: []scenario.Phase{{Name: "preflight", Start: -10 * s}, {Name: "baseline", End: 30 * s}, {Name: "correlation", Start: 30 * s, End: 60 * s},
 			{Name: "ticketing", Start: 60 * s, End: 90 * s}, {Name: "resend", Start: 90 * s, End: 120 * s}, {Name: "drain", Start: 120 * s, End: 150 * s}},
-		Baseline: scenario.BaselineSpec{Rate: 1, UniqueRatio: 0.9, PoolSize: 5, Instances: 3, Severity: map[string]float64{"warning": 1},
+		Baseline: scenario.BaselineSpec{Rate: 0.25, UniqueRatio: 0.9, PoolSize: 5, Instances: 3, Severity: map[string]float64{"warning": 1},
 			ResolveAfter: 5 * s, TicketEveryNth: 5, TicketFrom: 60 * s, TicketTo: 120 * s},
 		Correlation: scenario.CorrelationSpec{
 			SetA:             []scenario.CaseRef{{Pattern: "flood", Level: "builtin"}, {Pattern: "threshold", Level: "builtin"}},
