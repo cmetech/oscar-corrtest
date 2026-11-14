@@ -547,9 +547,9 @@ func (w *fakeWorker) Start(ctx context.Context, s workerapi.LaneSpec) (workerapi
 	}
 	return w.m.Start(ctx, s)
 }
-func (w *fakeWorker) Heartbeat(ctx context.Context, id string) error {
+func (w *fakeWorker) Heartbeat(ctx context.Context, id string) (workerapi.LaneStatus, error) {
 	if w.down.Load() {
-		return errDown
+		return workerapi.LaneStatus{}, errDown
 	}
 	return w.m.Heartbeat(ctx, id)
 }

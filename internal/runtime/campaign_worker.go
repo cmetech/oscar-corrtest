@@ -67,10 +67,10 @@ func (r *Runtime) Start(ctx context.Context, s workerapi.LaneSpec) (workerapi.La
 	return m.Start(ctx, s)
 }
 
-func (r *Runtime) Heartbeat(ctx context.Context, id string) error {
+func (r *Runtime) Heartbeat(ctx context.Context, id string) (workerapi.LaneStatus, error) {
 	m, err := r.workerMgr()
 	if err != nil {
-		return err
+		return workerapi.LaneStatus{}, err
 	}
 	return m.Heartbeat(ctx, id)
 }

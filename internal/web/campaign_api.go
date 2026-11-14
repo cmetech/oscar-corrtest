@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"time"
 
 	campaignscenario "github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/workerapi"
@@ -37,7 +36,7 @@ var _ campaignController = (*appruntime.Runtime)(nil)
 type campaignWorker interface {
 	Info(context.Context) workerapi.Info
 	Start(context.Context, workerapi.LaneSpec) (workerapi.LaneStatus, error)
-	Heartbeat(context.Context, string) error
+	Heartbeat(context.Context, string) (workerapi.LaneStatus, error)
 	Stop(context.Context, string) (workerapi.LaneStatus, error)
 	ResolveAll(context.Context, string) (int, error)
 	Status(context.Context, string) (workerapi.LaneStatus, error)
@@ -226,11 +225,12 @@ func registerWorkerRoutes(mux *http.ServeMux, wk campaignWorker, post func(strin
 		apiData(w, http.StatusOK, st)
 	})
 	post(base+"/lanes/{id}/heartbeat", func(w http.ResponseWriter, r *http.Request, _ string) {
-		if err := wk.Heartbeat(r.Context(), r.PathValue("id")); err != nil {
+		st, err := wk.Heartbeat(r.Context(), r.PathValue("id"))
+		if err != nil {
 			laneErr(w, err)
 			return
 		}
-		apiData(w, http.StatusOK, map[string]string{"at": time.Now().UTC().Format(time.RFC3339Nano)})
+		apiData(w, http.StatusOK, st) // lane state and last error (ruling C34a)
 	})
 	post(base+"/lanes/{id}/stop", func(w http.ResponseWriter, r *http.Request, _ string) {
 		st, err := wk.Stop(r.Context(), r.PathValue("id"))

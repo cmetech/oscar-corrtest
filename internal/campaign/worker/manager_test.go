@@ -185,7 +185,7 @@ func TestHeartbeatKeepsLaneRunning(t *testing.T) {
 	n := 0
 	clk.run(60*time.Second, func() {
 		if n++; n%20 == 0 { // every 5 s
-			if err := m.Heartbeat(ctx, "r1-baseline"); err != nil {
+			if _, err := m.Heartbeat(ctx, "r1-baseline"); err != nil {
 				t.Fatal(err)
 			}
 		}

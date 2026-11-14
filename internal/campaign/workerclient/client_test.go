@@ -50,7 +50,9 @@ func (d data) Info(ctx context.Context) workerapi.Info { return d.m.Info(ctx) }
 func (d data) Start(ctx context.Context, s workerapi.LaneSpec) (workerapi.LaneStatus, error) {
 	return d.m.Start(ctx, s)
 }
-func (d data) Heartbeat(ctx context.Context, id string) error { return d.m.Heartbeat(ctx, id) }
+func (d data) Heartbeat(ctx context.Context, id string) (workerapi.LaneStatus, error) {
+	return d.m.Heartbeat(ctx, id)
+}
 func (d data) Stop(ctx context.Context, id string) (workerapi.LaneStatus, error) {
 	if err := d.m.Stop(ctx, id); err != nil {
 		return workerapi.LaneStatus{}, err
@@ -124,8 +126,8 @@ func TestClientRoundTrip(t *testing.T) {
 	if _, err := c.Start(ctx, spec); !errors.Is(err, workerapi.ErrLaneExists) || !asCode(err, 409, "lane_exists") {
 		t.Fatalf("second start: %v", err)
 	}
-	if err := c.Heartbeat(ctx, spec.ID); err != nil {
-		t.Fatal(err)
+	if hb, err := c.Heartbeat(ctx, spec.ID); err != nil || hb.State != "running" || hb.ID != spec.ID {
+		t.Fatalf("heartbeat must carry the lane state: %+v %v", hb, err)
 	}
 	for i := 0; i < 100; i++ {
 		if st, err = c.Status(ctx, spec.ID); err != nil || st.Sent >= 3 {
@@ -203,7 +205,7 @@ func TestClientNeverLogsToken(t *testing.T) {
 	var errs []string
 	_, e1 := c.Status(context.Background(), "nope")
 	errs = append(errs, e1.Error())
-	err = badTok.Heartbeat(context.Background(), "x")
+	_, err = badTok.Heartbeat(context.Background(), "x")
 	if !asCode(err, 401, "unauthorized") {
 		t.Fatalf("want 401 unauthorized, got %v", err)
 	}
@@ -264,7 +266,7 @@ func TestHeartbeatTimesOut(t *testing.T) {
 	c, _ := workerclient.New(srv.URL, tok, writePEM(t, dir, "ca.pem", srv))
 	c.SetTimeouts(200*time.Millisecond, time.Second, time.Second)
 	start := time.Now()
-	if err := c.Heartbeat(context.Background(), "x"); err == nil || time.Since(start) > 2*time.Second {
+	if _, err := c.Heartbeat(context.Background(), "x"); err == nil || time.Since(start) > 2*time.Second {
 		t.Fatalf("want quick timeout error, got %v after %v", err, time.Since(start))
 	}
 }
@@ -293,7 +295,7 @@ func TestBearerRequiredIsTyped(t *testing.T) {
 	tok := filepath.Join(dir, "t")
 	_ = os.WriteFile(tok, []byte(token), 0o600)
 	c, _ := workerclient.New(srv.URL, tok, writePEM(t, dir, "ca.pem", srv))
-	if err := c.Heartbeat(context.Background(), "x"); !asCode(err, 401, "bearer_required") {
+	if _, err := c.Heartbeat(context.Background(), "x"); !asCode(err, 401, "bearer_required") {
 		t.Fatalf("got %v", err)
 	}
 }

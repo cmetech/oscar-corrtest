@@ -16,6 +16,7 @@ const (
 	GuardHeartbeatLost = "heartbeat_lost"
 	GuardUnknownRate   = "unknown_rate"
 	GuardTicketUnknown = "ticket_unknown"
+	GuardLaneStopped   = "lane_stopped"
 )
 
 const growthWindow = 20 // samples: 5 min at 15 s
@@ -31,6 +32,10 @@ type Sample struct {
 type Counters struct {
 	Offered, Unknown, TicketUnknown int
 	WorkerHeartbeat                 time.Time
+	// LaneState and LaneError come from the last worker heartbeat; a lane
+	// that is not running before BaselineEnd stopped on its own.
+	LaneState, LaneError string
+	BaselineEnd          time.Time
 }
 
 type Trip struct {
@@ -51,6 +56,9 @@ func Evaluate(now time.Time, window []Sample, c Counters, baseline Sample) []Tri
 	}
 	if c.Unknown*1000 > c.Offered*5 {
 		add(GuardUnknownRate, "unknown %d of %d offered", c.Unknown, c.Offered)
+	}
+	if c.LaneState != "" && c.LaneState != "running" && now.Before(c.BaselineEnd) {
+		add(GuardLaneStopped, "baseline lane %s before the planned end: %s", c.LaneState, c.LaneError)
 	}
 	if c.TicketUnknown > 3 {
 		add(GuardTicketUnknown, "%d ticket creates with unknown outcome", c.TicketUnknown)

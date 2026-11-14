@@ -113,6 +113,25 @@ func TestGuardTripStopsAndStillCleansUp(t *testing.T) {
 	}
 }
 
+// TestLaneStoppedEarlyTripsGuard: a lane that stops on its own while the
+// campaign is RUNNING (before the planned baseline end) is a guard trip, not a
+// silent under-delivery (ruling C34a).
+func TestLaneStoppedEarlyTripsGuard(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.oscar.onCorr = func() { _ = h.worker.m.Stop(context.Background(), h.id+"-baseline") }
+	if err := h.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	c, card := h.scorecard()
+	if c.Verdict != domain.VerdictFail || len(card.Reasons) == 0 || card.Reasons[0] != "guard:lane_stopped" {
+		t.Fatalf("verdict %s reasons %v", c.Verdict, card.Reasons)
+	}
+	if c.Cleanup != domain.CleanupClean {
+		t.Fatalf("cleanup %s", c.Cleanup)
+	}
+}
+
 func TestWorkerLossIsInconclusive(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)

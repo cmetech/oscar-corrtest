@@ -59,7 +59,7 @@ type Store interface {
 // Worker is the controller's view of the remote worker (*workerclient.Client).
 type Worker interface {
 	Start(ctx context.Context, s workerapi.LaneSpec) (workerapi.LaneStatus, error)
-	Heartbeat(ctx context.Context, id string) error
+	Heartbeat(ctx context.Context, id string) (workerapi.LaneStatus, error)
 	Status(ctx context.Context, id string) (workerapi.LaneStatus, error)
 	Stop(ctx context.Context, id string) (workerapi.LaneStatus, error)
 	ResolveAll(ctx context.Context, id string) (int, error)
@@ -173,6 +173,9 @@ type run struct {
 	trip          string // guard name that tripped
 	workerLost    bool
 	lastHeartbeat time.Time
+	laneState     string // lane state from the last heartbeat
+	laneErr       string // lane's last error from the last heartbeat
+	laneStopAt    time.Time
 	ticketUnknown int
 	policies      []*policyState
 	resendIncon   string

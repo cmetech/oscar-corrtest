@@ -187,8 +187,11 @@ func (c *Client) Start(ctx context.Context, s workerapi.LaneSpec) (workerapi.Lan
 	return st, err
 }
 
-func (c *Client) Heartbeat(ctx context.Context, id string) error {
-	return c.call(ctx, c.short, http.MethodPost, "/lanes/"+url.PathEscape(id)+"/heartbeat", nil, nil)
+// Heartbeat keeps the lane alive and returns its state and last error.
+func (c *Client) Heartbeat(ctx context.Context, id string) (workerapi.LaneStatus, error) {
+	var st workerapi.LaneStatus
+	err := c.call(ctx, c.short, http.MethodPost, "/lanes/"+url.PathEscape(id)+"/heartbeat", nil, &st)
+	return st, err
 }
 
 func (c *Client) Status(ctx context.Context, id string) (workerapi.LaneStatus, error) {

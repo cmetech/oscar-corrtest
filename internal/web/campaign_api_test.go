@@ -66,7 +66,9 @@ func (f *fakeWorkerData) Start(_ context.Context, s workerapi.LaneSpec) (workera
 	f.lanes = append(f.lanes, s)
 	return workerapi.LaneStatus{ID: s.ID, State: "running"}, nil
 }
-func (f *fakeWorkerData) Heartbeat(context.Context, string) error { return nil }
+func (f *fakeWorkerData) Heartbeat(_ context.Context, id string) (workerapi.LaneStatus, error) {
+	return workerapi.LaneStatus{ID: id, State: "running"}, nil
+}
 func (f *fakeWorkerData) Stop(_ context.Context, id string) (workerapi.LaneStatus, error) {
 	return workerapi.LaneStatus{ID: id, State: "stopped"}, nil
 }

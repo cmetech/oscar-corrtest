@@ -202,17 +202,19 @@ func (m *Manager) snapshot(ls *laneState) workerapi.LaneStatus { // m.mu held
 	return s
 }
 
-func (m *Manager) Heartbeat(_ context.Context, id string) error {
+// Heartbeat keeps a running lane alive and returns its status, so the
+// controller sees a lane that stopped on its own (state and last error).
+func (m *Manager) Heartbeat(_ context.Context, id string) (workerapi.LaneStatus, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	ls, err := m.get(id)
 	if err != nil {
-		return err
+		return workerapi.LaneStatus{}, err
 	}
 	if ls.status.State == "running" {
 		ls.status.LastHeartbeat = m.clock.Now()
 	}
-	return nil
+	return m.snapshot(ls), nil
 }
 
 func (m *Manager) Status(_ context.Context, id string) (workerapi.LaneStatus, error) {

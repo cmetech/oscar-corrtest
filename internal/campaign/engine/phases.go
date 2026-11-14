@@ -220,9 +220,9 @@ func (r *run) startLane(ctx context.Context) error {
 // heartbeats keeps the worker lane alive every 5 s until ctx ends.
 func (r *run) heartbeats(ctx context.Context) {
 	for next := r.now().Add(heartbeatEvery); r.e.clock.SleepUntil(ctx, next); next = next.Add(heartbeatEvery) {
-		if err := r.e.d.Worker.Heartbeat(ctx, r.laneID); err == nil {
+		if st, err := r.e.d.Worker.Heartbeat(ctx, r.laneID); err == nil {
 			r.mu.Lock()
-			r.lastHeartbeat = r.now()
+			r.lastHeartbeat, r.laneState, r.laneErr = r.now(), st.State, st.Error
 			r.mu.Unlock()
 		}
 	}
@@ -246,7 +246,8 @@ func (r *run) guards(ctx context.Context, stop context.CancelFunc) {
 		}
 		st, _ := r.e.d.Worker.Status(ctx, r.laneID)
 		r.mu.Lock()
-		c := guard.Counters{Offered: st.Sent + st.Failed, Unknown: st.Failed, TicketUnknown: r.ticketUnknown, WorkerHeartbeat: r.lastHeartbeat}
+		c := guard.Counters{Offered: st.Sent + st.Failed, Unknown: st.Failed, TicketUnknown: r.ticketUnknown, WorkerHeartbeat: r.lastHeartbeat,
+			LaneState: r.laneState, LaneError: r.laneErr, BaselineEnd: r.at("drain", false)}
 		r.mu.Unlock()
 		trips := guard.Evaluate(r.now(), window, c, baseline)
 		if len(trips) == 0 {

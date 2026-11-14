@@ -103,3 +103,25 @@ func TestMySQLRedisOOM(t *testing.T) {
 		}
 	}
 }
+
+func TestLaneStoppedBeforeBaselineEnd(t *testing.T) {
+	w := series(1, func(int) float64 { return 0 })
+	now := w[0].At
+	c := Counters{WorkerHeartbeat: now, LaneState: "completed", LaneError: "ledger outcome seq 9: disk full", BaselineEnd: now.Add(time.Minute)}
+	if !has(Evaluate(now, w, c, Sample{}), GuardLaneStopped) {
+		t.Fatal("a lane completed before the baseline end must trip")
+	}
+	c.LaneState = "running"
+	if has(Evaluate(now, w, c, Sample{}), GuardLaneStopped) {
+		t.Fatal("a running lane must not trip")
+	}
+	c.LaneState, c.BaselineEnd = "completed", now
+	if has(Evaluate(now, w, c, Sample{}), GuardLaneStopped) {
+		t.Fatal("a lane done at the baseline end must not trip")
+	}
+	c.LaneState = ""
+	c.BaselineEnd = now.Add(time.Minute)
+	if has(Evaluate(now, w, c, Sample{}), GuardLaneStopped) {
+		t.Fatal("no heartbeat yet (unknown state) must not trip")
+	}
+}
