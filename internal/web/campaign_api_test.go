@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -44,7 +45,11 @@ func (f *fakeDataSourceForCampaign) CampaignStatus(_ context.Context, id string)
 	if id != "camp_1" {
 		return appruntime.CampaignView{}, appruntime.ErrCampaignNotFound
 	}
-	return appruntime.CampaignView{Campaign: domain.Campaign{ID: id}}, nil
+	status := domain.CampaignPrecheck
+	if len(f.stopped) > 0 {
+		status = domain.CampaignInterrupted
+	}
+	return appruntime.CampaignView{Campaign: domain.Campaign{ID: id, Status: status}}, nil
 }
 func (f *fakeDataSourceForCampaign) ListCampaigns(context.Context, domain.CampaignFilter) ([]domain.Campaign, error) {
 	return []domain.Campaign{{ID: "camp_1"}}, nil
@@ -158,8 +163,8 @@ func TestCampaignAPIValidation(t *testing.T) {
 	if w := apiDo(h, http.MethodGet, "/api/v1/campaign/runs/zzz", "", true, nil); w.Code != http.StatusNotFound {
 		t.Errorf("missing status=%d", w.Code)
 	}
-	if w := apiDo(h, http.MethodPost, "/api/v1/campaign/runs/camp_1/stop", "", true, nil); w.Code != http.StatusOK || len(data.stopped) != 1 {
-		t.Errorf("stop status=%d", w.Code)
+	if w := apiDo(h, http.MethodPost, "/api/v1/campaign/runs/camp_1/stop", "", true, nil); w.Code != http.StatusOK || len(data.stopped) != 1 || !strings.Contains(w.Body.String(), `"status":"INTERRUPTED"`) {
+		t.Errorf("stop status=%d %s", w.Code, w.Body)
 	}
 	if w := apiDo(h, http.MethodGet, "/api/v1/campaign/compare?ids=a,b", "", true, nil); w.Code != http.StatusNotImplemented {
 		t.Errorf("compare status=%d", w.Code)
@@ -226,5 +231,39 @@ func TestTriggerIdentityRecorded(t *testing.T) {
 	}
 	if strings.Contains(w.Body.String(), apiToken) {
 		t.Fatal("token leaked in response")
+	}
+}
+
+func TestCampaignPostRejectedWithoutBearerMode(t *testing.T) {
+	t.Parallel()
+	_, network, _ := net.ParseCIDR("192.0.2.0/24")
+	for name, sec := range map[string]Security{
+		"none":          {},
+		"trusted-proxy": {Mode: SecurityTrustedProxy, ProxyHeader: "X-User", ProxyValue: "corey", TrustedProxies: []*net.IPNet{network}},
+	} {
+		data := &fakeDataSourceForCampaign{}
+		h, err := NewHandlerWithOptions(version.Info{}, data, sec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := httptest.NewRequest(http.MethodPost, "https://corrtest.example/api/v1/campaign/runs", strings.NewReader(`{"scenario":"alerting-day@v1"}`))
+		r.Header.Set("X-User", "corey")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusUnauthorized || len(data.started) != 0 {
+			t.Errorf("%s: status=%d started=%d", name, w.Code, len(data.started))
+		}
+	}
+}
+
+func TestCampaignAPIBodyLimitsAndStrictFields(t *testing.T) {
+	t.Parallel()
+	h := campaignServer(t, &fakeDataSourceForCampaign{}, false)
+	big := `{"scenario":"alerting-day@v1","acknowledged":["` + strings.Repeat("a", 1<<20+1) + `"]}`
+	if w := apiDo(h, http.MethodPost, "/api/v1/campaign/runs", big, true, nil); w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("oversize status=%d", w.Code)
+	}
+	if w := apiDo(h, http.MethodPost, "/api/v1/campaign/runs", `{"scenario":"alerting-day@v1","triggerIdentity":"bearer:evil"}`, true, nil); w.Code != http.StatusBadRequest {
+		t.Errorf("triggerIdentity status=%d", w.Code)
 	}
 }

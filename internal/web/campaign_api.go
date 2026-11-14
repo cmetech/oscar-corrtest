@@ -23,6 +23,9 @@ type campaignController interface {
 	ListCampaigns(context.Context, domain.CampaignFilter) ([]domain.Campaign, error)
 }
 
+// Compile-time guard: a signature drift would otherwise silently 404 every campaign route.
+var _ campaignController = (*appruntime.Runtime)(nil)
+
 // campaignWorker is implemented by the campaign worker manager (internal/campaign/worker).
 type campaignWorker interface {
 	Info(context.Context) workerapi.Info
@@ -107,7 +110,13 @@ func registerCampaignRoutes(mux *http.ServeMux, data DataSource, workerMode bool
 			case err != nil:
 				apiError(w, http.StatusInternalServerError, "stop_failed", err.Error())
 			default:
-				apiData(w, http.StatusOK, map[string]string{"id": r.PathValue("id"), "status": "stopping"})
+				// Report the resulting status (STOPPING, or INTERRUPTED from PRECHECK).
+				view, err := ctl.CampaignStatus(r.Context(), r.PathValue("id"))
+				if err != nil {
+					apiError(w, http.StatusInternalServerError, "status_failed", err.Error())
+					return
+				}
+				apiData(w, http.StatusOK, map[string]string{"id": view.Campaign.ID, "status": string(view.Campaign.Status)})
 			}
 		})
 		mux.HandleFunc("GET /api/v1/campaign/runs", func(w http.ResponseWriter, r *http.Request) {
