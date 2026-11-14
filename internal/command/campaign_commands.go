@@ -158,7 +158,7 @@ func (a *App) campaignFail(name string, err error) int {
 }
 
 func terminalCampaign(s domain.CampaignStatus) bool {
-	return s == domain.CampaignCompleted || s == domain.CampaignInterrupted
+	return s == domain.CampaignCompleted // INTERRUPTED continues to RECOVERING, then COMPLETED
 }
 
 func (a *App) campaignStart(ctx context.Context, name string, args []string, precheck bool) int {
@@ -196,8 +196,15 @@ func (a *App) campaignStart(ctx context.Context, name string, args []string, pre
 			Campaign domain.Campaign `json:"campaign"`
 		}
 		for {
-			if err := c.call(ctx, http.MethodGet, "/api/v1/campaign/runs/"+url.PathEscape(camp.ID), nil, &view); err != nil {
-				return a.campaignFail(name, err)
+			var perr error
+			for try := 0; try < 3; try++ { // retry transient polling errors
+				if perr = c.call(ctx, http.MethodGet, "/api/v1/campaign/runs/"+url.PathEscape(camp.ID), nil, &view); perr == nil {
+					break
+				}
+				time.Sleep(campaignPollInterval)
+			}
+			if perr != nil {
+				return a.campaignFail(name, perr)
 			}
 			if camp = view.Campaign; terminalCampaign(camp.Status) {
 				break
@@ -213,7 +220,11 @@ func (a *App) campaignStart(ctx context.Context, name string, args []string, pre
 	code := 0
 	if (precheck || *wait) && camp.Verdict != domain.VerdictPass {
 		code = 4
-		if precheck {
+		var rep struct {
+			Startable *bool `json:"startable"`
+		}
+		_ = json.Unmarshal(camp.Report, &rep)
+		if precheck || (rep.Startable != nil && !*rep.Startable) {
 			code = 3 // precheck failure is a refusal, not a campaign verdict
 		}
 	}
