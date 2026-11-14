@@ -78,14 +78,15 @@ type Limits struct {
 }
 
 type PrecheckLimits struct {
-	IdleQueueDepth    int           `json:"idleQueueDepth"`
-	IdleQueueAge      time.Duration `json:"idleQueueAge"`
-	ClockSkew         time.Duration `json:"clockSkew"`
-	TargetDiskFreePct float64       `json:"targetDiskFreePct"`
-	TargetMemAvailPct float64       `json:"targetMemAvailPct"`
-	RunnerDiskFreeGiB float64       `json:"runnerDiskFreeGiB"`
-	MetricsFreshness  time.Duration `json:"metricsFreshness"`
-	RestartWindow     time.Duration `json:"restartWindow"`
+	IdleQueueDepth      int           `json:"idleQueueDepth"`
+	IdleQueueAge        time.Duration `json:"idleQueueAge"`
+	ClockSkew           time.Duration `json:"clockSkew"`
+	TargetDiskFreePct   float64       `json:"targetDiskFreePct"`
+	TargetMemAvailPct   float64       `json:"targetMemAvailPct"`
+	RunnerDiskFreeGiB   float64       `json:"runnerDiskFreeGiB"`
+	MetricsFreshness    time.Duration `json:"metricsFreshness"`
+	RestartWindow       time.Duration `json:"restartWindow"`
+	HistoryRowsAdvisory int64         `json:"historyRowsAdvisory"`
 }
 
 type Scenario struct {
@@ -135,7 +136,7 @@ func AlertingDayV1() Scenario {
 			FrontOfficeP95: 2 * time.Second, FrontOfficeP99: 5 * time.Second, CorrelationSuccess: 1, TicketSuccess: 1, ResendSuccess: 1,
 			RegressionPct: 20, QuerySetVersion: "q1"},
 		Precheck: PrecheckLimits{IdleQueueDepth: 50, IdleQueueAge: 30 * time.Second, ClockSkew: 250 * time.Millisecond,
-			TargetDiskFreePct: 20, TargetMemAvailPct: 25, RunnerDiskFreeGiB: 10, MetricsFreshness: 60 * time.Second, RestartWindow: 30 * min},
+			TargetDiskFreePct: 20, TargetMemAvailPct: 25, RunnerDiskFreeGiB: 10, MetricsFreshness: 60 * time.Second, RestartWindow: 30 * min, HistoryRowsAdvisory: 5_000_000},
 		Seed: 20261113,
 	}
 }

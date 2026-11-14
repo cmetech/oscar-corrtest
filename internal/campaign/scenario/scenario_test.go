@@ -7,7 +7,7 @@ import (
 	corr "github.com/cmetech/oscar-corrtest/internal/scenario"
 )
 
-const goldenHash = "ee96330b51131f10eff340289f3c7e4f0300926ee4b4293b98e406ee91bb8b69"
+const goldenHash = "091bdc8356c653f7496b912cad4f259b379cdf79f9efd5068844ad55eff3fcb3"
 
 func TestAlertingDayV1Values(t *testing.T) {
 	s := AlertingDayV1()

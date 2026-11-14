@@ -80,6 +80,7 @@ type Deps interface {
 	SinkEnabled(ctx context.Context) (bool, error)
 	SetSinkEnabled(ctx context.Context, on bool) error // enable/disable CAMPAIGN_SINK with readback
 	PostAlert(ctx context.Context, labels map[string]string) error
+	ResolveAlert(ctx context.Context, labels map[string]string) error // same labels, endsAt=now
 	SinkReceipts(ctx context.Context, campaignRun string, since time.Time) ([]targetops.Receipt, error)
 	ExternalNotifiers(ctx context.Context) ([]targetops.Notifier, error) // enabled, excluding CAMPAIGN_SINK and Alert History
 	OpenCampaignAlerts(ctx context.Context) (int, error)
@@ -131,7 +132,7 @@ func Run(ctx context.Context, d Deps, s scenario.Scenario, minVersion string) []
 		func() Result { return a2(getProbe()) },
 		func() Result { return a3(ctx, d) },
 		func() Result { return a4(ctx, d) },
-		func() Result { return a5(getProbe()) },
+		func() Result { return a5(getProbe(), s) },
 	}
 	out := make([]Result, 0, len(steps))
 	for _, st := range steps {

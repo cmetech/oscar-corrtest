@@ -3,6 +3,7 @@ package precheck
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,6 +55,11 @@ type fake struct {
 	hostsDown     []string
 	backlog       int
 	foreignRate   float64
+	resolved      []map[string]string
+	posted        []map[string]string
+	postErr       error
+	incErr        map[string]error
+	incQueries    []string
 }
 
 func good() *fake {
@@ -69,7 +75,7 @@ func good() *fake {
 		winfoT:     Timing{Sent: t0, Recv: t0},
 		ctlVersion: "v1",
 		queues:     []Queue{{Name: "alerts", Depth: 50, OldestAge: 30 * time.Second}},
-		camps:      []domain.Campaign{{ID: "prior-001", Status: domain.CampaignCompleted, Cleanup: domain.CleanupClean}},
+		camps:      []domain.Campaign{{ID: "prior-001", Status: domain.CampaignCompleted, Cleanup: domain.CleanupClean, Verdict: domain.VerdictPass}},
 		openMut:    map[string][]domain.CampaignMutation{},
 		fresh:      map[string]time.Duration{"alerts": 5 * time.Second},
 		rate:       SNOWRate{Healthy: true, Configured: true, OpsPerSecond: 0.2},
@@ -120,7 +126,14 @@ func (f *fake) SetSinkEnabled(_ context.Context, on bool) error {
 	f.sinkSets = append(f.sinkSets, on)
 	return nil
 }
-func (f *fake) PostAlert(context.Context, map[string]string) error { return nil }
+func (f *fake) PostAlert(_ context.Context, l map[string]string) error {
+	f.posted = append(f.posted, l)
+	return f.postErr
+}
+func (f *fake) ResolveAlert(_ context.Context, l map[string]string) error {
+	f.resolved = append(f.resolved, l)
+	return nil
+}
 func (f *fake) SinkReceipts(context.Context, string, time.Time) ([]targetops.Receipt, error) {
 	return f.receipts, nil
 }
@@ -135,7 +148,8 @@ func (f *fake) SNOWRate(context.Context) (SNOWRate, error)                  { re
 func (f *fake) SNOWWake(context.Context) error                              { return f.wakeErr }
 func (f *fake) SNOWCredential(context.Context) error                        { return f.credErr }
 func (f *fake) OpenIncidents(_ context.Context, run string) ([]targetops.Incident, error) {
-	return f.incidents[run], nil
+	f.incQueries = append(f.incQueries, run)
+	return f.incidents[run], f.incErr[run]
 }
 func (f *fake) TaskRuns(context.Context, []string, time.Time, time.Time) ([]targetops.TaskRun, error) {
 	return f.taskRuns, nil
@@ -205,6 +219,10 @@ func TestBlockingBoundaries(t *testing.T) {
 			f.probe.Containers[0].StartedAt = t0.Add(-40 * time.Minute).Format(time.RFC3339)
 		}, "pass"},
 		{"B2 unhealthy", "B2", func(f *fake) { f.probe.Containers[0].Health = "unhealthy" }, "fail"},
+		{"B2 no healthcheck none", "B2", func(f *fake) {
+			f.probe.Containers = append(f.probe.Containers, targetops.ProbeContainer{Name: "x", Health: "none"}, targetops.ProbeContainer{Name: "y", Health: ""})
+		}, "pass"},
+		{"B2 starting", "B2", func(f *fake) { f.probe.Containers[0].Health = "starting" }, "fail"},
 		{"B2 oom", "B2", func(f *fake) { f.probe.Containers[0].OOMKilled = true }, "fail"},
 		{"B3 depth 51", "B3", func(f *fake) { f.queues[0].Depth = 51 }, "fail"},
 		{"B3 age 31s", "B3", func(f *fake) { f.queues[0].OldestAge = 31 * time.Second }, "fail"},
@@ -273,6 +291,56 @@ func TestB5SmokeRecordsAndRestoresMutation(t *testing.T) {
 	run(f)
 	if len(f.sinkSets) != 2 || len(f.restored) != 1 {
 		t.Fatal("failed smoke must still disable and restore")
+	}
+}
+
+func TestB5ResolvesSmokeAlertOnAllPaths(t *testing.T) {
+	for name, mut := range map[string]func(*fake){
+		"success":  func(*fake) {},
+		"timeout":  func(f *fake) { f.receipts = nil },
+		"postfail": func(f *fake) { f.postErr = errors.New("boom") },
+	} {
+		f := good()
+		mut(f)
+		run(f)
+		if len(f.resolved) != 1 || len(f.posted) != 1 || f.resolved[0]["campaign_run"] != "camp-001-precheck" || f.resolved[0]["alertname"] != f.posted[0]["alertname"] {
+			t.Errorf("%s: posted %v resolved %v", name, f.posted, f.resolved)
+		}
+	}
+}
+
+func manyCampaigns(f *fake, n int, cleanup domain.CleanupStatus) {
+	f.camps = nil
+	for i := 0; i < n; i++ {
+		f.camps = append(f.camps, domain.Campaign{ID: fmt.Sprintf("old-%03d", i), Status: domain.CampaignCompleted, Cleanup: cleanup,
+			Verdict: domain.VerdictPass, StartedAt: t0.Add(-time.Duration(i+1) * time.Hour)})
+	}
+}
+
+func TestB7BoundedQueries(t *testing.T) {
+	f := good()
+	manyCampaigns(f, 20, domain.CleanupClean)
+	run(f)
+	if len(f.incQueries) != 5 {
+		t.Fatalf("want 5 queries, got %v", f.incQueries)
+	}
+	f = good()
+	manyCampaigns(f, 20, domain.CleanupClean)
+	f.camps[15].Cleanup = domain.CleanupDirty
+	run(f)
+	if len(f.incQueries) != 6 {
+		t.Fatalf("dirty old campaign must be included: %v", f.incQueries)
+	}
+}
+
+func TestB7ErrorsAggregate(t *testing.T) {
+	f := good()
+	manyCampaigns(f, 3, domain.CleanupClean)
+	f.incErr = map[string]error{"old-000": errors.New("e0"), "old-002": errors.New("e2")}
+	f.incidents["old-001"] = []targetops.Incident{{Number: "INC9"}}
+	r := find(run(f), "B7")
+	if r.Status != Error || len(f.incQueries) != 3 || !strings.Contains(r.Detail, "old-000") || !strings.Contains(r.Detail, "old-002") || !strings.Contains(r.Detail, "INC9") {
+		t.Fatalf("%+v %v", r, f.incQueries)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -19,8 +20,8 @@ import (
 
 const (
 	retentionMinDays = 30
-	historyRowLimit  = 5_000_000 // A5 records drift above this; it never purges
-	foreignRateMax   = 1.0       // A4: non-campaign History arrivals per second
+	recentCampaigns  = 5   // B7 always checks this many most recent campaigns
+	foreignRateMax   = 1.0 // A4: non-campaign History arrivals per second
 	foreignWindow    = 2 * time.Minute
 	snowMinOpsPerHr  = 600
 	b9Window         = 60 * time.Minute
@@ -134,7 +135,7 @@ func b2(d Deps, p *probeData, s scenario.Scenario) Result {
 	var probs []string
 	now := d.Now()
 	for _, c := range p.r.Containers {
-		if c.Health != "healthy" {
+		if c.Health == "unhealthy" || c.Health == "starting" { // "none" or "" means no healthcheck: fine
 			probs = append(probs, fmt.Sprintf("%s health %q", c.Name, c.Health))
 		}
 		if c.OOMKilled {
@@ -262,9 +263,17 @@ func smoke(ctx context.Context, d Deps) (received bool, err error) {
 	if err != nil {
 		return false, fmt.Errorf("record mutation: %w", err)
 	}
+	run := d.CampaignID() + "-precheck"
+	labels := map[string]string{"alertname": "CampaignPrecheckSmoke", "campaign_run": run}
+	posted := false
 	defer func() {
 		// Restore even if the caller's context was cancelled.
 		rctx := context.WithoutCancel(ctx)
+		if posted { // never leave the smoke alert firing; best effort, it expires with the sink off
+			if rerr := d.ResolveAlert(rctx, labels); rerr != nil && err == nil {
+				err = fmt.Errorf("resolve smoke alert: %w", rerr)
+			}
+		}
 		if derr := d.SetSinkEnabled(rctx, false); derr != nil {
 			err = fmt.Errorf("CAMPAIGN_SINK left enabled, mutation %d stays open: %v", id, derr)
 			return
@@ -276,9 +285,9 @@ func smoke(ctx context.Context, d Deps) (received bool, err error) {
 	if err := d.SetSinkEnabled(ctx, true); err != nil {
 		return false, fmt.Errorf("enable CAMPAIGN_SINK: %w", err)
 	}
-	run := d.CampaignID() + "-precheck"
 	since := d.Now().Add(-2 * time.Second) // receipts filter at one-second resolution
-	if err := d.PostAlert(ctx, map[string]string{"alertname": "CampaignPrecheckSmoke", "campaign_run": run}); err != nil {
+	posted = true                          // resolve even if the post errored: it may have landed
+	if err := d.PostAlert(ctx, labels); err != nil {
 		return false, fmt.Errorf("post smoke alert: %w", err)
 	}
 	for i := 0; i < smokeAttempts; i++ {
@@ -340,6 +349,20 @@ func priorCampaignIDs(ctx context.Context, d Deps) ([]domain.Campaign, error) {
 	return out, nil
 }
 
+// b7Scope bounds SNOW queries (ruling C19): the most recent recentCampaigns, plus any older campaign whose cleanup is
+// not CLEAN, that was interrupted, or that has no verdict.
+func b7Scope(prior []domain.Campaign) []domain.Campaign {
+	sorted := append([]domain.Campaign(nil), prior...)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].StartedAt.After(sorted[j].StartedAt) })
+	var out []domain.Campaign
+	for i, c := range sorted {
+		if i < recentCampaigns || c.Cleanup != domain.CleanupClean || c.Status == domain.CampaignInterrupted || c.Verdict == "" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 func b7(ctx context.Context, d Deps) Result {
 	var probs []string
 	rate, err := d.SNOWRate(ctx)
@@ -363,15 +386,23 @@ func b7(ctx context.Context, d Deps) Result {
 		return errRes("B7", Blocking, "campaign list", err)
 	}
 	open := 0
-	for _, c := range prior {
+	var failed []string
+	for _, c := range b7Scope(prior) {
 		inc, err := d.OpenIncidents(ctx, c.ID)
 		if err != nil {
-			return errRes("B7", Blocking, "open incidents for "+c.ID, err)
+			failed = append(failed, fmt.Sprintf("%s: %v", c.ID, err))
+			continue
 		}
 		for _, i := range inc {
 			open++
 			probs = append(probs, fmt.Sprintf("open incident %s from campaign %s", i.Number, c.ID))
 		}
+	}
+	if len(failed) > 0 {
+		r := res("B7", Blocking, true, fmt.Sprintf("%.0f ops/hour, %d open prior incidents", perHour, open), probs)
+		r.Status = Error
+		r.Detail = strings.Trim(r.Detail+"; incident query failed for "+strings.Join(failed, " | "), "; ")
+		return r
 	}
 	return res("B7", Blocking, true, fmt.Sprintf("%.0f ops/hour, %d open prior incidents", perHour, open), probs)
 }
@@ -568,13 +599,13 @@ func a4(ctx context.Context, d Deps) Result {
 	return res("A4", Advisory, true, fmt.Sprintf("%.2f/s", r), probs)
 }
 
-func a5(p *probeData) Result {
+func a5(p *probeData, s scenario.Scenario) Result {
 	if p.err != nil || p.r.AlertHistory == nil {
 		return errRes("A5", Advisory, "alert history size", fmt.Errorf("probe did not report it"))
 	}
 	var probs []string
-	if p.r.AlertHistory.Rows > historyRowLimit {
-		probs = append(probs, fmt.Sprintf("%d rows above %d (recorded, never purged)", p.r.AlertHistory.Rows, historyRowLimit))
+	if p.r.AlertHistory.Rows > s.Precheck.HistoryRowsAdvisory {
+		probs = append(probs, fmt.Sprintf("%d rows above %d (recorded, never purged)", p.r.AlertHistory.Rows, s.Precheck.HistoryRowsAdvisory))
 	}
 	return res("A5", Advisory, true, fmt.Sprintf("%d rows", p.r.AlertHistory.Rows), probs)
 }
