@@ -54,15 +54,17 @@ func Evaluate(now time.Time, window []Sample, c Counters, baseline Sample) []Tri
 	if len(window) == 0 || now.Sub(window[len(window)-1].Newest) > 2*time.Minute {
 		add(GuardMetricsStale, "no fresh metrics for over 2m")
 	}
-	if now.Sub(c.WorkerHeartbeat) > 30*time.Second {
-		add(GuardHeartbeatLost, "worker heartbeat older than 30s")
+	// The worker orphan-stops itself after 30s without heartbeats; a 15s guard
+	// tick can miss that window, so its own report is the same harness fault.
+	if now.Sub(c.WorkerHeartbeat) > 30*time.Second || c.LaneState == "orphan_stopped" {
+		add(GuardHeartbeatLost, "worker heartbeat lost (lane %s)", c.LaneState)
 	}
 	// Only sends with no definite answer are unknown (ruling C38); a handful
 	// of sends is no rate, so evaluate from 500 offered.
 	if c.Offered >= unknownMinOffered && c.Unknown*1000 > c.Offered*5 {
 		add(GuardUnknownRate, "unknown %d of %d offered", c.Unknown, c.Offered)
 	}
-	if c.LaneState != "" && c.LaneState != "running" && now.Before(c.BaselineEnd) {
+	if c.LaneState != "" && c.LaneState != "running" && c.LaneState != "orphan_stopped" && now.Before(c.BaselineEnd) {
 		add(GuardLaneStopped, "baseline lane %s before the planned end: %s", c.LaneState, c.LaneError)
 	}
 	if c.TicketUnknown > 3 {

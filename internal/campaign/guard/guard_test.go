@@ -111,6 +111,16 @@ func TestMySQLRedisOOM(t *testing.T) {
 	}
 }
 
+func TestOrphanStoppedLaneIsHeartbeatLost(t *testing.T) {
+	w := series(1, func(int) float64 { return 0 })
+	now := w[0].At
+	c := Counters{WorkerHeartbeat: now, LaneState: "orphan_stopped", BaselineEnd: now.Add(time.Minute)}
+	trips := Evaluate(now, w, c, Sample{})
+	if !has(trips, GuardHeartbeatLost) || has(trips, GuardLaneStopped) {
+		t.Fatalf("orphan stop is a harness fault (heartbeat_lost), not lane_stopped: %+v", trips)
+	}
+}
+
 func TestLaneStoppedBeforeBaselineEnd(t *testing.T) {
 	w := series(1, func(int) float64 { return 0 })
 	now := w[0].At
