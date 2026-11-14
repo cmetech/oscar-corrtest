@@ -184,6 +184,17 @@ func (a *App) runServe(ctx context.Context, args []string) int {
 		}
 		defer application.Close()
 	}
+	if *campaignWorker {
+		w, ok := application.(interface{ EnableCampaignWorker(context.Context) error })
+		if !ok {
+			fmt.Fprintln(a.stderr, "serve: --campaign-worker is not supported by this runtime")
+			return 1
+		}
+		if err := w.EnableCampaignWorker(ctx); err != nil {
+			fmt.Fprintf(a.stderr, "serve: %v\n", err)
+			return 1
+		}
+	}
 	scheme := "http"
 	if *tlsCert != "" {
 		scheme = "https"

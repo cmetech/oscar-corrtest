@@ -485,3 +485,16 @@ func TestServeRejectsBadCampaignConfig(t *testing.T) {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
 }
+
+func TestServeCampaignWorkerFailsWhenWorkerCannotBeBuilt(t *testing.T) {
+	var stderr bytes.Buffer
+	open := func(context.Context, config.Settings) (ApplicationRuntime, error) { return &fakeRuntime{}, nil }
+	served := false
+	app := NewConfigured(io.Discard, &stderr, version.Info{}, func(context.Context, web.Options) error { served = true; return nil }, open, testGetenv)
+	if code := app.Run(context.Background(), []string{"serve", "--campaign-worker"}); code != 1 || served {
+		t.Fatalf("code=%d served=%v stderr=%s", code, served, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "campaign-worker") {
+		t.Fatalf("stderr=%q", stderr.String())
+	}
+}

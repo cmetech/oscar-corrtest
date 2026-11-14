@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
 )
 
 // ErrLaneNotFound is returned by a worker for an unknown lane id.
@@ -29,11 +31,28 @@ type LaneSpec struct {
 	Params     json.RawMessage `json:"params,omitempty"`
 }
 
+// BaselineParams is LaneSpec.Params for Kind "baseline". The lane id is
+// LaneSpec.ID (e.g. "<campaignRunID>-baseline") and the plan run id is CampaignID.
+type BaselineParams struct {
+	TargetURL string                `json:"targetUrl"`
+	Seed      int64                 `json:"seed"`
+	Baseline  scenario.BaselineSpec `json:"baseline"`
+	Duration  time.Duration         `json:"duration"`
+	StartAt   time.Time             `json:"startAt,omitempty"` // zero = now
+}
+
 // LaneStatus is a lane's current state.
 type LaneStatus struct {
-	ID            string    `json:"id"`
-	State         string    `json:"state"`
-	Sent          int       `json:"sent"`
-	Failed        int       `json:"failed"`
-	LastHeartbeat time.Time `json:"lastHeartbeat"`
+	ID       string `json:"id"`
+	State    string `json:"state"`
+	Sent     int    `json:"sent"`
+	Failed   int    `json:"failed"`
+	Missed   int    `json:"missed"`
+	Resolved int    `json:"resolved"` // accepted resolves sent by ResolveAll (not planned ones)
+	Error    string `json:"error,omitempty"`
+	// OrphanStopAt is the orphan_stop marker: set when the watchdog stopped the
+	// lane for lack of heartbeats. (The ledger kind column only allows
+	// firing/resolve, so the marker lives on the status, not as a ledger row.)
+	OrphanStopAt  *time.Time `json:"orphanStopAt,omitempty"`
+	LastHeartbeat time.Time  `json:"lastHeartbeat"`
 }

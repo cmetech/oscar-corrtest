@@ -37,6 +37,9 @@ type campaignWorker interface {
 	Ledger(context.Context, string, io.Writer) error
 }
 
+// Compile-time guard: the production data source must serve the worker routes.
+var _ campaignWorker = (*appruntime.Runtime)(nil)
+
 func apiData(w http.ResponseWriter, status int, data any) {
 	writeJSON(w, status, map[string]any{"apiVersion": campaignAPIVersion, "data": data})
 }
@@ -216,13 +219,34 @@ func registerWorkerRoutes(mux *http.ServeMux, wk campaignWorker, post func(strin
 		apiData(w, http.StatusOK, map[string]int{"resolved": n})
 	})
 	mux.HandleFunc("GET "+base+"/lanes/{id}/ledger", func(w http.ResponseWriter, r *http.Request) {
+		// Streaming contract: NDJSON rows, then a terminal record {"type":"end","ok":true}
+		// (or ok:false with an error message if the stream failed after bytes were
+		// written). A stream with no end record is truncated.
+		cw := &countingWriter{w: w}
 		w.Header().Set("Content-Type", "application/x-ndjson")
-		if err := wk.Ledger(r.Context(), r.PathValue("id"), w); err != nil {
-			// Headers are sent once the first bytes are written; only an immediate failure maps cleanly.
+		err := wk.Ledger(r.Context(), r.PathValue("id"), cw)
+		switch {
+		case err == nil:
+			_, _ = io.WriteString(w, "{\"type\":\"end\",\"ok\":true}\n")
+		case cw.n > 0:
+			msg, _ := json.Marshal(err.Error())
+			_, _ = io.WriteString(w, "{\"type\":\"end\",\"ok\":false,\"error\":"+string(msg)+"}\n")
+		default:
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			laneErr(w, err)
 		}
 	})
+}
+
+type countingWriter struct {
+	w io.Writer
+	n int
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.n += n
+	return n, err
 }
 
 func decodeStrict(w http.ResponseWriter, r *http.Request, v any) bool {

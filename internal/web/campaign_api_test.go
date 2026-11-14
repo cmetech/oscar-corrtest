@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -76,7 +77,11 @@ func (f *fakeWorkerData) Status(_ context.Context, id string) (workerapi.LaneSta
 	}
 	return workerapi.LaneStatus{ID: id, State: "running"}, nil
 }
-func (f *fakeWorkerData) Ledger(_ context.Context, _ string, w io.Writer) error {
+func (f *fakeWorkerData) Ledger(_ context.Context, id string, w io.Writer) error {
+	if id == "fail" {
+		_, _ = io.WriteString(w, "{\"seq\":1}\n")
+		return errors.New("disk gone")
+	}
 	_, err := io.WriteString(w, "{\"seq\":1}\n")
 	return err
 }
@@ -202,8 +207,12 @@ func TestWorkerRoutesAbsentUnlessWorkerMode(t *testing.T) {
 		}
 	}
 	w = apiDo(h, http.MethodGet, "/api/v1/campaign-worker/lanes/l1/ledger", "", true, nil)
-	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "application/x-ndjson" || w.Body.String() != "{\"seq\":1}\n" {
+	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "application/x-ndjson" || w.Body.String() != "{\"seq\":1}\n{\"type\":\"end\",\"ok\":true}\n" {
 		t.Fatalf("ledger status=%d ct=%s", w.Code, w.Header().Get("Content-Type"))
+	}
+	w = apiDo(h, http.MethodGet, "/api/v1/campaign-worker/lanes/fail/ledger", "", true, nil)
+	if want := "{\"seq\":1}\n{\"type\":\"end\",\"ok\":false,\"error\":\"disk gone\"}\n"; w.Body.String() != want {
+		t.Fatalf("mid-stream failure body=%q", w.Body.String())
 	}
 	if w := apiDo(h, http.MethodPost, "/api/v1/campaign-worker/lanes/l1/stop", "", false, sessionCookie(t, h)); w.Code != http.StatusUnauthorized {
 		t.Fatalf("cookie worker POST status=%d", w.Code)

@@ -228,3 +228,14 @@ func TestStopDuringPrecheckCancels(t *testing.T) {
 		t.Fatalf("status=%s", view.Campaign.Status)
 	}
 }
+
+func TestWorkerCampaignModeNeedsTarget(t *testing.T) {
+	r := openCampaignRuntime(t, t.TempDir(), nil)
+	defer r.Close()
+	if _, err := r.Status(context.Background(), "x"); err == nil {
+		t.Fatal("worker methods must fail when worker mode is off")
+	}
+	if err := r.EnableCampaignWorker(context.Background()); err == nil {
+		t.Fatal("want no-target error")
+	}
+}

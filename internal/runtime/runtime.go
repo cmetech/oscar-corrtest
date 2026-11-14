@@ -24,6 +24,7 @@ import (
 
 	"github.com/cmetech/oscar-corrtest/internal/applog"
 	"github.com/cmetech/oscar-corrtest/internal/artifact"
+	"github.com/cmetech/oscar-corrtest/internal/campaign/worker"
 	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
@@ -81,6 +82,7 @@ type Runtime struct {
 	rootCtx    context.Context
 
 	campaignEngine CampaignEngine
+	worker         *worker.Manager // non-nil only in campaign worker mode
 	campaignActive atomic.Bool
 	campaignID     string // guarded by activeMu
 	campaignCancel context.CancelFunc
@@ -497,6 +499,9 @@ func (r *Runtime) Close() error {
 			r.campaignCancel()
 		}
 		r.activeMu.Unlock()
+		if r.worker != nil {
+			r.worker.Shutdown()
+		}
 		r.runWG.Wait()
 		r.closeErr = r.database.Close()
 		if err := r.stateLock.Close(); r.closeErr == nil {
