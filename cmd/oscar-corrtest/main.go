@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"syscall"
 
 	"github.com/cmetech/oscar-corrtest/internal/applog"
+	"github.com/cmetech/oscar-corrtest/internal/campaign"
+	"github.com/cmetech/oscar-corrtest/internal/campaign/engine"
 	"github.com/cmetech/oscar-corrtest/internal/command"
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/envfile"
@@ -72,8 +75,22 @@ func run(args []string, stdout, stderr io.Writer, lookupEnv func(string) (string
 		controller := operations.New(settings, environment, manager, logs)
 		return appruntime.OpenWithOptions(ctx, settings, info, appruntime.Options{Environment: environment, Logs: logs, Logger: logs.Logger("runtime"), Operations: controller})
 	}
-	app := command.NewApplication(stdout, stderr, info, command.Dependencies{Serve: web.Run, Open: open, Getenv: environment.Getenv, Service: serviceFactory, Logger: logger})
+	app := command.NewApplication(stdout, stderr, info, command.Dependencies{Serve: web.Run, Open: open, Getenv: environment.Getenv, Service: serviceFactory, Logger: logger, CampaignEngine: enableCampaignEngine})
 	exitCode := app.Run(ctx, args)
 	_ = logs.Close()
 	return exitCode
+}
+
+// enableCampaignEngine wires the campaign engine to the real clients named by
+// --campaign-config. Without the flag StartCampaign stays "engine not configured".
+func enableCampaignEngine(ctx context.Context, app command.ApplicationRuntime, cfg campaign.Config) error {
+	rt, ok := app.(*appruntime.Runtime)
+	if !ok {
+		return errors.New("campaign engine needs the local runtime")
+	}
+	e, err := engine.NewFromConfig(ctx, cfg, rt)
+	if err != nil {
+		return err
+	}
+	return rt.EnableCampaignEngine(ctx, e)
 }

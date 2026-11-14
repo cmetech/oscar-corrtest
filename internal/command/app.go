@@ -41,14 +41,15 @@ type OpenRuntimeFunc func(context.Context, config.Settings) (ApplicationRuntime,
 
 // App is the oscar-corrtest command-line application.
 type App struct {
-	stdout  io.Writer
-	stderr  io.Writer
-	info    version.Info
-	serve   ServeFunc
-	open    OpenRuntimeFunc
-	getenv  func(string) string
-	service func() (service.Manager, error)
-	logger  *slog.Logger
+	stdout         io.Writer
+	stderr         io.Writer
+	info           version.Info
+	serve          ServeFunc
+	open           OpenRuntimeFunc
+	getenv         func(string) string
+	service        func() (service.Manager, error)
+	logger         *slog.Logger
+	campaignEngine func(ctx context.Context, app ApplicationRuntime, cfg campaign.Config) error
 }
 
 // Dependencies contains process-owned integrations used by commands.
@@ -58,6 +59,8 @@ type Dependencies struct {
 	Getenv  func(string) string
 	Service func() (service.Manager, error)
 	Logger  *slog.Logger
+	// CampaignEngine installs the campaign engine when serve gets --campaign-config.
+	CampaignEngine func(ctx context.Context, app ApplicationRuntime, cfg campaign.Config) error
 }
 
 // NewApplication constructs the complete CLI from explicit dependencies.
@@ -66,7 +69,7 @@ func NewApplication(stdout, stderr io.Writer, info version.Info, dependencies De
 	if getenv == nil {
 		getenv = os.Getenv
 	}
-	return &App{stdout: stdout, stderr: stderr, info: info, serve: dependencies.Serve, open: dependencies.Open, getenv: getenv, service: dependencies.Service, logger: dependencies.Logger}
+	return &App{stdout: stdout, stderr: stderr, info: info, serve: dependencies.Serve, open: dependencies.Open, getenv: getenv, service: dependencies.Service, logger: dependencies.Logger, campaignEngine: dependencies.CampaignEngine}
 }
 
 // New constructs an application using the supplied output streams and build metadata.
@@ -192,6 +195,16 @@ func (a *App) runServe(ctx context.Context, args []string) int {
 		}
 		if err := w.EnableCampaignWorker(ctx); err != nil {
 			fmt.Fprintf(a.stderr, "serve: %v\n", err)
+			return 1
+		}
+	}
+	if campaignSettings != nil {
+		if a.campaignEngine == nil || application == nil {
+			fmt.Fprintln(a.stderr, "serve: --campaign-config is not supported by this runtime")
+			return 1
+		}
+		if err := a.campaignEngine(ctx, application, *campaignSettings); err != nil {
+			fmt.Fprintf(a.stderr, "serve: campaign engine: %v\n", err)
 			return 1
 		}
 	}
