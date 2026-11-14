@@ -104,6 +104,7 @@ type pageData struct {
 	Authoring            *authoring.Page
 	AuthoringFilter      string
 	AuthoringFields      []scenario.FieldDefinition
+	Campaign             *campaignPage
 }
 
 type readinessView struct {
@@ -221,6 +222,7 @@ func buildHandler(info version.Info, data DataSource, tmpl *template.Template, s
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
 	registerCampaignRoutes(mux, data, workerMode)
+	registerCampaignPages(mux, info, data, tmpl, nonce, csrfSecret, csrfErr)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", noCache(static)))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
 		render(w, tmpl, nonce, pageData{Version: info, Page: "dashboard", Readiness: readiness(data)})

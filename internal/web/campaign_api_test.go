@@ -171,7 +171,7 @@ func TestCampaignAPIValidation(t *testing.T) {
 	if w := apiDo(h, http.MethodPost, "/api/v1/campaign/runs/camp_1/stop", "", true, nil); w.Code != http.StatusOK || len(data.stopped) != 1 || !strings.Contains(w.Body.String(), `"status":"INTERRUPTED"`) {
 		t.Errorf("stop status=%d %s", w.Code, w.Body)
 	}
-	if w := apiDo(h, http.MethodGet, "/api/v1/campaign/compare?ids=a,b", "", true, nil); w.Code != http.StatusNotImplemented {
+	if w := apiDo(h, http.MethodGet, "/api/v1/campaign/compare?ids=a", "", true, nil); w.Code != http.StatusBadRequest {
 		t.Errorf("compare status=%d", w.Code)
 	}
 	if w := apiDo(h, http.MethodGet, "/api/v1/campaign/runs/camp_1/bundle", "", true, nil); w.Code != http.StatusNotFound {

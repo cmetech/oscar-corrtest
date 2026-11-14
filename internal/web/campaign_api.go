@@ -6,8 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"time"
 
 	campaignscenario "github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
@@ -151,9 +149,22 @@ func registerCampaignRoutes(mux *http.ServeMux, data DataSource, workerMode bool
 			}
 			apiData(w, http.StatusOK, view)
 		})
-		// Defined shapes until their tasks land: compare (C13), bundle (C16).
-		mux.HandleFunc("GET /api/v1/campaign/compare", func(w http.ResponseWriter, _ *http.Request) {
-			apiError(w, http.StatusNotImplemented, "not_implemented", "campaign compare is not implemented yet")
+		mux.HandleFunc("GET /api/v1/campaign/compare", func(w http.ResponseWriter, r *http.Request) {
+			ids := splitIDs(r.URL.Query().Get("ids"))
+			if len(ids) < 2 {
+				apiError(w, http.StatusBadRequest, "invalid_request", "ids must list two or more campaign ids")
+				return
+			}
+			res, err := compareCampaigns(r.Context(), ctl, ids)
+			if errors.Is(err, appruntime.ErrCampaignNotFound) {
+				apiError(w, http.StatusNotFound, "not_found", err.Error())
+				return
+			}
+			if err != nil {
+				apiError(w, http.StatusInternalServerError, "compare_failed", err.Error())
+				return
+			}
+			apiData(w, http.StatusOK, res)
 		})
 		mux.HandleFunc("GET /api/v1/campaign/runs/{id}/bundle", func(w http.ResponseWriter, r *http.Request) {
 			if _, ok := requestBearerIdentity(r); !ok {
@@ -166,28 +177,7 @@ func registerCampaignRoutes(mux *http.ServeMux, data DataSource, workerMode bool
 				apiError(w, http.StatusNotFound, "not_implemented", "campaign bundle download is unavailable")
 				return
 			}
-			dir, err := os.MkdirTemp("", "oscar-corrtest-campaign-*")
-			if err != nil {
-				apiError(w, http.StatusInternalServerError, "export_failed", "campaign export unavailable")
-				return
-			}
-			defer os.RemoveAll(dir)
-			dest := filepath.Join(dir, "campaign.zip")
-			if _, err := x.ExportCampaign(r.Context(), r.PathValue("id"), dest); err != nil {
-				apiError(w, http.StatusUnprocessableEntity, "export_failed", err.Error())
-				return
-			}
-			f, err := os.Open(dest) // #nosec G304 -- server-generated file in a private temp dir.
-			if err != nil {
-				apiError(w, http.StatusInternalServerError, "export_failed", "campaign export unavailable")
-				return
-			}
-			defer f.Close()
-			w.Header().Set("Content-Type", "application/zip")
-			w.Header().Set("Content-Disposition", `attachment; filename="oscar-corrtest-campaign-`+r.PathValue("id")+`.zip"`)
-			w.Header().Set("Cache-Control", "no-store")
-			w.Header().Set("X-Content-Type-Options", "nosniff")
-			_, _ = io.Copy(w, f)
+			writeCampaignBundle(w, r, x, r.PathValue("id"))
 		})
 	}
 	if wk, ok := data.(campaignWorker); ok && workerMode {

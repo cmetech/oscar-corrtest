@@ -1,0 +1,22 @@
+{{define "campaigns"}}
+<section class="page-heading"><p class="eyebrow">Alerting day</p><h1>Campaigns</h1><p>Run pre-checks, then start a campaign. <a href="/campaigns/compare">Compare campaigns</a></p></section>
+{{if .Error}}<div class="notice notice--error" role="alert">{{.Error}}</div>{{end}}
+{{with .Campaign}}
+<form method="post" action="/campaigns/prechecks"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><button class="primary-button" type="submit">Run pre-checks</button></form>
+{{if .Pending}}<p data-autoreload="3000">Pre-checks for <code>{{.PrecheckID}}</code> are running. This page refreshes.</p>{{end}}
+{{if .Checks}}
+<form method="post" action="/campaigns/start" class="stack">
+  <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><input type="hidden" name="precheck" value="{{.PrecheckID}}">
+  <div class="data-table-wrapper"><table><caption>Pre-check results for <code>{{.PrecheckID}}</code></caption><thead><tr><th>Check</th><th>Tier</th><th>Status</th><th>Measured</th><th>Detail</th><th>Acknowledge</th></tr></thead><tbody>
+  {{range .Checks}}<tr><td>{{.ID}}</td><td>{{.Tier}}</td><td><span class="status-pill" data-status="{{.Status}}">{{.Status}}</span></td><td>{{.Measured}}</td><td>{{.Detail}}</td>
+  <td>{{if and (eq .Tier "advisory") (ne .Status "pass")}}<label>Type {{.ID}}<input name="ack_{{.ID}}" autocomplete="off" aria-label="Type {{.ID}} to acknowledge"></label>{{end}}</td></tr>{{end}}
+  </tbody></table></div>
+  <button class="primary-button" type="submit"{{if .Blocked}} disabled{{end}}>Start campaign</button>
+  {{if .Blocked}}<p>A blocking check is not passing; fix it and run pre-checks again.</p>{{end}}
+</form>
+{{end}}
+{{if .Campaigns}}<div class="data-table-wrapper"><table><caption>Campaigns</caption><thead><tr><th>Campaign</th><th>Status</th><th>Verdict</th><th>Run by</th><th>Started</th></tr></thead><tbody>
+{{range .Campaigns}}<tr><td><a href="/campaigns/{{.ID}}"><code>{{.ID}}</code></a></td><td><span class="status-pill" data-status="{{.Status}}">{{.Status}}</span></td><td>{{.Verdict}}</td><td>{{.RunBy}}</td><td>{{logTime .StartedAt}}</td></tr>{{end}}
+</tbody></table></div>{{else}}<section class="empty-state"><h2>No campaigns yet</h2><p>Run pre-checks to begin.</p></section>{{end}}
+{{end}}
+{{end}}

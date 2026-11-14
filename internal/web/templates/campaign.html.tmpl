@@ -1,0 +1,18 @@
+{{define "campaign"}}
+{{with .Campaign}}
+<section class="page-heading"><p class="eyebrow">Campaign</p><h1><code>{{.Campaign.ID}}</code></h1>
+<p><span class="status-pill" data-status="{{.Campaign.Status}}">{{.Campaign.Status}}</span> {{if .Campaign.Verdict}}verdict {{.Campaign.Verdict}}{{end}} · run by {{.Campaign.RunBy}} · cleanup {{.Campaign.Cleanup}}{{if not .Campaign.Comparable}} · not comparable{{end}}</p></section>
+{{end}}
+{{if .Error}}<div class="notice notice--error" role="alert">{{.Error}}</div>{{end}}
+{{with .Campaign}}
+{{if not .Terminal}}<form method="post" action="/campaigns/{{.Campaign.ID}}/stop"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><button class="danger-button" type="submit">Stop campaign</button></form>{{end}}
+<h2>Timeline <span data-stream-state></span></h2>
+<ol data-campaign-timeline data-campaign-id="{{.Campaign.ID}}"{{if .Terminal}} data-terminal="true"{{end}}>
+{{range .Events}}<li data-sequence="{{.Sequence}}"><time>{{logTime .OccurredAt}}</time> <strong>{{.Summary}}</strong> <code>{{.Type}}</code></li>{{end}}
+</ol>
+{{with .Card}}<div class="data-table-wrapper"><table><caption>Scorecard headlines (verdict {{.Verdict}})</caption><thead><tr><th>Headline</th><th>Value</th><th>Limit</th><th>Result</th></tr></thead><tbody>
+{{range .Headlines}}<tr><td>{{.Name}}</td><td>{{.Value}} {{.Unit}}</td><td>{{if .Limit}}{{.Limit}}{{end}}</td><td>{{if .Pass}}pass{{else}}fail{{end}}</td></tr>{{end}}
+</tbody></table></div>{{end}}
+{{if .Terminal}}<p><a href="/campaigns/{{.Campaign.ID}}/bundle">Download evidence bundle</a></p>{{end}}
+{{end}}
+{{end}}

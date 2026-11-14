@@ -17,6 +17,7 @@
   <script defer src="/static/js/scenarios.js"></script>
   <script defer src="/static/js/operations.js"></script>
   <script defer src="/static/js/authoring.js"></script>
+  <script defer src="/static/js/campaign.js"></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to content</a>
@@ -38,6 +39,7 @@
       <a href="/"{{if eq .Page "dashboard"}} aria-current="page"{{end}}>Dashboard</a>
 	  <a href="/run-test"{{if eq .Page "run-test"}} aria-current="page"{{end}}>Run test</a>
       <a href="/runs"{{if or (eq .Page "runs") (eq .Page "run-detail")}} aria-current="page"{{end}}>Runs</a>
+      <a href="/campaigns"{{if or (eq .Page "campaigns") (eq .Page "campaign") (eq .Page "campaign-compare")}} aria-current="page"{{end}}>Campaigns</a>
       <a href="/scenarios"{{if eq .Page "scenarios"}} aria-current="page"{{end}}>Scenarios</a>
       <a href="/authoring"{{if eq .Page "authoring"}} aria-current="page"{{end}}>Authoring</a>
       <a href="/targets"{{if eq .Page "targets"}} aria-current="page"{{end}}>Targets</a>
@@ -51,6 +53,9 @@
       {{else if eq .Page "authoring"}}{{template "authoring" .}}
       {{else if eq .Page "runs"}}{{template "runs" .}}
       {{else if eq .Page "run-detail"}}{{template "run-detail" .}}
+      {{else if eq .Page "campaigns"}}{{template "campaigns" .}}
+      {{else if eq .Page "campaign"}}{{template "campaign" .}}
+      {{else if eq .Page "campaign-compare"}}{{template "campaign-compare" .}}
       {{else if eq .Page "operations"}}{{template "operations" .}}
       {{else if eq .Page "reference"}}{{template "reference" .}}
       {{else}}{{template "dashboard" .}}{{end}}
