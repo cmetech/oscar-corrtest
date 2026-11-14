@@ -180,3 +180,12 @@ func TestCampaignCleanupCommand(t *testing.T) {
 		t.Fatalf("dirty code=%d", code)
 	}
 }
+
+// Compare is served (web/campaign_compare.go); the help must not say pending.
+func TestCampaignHelpHasNoPendingSupport(t *testing.T) {
+	for name, topic := range helpTopics {
+		if strings.HasPrefix(name, "campaign") && strings.Contains(topic.description, "pending") {
+			t.Errorf("%s: %q", name, topic.description)
+		}
+	}
+}

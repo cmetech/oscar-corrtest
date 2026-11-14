@@ -367,7 +367,7 @@ var helpTopics = map[string]helpTopic{
 	},
 	"campaign compare": {
 		usage:       "oscar-corrtest campaign compare <id> <id>... --server <url> --token-file <file> [options]",
-		description: "Compare campaigns (server support pending).",
+		description: "Compare campaigns against the reference.",
 		options:     append([]helpItem{{"--server <url>", "CorrTest base URL (required)."}, {"--token-file <file>", "Bearer token file, re-read per request (required)."}, {"--ca-file <file>", "CA bundle for the server certificate."}, {"--output <format>", "human or json."}}, []helpItem{}...),
 		examples:    []string{"oscar-corrtest campaign compare cmp_1 cmp_2 --server https://mini:8443 --token-file ./token"},
 		notes:       []string{"HTTP client of the running service; never opens the data directory. Exit 0 success, 1 runtime error, 2 usage, 3 refused (precheck failed or campaign active), 4 any non-PASS terminal verdict (FAIL, INCONCLUSIVE, ERROR) with --wait."},
