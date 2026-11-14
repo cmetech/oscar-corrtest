@@ -284,7 +284,7 @@ func Compute(in Inputs, lim scenario.Limits) Scorecard {
 	h = append(h,
 		limitHeadline("latency.history_p95", "s", c.Latency.History.P95, lim.HistoryP95.Seconds(), false),
 		Headline{Name: "latency.sink_p95", Unit: "s", Value: c.Latency.Sink.P95, Pass: true},
-		Headline{Name: "latency.correlation_p95", Unit: "s", Value: c.Latency.Correlation.P95, Pass: true})
+		Headline{Name: "latency.correlation_run_wall_p95", Unit: "s", Value: c.Latency.Correlation.P95, Pass: true})
 
 	// Memory: every worker container's working-set slope over 0-120 min.
 	from := float64(in.Start.Unix())

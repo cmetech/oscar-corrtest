@@ -56,6 +56,11 @@ type CampaignMutation struct {
 }
 
 // LaneRow is one lane-ledger entry; Done is false until the outcome is recorded.
+// CampaignRunLink ties a correlation run to a campaign.
+type CampaignRunLink struct {
+	RunID, Kind string
+}
+
 type LaneRow struct {
 	LaneID              string
 	Seq                 int

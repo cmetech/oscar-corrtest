@@ -109,6 +109,24 @@ func (d *Database) LinkCampaignRun(ctx context.Context, campaignID, runID, kind 
 	})
 }
 
+// CampaignRuns lists the correlation runs linked to a campaign, in link order.
+func (d *Database) CampaignRuns(ctx context.Context, campaignID string) ([]domain.CampaignRunLink, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT run_id, kind FROM campaign_runs WHERE campaign_id=? ORDER BY rowid`, campaignID)
+	if err != nil {
+		return nil, fmt.Errorf("list campaign runs: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.CampaignRunLink
+	for rows.Next() {
+		var l domain.CampaignRunLink
+		if err := rows.Scan(&l.RunID, &l.Kind); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
 func (d *Database) RecordMutation(ctx context.Context, m domain.CampaignMutation) (int64, error) {
 	if m.RecordedAt.IsZero() {
 		m.RecordedAt = time.Now()
