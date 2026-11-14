@@ -49,7 +49,7 @@ func Probe(ctx context.Context, sshPath, keyFile, host string) (ProbeResult, err
 	if !strings.Contains(host, "@") {
 		host = "oscar@" + host
 	}
-	cmd := exec.CommandContext(ctx, sshPath, "-i", keyFile, "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", host) // #nosec G204 -- fixed argv, operator-supplied paths
+	cmd := exec.CommandContext(ctx, sshPath, "-i", keyFile, "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "--", host) // #nosec G204 -- fixed argv, operator-supplied paths
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	runErr := cmd.Run()

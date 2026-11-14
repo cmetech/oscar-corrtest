@@ -72,6 +72,6 @@ func TestLiveReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rs, err := s.Receipts(ctx, "default", "no-such-run-livecheck")
+	rs, err := s.Receipts(ctx, "default", "no-such-run-livecheck", time.Now().Add(-24*time.Hour))
 	t.Logf("sink receipts(no such run)=%d err=%v", len(rs), err)
 }

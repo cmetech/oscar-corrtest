@@ -19,6 +19,7 @@ type TaskRun struct {
 }
 
 // TaskRuns reads GET /api/v1/tasks/history for the window and keeps runs of the named jobs.
+// Results are sorted by the record "timestamp" column, and start/end filter on that same timestamp.
 func TaskRuns(ctx context.Context, c *oscar.Client, jobNames []string, start, end time.Time) ([]TaskRun, error) {
 	want := map[string]bool{}
 	for _, j := range jobNames {
@@ -36,7 +37,7 @@ func TaskRuns(ctx context.Context, c *oscar.Client, jobNames []string, start, en
 				Duration *float64   `json:"duration"`
 			} `json:"records"`
 		}
-		q := url.Values{"page": {strconv.Itoa(page)}, "perPage": {"100"}, "order": {"asc"},
+		q := url.Values{"page": {strconv.Itoa(page)}, "perPage": {"100"}, "order": {"asc"}, "column": {"timestamp"},
 			"start_time": {start.UTC().Format(time.RFC3339)}, "end_time": {end.UTC().Format(time.RFC3339)}}
 		if err := c.DoJSON(ctx, http.MethodGet, "/api/v1/tasks/history", q, nil, &resp); err != nil {
 			return nil, err

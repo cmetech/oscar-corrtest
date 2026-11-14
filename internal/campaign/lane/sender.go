@@ -60,7 +60,7 @@ func (s *amSender) Send(ctx context.Context, e Event, runID, lane string) (int, 
 			"alertname": e.Identity, "campaign_run": runID, "campaign_lane": lane,
 			"severity": e.Severity, "instance": e.Instance, "create_ticket": ticket,
 		},
-		"annotations": map[string]string{"summary": "OSCAR alerting campaign"},
+		"annotations": map[string]string{"summary": e.Identity, "description": "OSCAR alerting campaign"},
 		"startsAt":    now,
 	}
 	if e.Kind == Resolve {

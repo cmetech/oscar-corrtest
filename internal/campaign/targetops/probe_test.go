@@ -23,7 +23,7 @@ func TestProbeUsesFixedArgs(t *testing.T) {
 	}
 	raw, _ := os.ReadFile(argv)
 	got := strings.Fields(string(raw))
-	want := []string{"-i", "/k/key", "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "oscar@oscar.home.arpa"}
+	want := []string{"-i", "/k/key", "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "--", "oscar@oscar.home.arpa"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("argv = %v, want %v (no remote command allowed)", got, want)
 	}

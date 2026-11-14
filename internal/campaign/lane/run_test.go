@@ -221,6 +221,9 @@ func TestAlertmanagerPayload(t *testing.T) {
 				t.Errorf("label %s=%v want %s", k, l[k], v)
 			}
 		}
+		if a := got[0]["annotations"].(map[string]any); a["summary"] != "A1" {
+			t.Errorf("summary=%v want alertname (SNOW short_description)", a["summary"])
+		}
 		if _, has := got[0]["endsAt"]; has != tc.ends {
 			t.Errorf("endsAt present=%v want %v", has, tc.ends)
 		}

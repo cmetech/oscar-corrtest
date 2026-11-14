@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/oscar"
@@ -69,11 +70,20 @@ func mapResendErr(err error) error {
 	case me.StatusCode == http.StatusServiceUnavailable &&
 		(me.Detail == "RESEND_POLICY_OPS_RECEIVER_UNCONFIGURED" || me.Detail == "RESEND_POLICY_ACTIVATION_UNAVAILABLE"):
 		return fmt.Errorf("%w: %s", ErrReceiverUnavailable, me.Detail)
-	case me.StatusCode == http.StatusConflict:
+	case me.StatusCode == http.StatusConflict && strings.Contains(me.Detail, "REVISION"):
 		return fmt.Errorf("%w: %s", ErrRevisionMismatch, me.Detail)
+	case me.StatusCode == http.StatusConflict:
+		return &ConflictError{Code: me.Detail, Detail: me.Error()}
 	}
 	return err
 }
+
+// ConflictError is a 409 that is not a recognised revision mismatch. The middleware proxy reduces taskmanager
+// detail to a RESEND_POLICY_* code (or RESEND_POLICY_REQUEST_FAILED), so a stale revision may surface here;
+// callers that suspect staleness should re-read Status and retry with its Revision.
+type ConflictError struct{ Code, Detail string }
+
+func (e *ConflictError) Error() string { return "resend policy conflict " + e.Code + ": " + e.Detail }
 
 // CreateDraft always sends enabled=false.
 func CreateDraft(ctx context.Context, c *oscar.Client, def PolicyDefinition, expectedRevision int) (Policy, error) {
@@ -90,6 +100,9 @@ type opBody struct {
 }
 
 // Activate: first activation answers 202 preparing, then /status is polled until enrolled or wait elapses.
+//
+// A 503 RESEND_POLICY_BACKEND_UNAVAILABLE (or a transport error) is ambiguous: the activation may or may not have
+// been applied, so callers must check Status before retrying.
 func Activate(ctx context.Context, c *oscar.Client, id, notifierID, action string, expectedRevision int, wait time.Duration) (Policy, error) {
 	var resp struct {
 		Status   string `json:"status"`
@@ -121,13 +134,23 @@ func Activate(ctx context.Context, c *oscar.Client, id, notifierID, action strin
 	}
 }
 
-func Deactivate(ctx context.Context, c *oscar.Client, id, notifierID, action string, expectedRevision int) error {
-	return mapResendErr(c.DoJSON(ctx, http.MethodPost, resendPath+"/"+id+"/deactivate", nil, opBody{notifierID, action, expectedRevision}, nil))
+// Deactivate and Delete return the new catalog revision. Every later call on the same notifier/action must use
+// the latest revision, not the one passed in.
+func Deactivate(ctx context.Context, c *oscar.Client, id, notifierID, action string, expectedRevision int) (int, error) {
+	var r struct {
+		Revision int `json:"revision"`
+	}
+	err := c.DoJSON(ctx, http.MethodPost, resendPath+"/"+id+"/deactivate", nil, opBody{notifierID, action, expectedRevision}, &r)
+	return r.Revision, mapResendErr(err)
 }
 
-func Delete(ctx context.Context, c *oscar.Client, id, notifierID, action string, expectedRevision int) error {
+func Delete(ctx context.Context, c *oscar.Client, id, notifierID, action string, expectedRevision int) (int, error) {
 	q := url.Values{"notifier_id": {notifierID}, "action": {action}}
-	return mapResendErr(c.DoJSON(ctx, http.MethodDelete, resendPath+"/"+id, q, map[string]int{"expected_revision": expectedRevision}, nil))
+	var r struct {
+		Revision int `json:"revision"`
+	}
+	err := c.DoJSON(ctx, http.MethodDelete, resendPath+"/"+id, q, map[string]int{"expected_revision": expectedRevision}, &r)
+	return r.Revision, mapResendErr(err)
 }
 
 func Status(ctx context.Context, c *oscar.Client, notifierID, action, policyID string) (PolicyStatus, error) {

@@ -29,7 +29,7 @@ func TestCreateDraftNeverSendsEnabledTrue(t *testing.T) {
 }
 
 func TestResendActivationTimeoutIsInconclusive(t *testing.T) {
-	activationPollInterval = 5 * time.Millisecond
+	fastPoll(t)
 	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			w.WriteHeader(202)
@@ -45,7 +45,7 @@ func TestResendActivationTimeoutIsInconclusive(t *testing.T) {
 }
 
 func TestResendActivationPollsUntilEnrolled(t *testing.T) {
-	activationPollInterval = 5 * time.Millisecond
+	fastPoll(t)
 	polls := 0
 	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
@@ -76,7 +76,7 @@ func TestActivation503MapsToReceiverUnavailable(t *testing.T) {
 	}
 }
 
-func TestResend409IsRevisionMismatchAndDeleteShape(t *testing.T) {
+func TestResend409RevisionMismatchAndDeleteShape(t *testing.T) {
 	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete || r.URL.Query().Get("notifier_id") != "n" || r.URL.Query().Get("action") != "ticket" {
 			t.Errorf("bad delete %s %s", r.Method, r.URL)
@@ -84,7 +84,7 @@ func TestResend409IsRevisionMismatchAndDeleteShape(t *testing.T) {
 		w.WriteHeader(409)
 		w.Write([]byte(`{"detail":"RESEND_POLICY_REVISION_CONFLICT"}`))
 	}))
-	if err := Delete(context.Background(), c, "p", "n", "ticket", 1); !errors.Is(err, ErrRevisionMismatch) {
+	if _, err := Delete(context.Background(), c, "p", "n", "ticket", 1); !errors.Is(err, ErrRevisionMismatch) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -99,5 +99,30 @@ func TestStatusParsesEpisodes(t *testing.T) {
 	st, err := Status(context.Background(), c, "n", "notification", "p")
 	if err != nil || st.Episodes.Open != 2 || st.RecentPolicyEpisodes[0].UsedResends != 3 || !st.RecentPolicyEpisodes[0].StickyExhausted {
 		t.Fatal(st, err)
+	}
+}
+
+func fastPoll(t *testing.T) {
+	old := activationPollInterval
+	activationPollInterval = 5 * time.Millisecond
+	t.Cleanup(func() { activationPollInterval = old })
+}
+
+func TestResendOther409IsTypedConflictAndDeleteReturnsRevision(t *testing.T) {
+	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ext/mw/api/v1/resend-policies/p/deactivate" {
+			w.Write([]byte(`{"status":"draft","revision":9}`))
+			return
+		}
+		w.WriteHeader(409)
+		w.Write([]byte(`{"detail":"RESEND_POLICY_RULE_LIMIT"}`))
+	}))
+	_, err := Delete(context.Background(), c, "p", "n", "ticket", 1)
+	var ce *ConflictError
+	if !errors.As(err, &ce) || ce.Code != "RESEND_POLICY_RULE_LIMIT" || errors.Is(err, ErrRevisionMismatch) {
+		t.Fatalf("err = %v", err)
+	}
+	if rev, err := Deactivate(context.Background(), c, "p", "n", "ticket", 1); err != nil || rev != 9 {
+		t.Fatal(rev, err)
 	}
 }

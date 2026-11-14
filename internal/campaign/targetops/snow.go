@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -166,13 +167,18 @@ func (s *SNOW) Resolve(ctx context.Context, number, note string) (Incident, erro
 	return after, nil
 }
 
-// OpenCampaignIncidents lists active incidents whose short description or description mentions marker.
-func (s *SNOW) OpenCampaignIncidents(ctx context.Context, marker string) ([]Incident, error) {
-	if marker == "" || strings.ContainsAny(marker, "^=&?") {
-		return nil, fmt.Errorf("invalid campaign marker")
+var runIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{6,}$`)
+
+// OpenCampaignIncidents lists unresolved incidents (state not 6, 7, 8) whose short_description starts with
+// "Campaign-<campaignRun>-" (OSCAR uses the alert summary, which the lane sender sets to the alertname).
+// Rows are re-checked client-side so a prefix-colliding run id never leaks in.
+func (s *SNOW) OpenCampaignIncidents(ctx context.Context, campaignRun string) ([]Incident, error) {
+	if !runIDPattern.MatchString(campaignRun) {
+		return nil, fmt.Errorf("invalid campaign run id")
 	}
+	marker := "Campaign-" + campaignRun + "-"
 	res, err := s.call(ctx, http.MethodGet, "/api/now/table/incident", url.Values{
-		"sysparm_query":  {"active=true^short_descriptionLIKE" + marker + "^ORdescriptionLIKE" + marker},
+		"sysparm_query":  {"short_descriptionSTARTSWITH" + marker + "^stateNOT IN6,7,8"},
 		"sysparm_limit":  {"500"},
 		"sysparm_fields": {incidentFields}}, nil)
 	if err != nil {
@@ -184,7 +190,9 @@ func (s *SNOW) OpenCampaignIncidents(ctx context.Context, marker string) ([]Inci
 	}
 	out := make([]Incident, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, r.inc())
+		if strings.HasPrefix(r.ShortDescription, marker) {
+			out = append(out, r.inc())
+		}
 	}
 	return out, nil
 }

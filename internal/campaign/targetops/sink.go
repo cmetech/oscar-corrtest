@@ -40,12 +40,20 @@ func NewSink(baseURL, tokenFile, caFile string) (*Sink, error) {
 	return &Sink{base: strings.TrimRight(baseURL, "/"), token: tok, hc: hc}, nil
 }
 
-// Receipts returns all receipts for the capture and campaign run (the sink's run filter), ascending, paging by after_id.
-func (s *Sink) Receipts(ctx context.Context, capture, campaignRun string) ([]Receipt, error) {
+// Receipts pages the capture from since (RFC 3339, ascending, by after_id) and keeps only alerts whose
+// campaign_run label equals campaignRun; receipts with no matching alert are dropped. The sink's own run filter is not
+// used: it only knows a few label names and the capture URL's ?run=, never campaign_run. A zero since means no lower bound.
+func (s *Sink) Receipts(ctx context.Context, capture, campaignRun string, since time.Time) ([]Receipt, error) {
+	if campaignRun == "" {
+		return nil, fmt.Errorf("campaign run is required")
+	}
 	var all []Receipt
 	after := int64(0)
 	for page := 0; page < 1000; page++ {
-		q := url.Values{"capture": {capture}, "run": {campaignRun}, "order": {"asc"}, "limit": {"1000"}}
+		q := url.Values{"capture": {capture}, "order": {"asc"}, "limit": {"1000"}}
+		if !since.IsZero() {
+			q.Set("since", since.UTC().Format(time.RFC3339))
+		}
 		if after > 0 {
 			q.Set("after_id", strconv.FormatInt(after, 10))
 		}
@@ -65,7 +73,18 @@ func (s *Sink) Receipts(ctx context.Context, capture, campaignRun string) ([]Rec
 		if json.Unmarshal(raw, &resp) != nil {
 			return nil, fmt.Errorf("sink returned malformed JSON")
 		}
-		all = append(all, resp.Receipts...)
+		for _, r := range resp.Receipts {
+			var mine []SinkAlert
+			for _, a := range r.Alerts {
+				if a.Labels["campaign_run"] == campaignRun {
+					mine = append(mine, a)
+				}
+			}
+			if len(mine) > 0 {
+				r.Alerts = mine
+				all = append(all, r)
+			}
+		}
 		if resp.NextAfterID == 0 {
 			return all, nil
 		}
