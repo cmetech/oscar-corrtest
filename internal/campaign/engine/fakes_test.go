@@ -154,6 +154,7 @@ type fakeOSCAR struct {
 	restartAt  time.Time             // probe reports a restart from here
 	ambiguous  string                // first cohort post of this alertname has an unknown outcome
 	corrInc    []*targetops.Incident // set B source-alert incidents
+	lastFO     time.Time             // last front-office request
 	// fault injection
 	withholdComments bool   // resolves never get OSCAR's comment
 	listErr          int    // next N campaign incident listings fail (-1: always)
@@ -199,6 +200,9 @@ func (f *fakeOSCAR) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 		return
 	}
+	f.mu.Lock()
+	f.lastFO = f.clock.Now()
+	f.mu.Unlock()
 	_, _ = w.Write([]byte(`{"records":[],"total_records":0}`)) // front office
 }
 

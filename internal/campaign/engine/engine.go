@@ -190,6 +190,7 @@ type run struct {
 	notRun        []string
 	plannedCorr   int
 	fo            map[string][]score.FOSample
+	foDone        chan struct{} // closed when the front office has stopped
 }
 
 type policyState struct {
@@ -411,11 +412,17 @@ func (r *run) execute(ctx context.Context) error {
 		}
 	}()
 
+	// The front office runs for the whole 0-150 window (spec 6.1), through
+	// drain; Stop, Close or a guard trip end it early. Scoring waits for it.
+	foCtx, stopFO := context.WithCancel(ctx)
+	r.foDone = make(chan struct{})
+	go func() { r.e.clock.SleepUntil(foCtx, r.at("drain", true)); stopFO() }() // campaign clock, not wall time
+	go func() { defer close(r.foDone); defer stopFO(); r.frontOffice(foCtx) }()
+
 	var bg sync.WaitGroup
-	bg.Add(3)
+	bg.Add(2)
 	go func() { defer bg.Done(); r.heartbeats(phaseCtx) }()
-	go func() { defer bg.Done(); r.guards(phaseCtx, stopPhases) }()
-	go func() { defer bg.Done(); r.frontOffice(phaseCtx) }()
+	go func() { defer bg.Done(); r.guards(phaseCtx, func() { stopPhases(); stopFO() }) }()
 
 	var work sync.WaitGroup
 	work.Add(2)
@@ -437,6 +444,7 @@ func (r *run) execute(ctx context.Context) error {
 		if err != nil || c.Status != domain.CampaignStopping {
 			// Close: halt our own traffic and leave drain to recovery.
 			r.haltLane(stable)
+			<-r.foDone
 			return errors.New("runtime closing; campaign left for recovery")
 		}
 	}

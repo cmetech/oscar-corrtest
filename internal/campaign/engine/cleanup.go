@@ -126,6 +126,9 @@ func (r *run) finishAfterDrain(ctx context.Context, forced domain.Verdict, why s
 		return err
 	}
 	cleanup := r.cleanup(ctx)
+	if r.foDone != nil {
+		<-r.foDone // the front office runs to the drain end
+	}
 	card, report := r.scoreRun(ctx, end, incidents, cleanup == domain.CleanupClean, forced, why)
 	return r.store().CompleteCampaign(ctx, r.id, card.Verdict, cleanup, r.comparable && cleanup == domain.CleanupClean, mustJSON(card), report, r.now())
 }

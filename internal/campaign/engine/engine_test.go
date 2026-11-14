@@ -41,8 +41,15 @@ func hasReason(reasons []string, prefix string) bool {
 func TestEngineHappyPathPass(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
+	start := h.clock.Now()
 	if err := h.run(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+	h.oscar.mu.Lock()
+	lastFO := h.oscar.lastFO
+	h.oscar.mu.Unlock()
+	if d := lastFO.Sub(start); d < 145*time.Second { // spec 6.1: front office runs 0-150 min (scaled: 0-150 s)
+		t.Errorf("front office stopped at T+%s, want it running to the drain end", d)
 	}
 	c, card := h.scorecard()
 	if c.Status != domain.CampaignCompleted || c.Cleanup != domain.CleanupClean {
