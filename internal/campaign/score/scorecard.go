@@ -139,10 +139,13 @@ type Inputs struct {
 	Correlation                  []CorrRun
 	// Planned counts; evidence of zero against a positive plan is INCONCLUSIVE.
 	PlannedTickets, PlannedResend, PlannedCorrelation int
-	FrontOffice                                       map[string][]FOSample // API-level only
-	Tasks, PreTasks                                   []targetops.TaskRun
-	GuardStopped                                      bool
-	NotRun                                            []string
+	// PlannedBaseline is the number of lane plan events (seqs 0..n-1, sorted
+	// by schedule) inside the window the lane actually ran; 0 = unknown.
+	PlannedBaseline int
+	FrontOffice     map[string][]FOSample // API-level only
+	Tasks, PreTasks []targetops.TaskRun
+	GuardStopped    bool
+	NotRun          []string
 }
 
 func pcts(xs []float64) Percentiles {
@@ -247,9 +250,12 @@ func Compute(in Inputs, lim scenario.Limits) Scorecard {
 	var fails, incon []string
 	fail := func(f string, a ...any) { fails = append(fails, fmt.Sprintf(f, a...)) }
 
-	c.Baseline = reconcileBaseline(in.Ledger)
+	c.Baseline = reconcileBaseline(in.Ledger, in.PlannedBaseline)
 	if c.Baseline.Accepted == 0 {
 		incon = append(incon, "no accepted baseline rows")
+	}
+	if p := c.Baseline.Planned; p > 0 && c.Baseline.Offered*100 < p*98 {
+		fail("baseline_under_delivered: offered %d of %d planned (< 98%%)", c.Baseline.Offered, p)
 	}
 	hl, miss := historyLatencies(in.Ledger, in.History)
 	c.Latency.History, c.Latency.HistoryMissing = pcts(hl), miss

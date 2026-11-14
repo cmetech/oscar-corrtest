@@ -66,6 +66,9 @@ func TestEngineHappyPathPass(t *testing.T) {
 	if card.Tickets.Expected == 0 {
 		t.Error("no tickets expected; the scenario should ticket")
 	}
+	if card.Baseline.Planned == 0 || card.Baseline.Offered < card.Baseline.Planned*98/100 {
+		t.Errorf("baseline planned %d offered %d", card.Baseline.Planned, card.Baseline.Offered)
+	}
 	h.oscar.mu.Lock()
 	defer h.oscar.mu.Unlock()
 	tokens := map[string]int{}
@@ -289,6 +292,9 @@ func TestStopHaltsLaneAndCleansUp(t *testing.T) {
 	}
 	if c.Verdict != domain.VerdictInconclusive || card.Reasons[0] != "stopped: operator stop" {
 		t.Fatalf("verdict %s reasons %v", c.Verdict, card.Reasons)
+	}
+	if card.Baseline.Planned == 0 || hasReason(card.Reasons, "baseline_under_delivered") {
+		t.Fatalf("stopped window: baseline %+v reasons %v", card.Baseline, card.Reasons)
 	}
 	h.assertRestored()
 	h.oscar.mu.Lock()

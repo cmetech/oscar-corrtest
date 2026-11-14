@@ -60,6 +60,40 @@ func (c *scaledClock) SleepUntil(ctx context.Context, t time.Time) bool {
 	}
 }
 
+// laneClock is the scaled clock as the worker lane sees it. The scaled clock
+// multiplies timer overshoot by speed, and the lane spaces each send from the
+// previous actual send, so overshoot would pile up into pacing misses that a
+// real clock never produces. A slept wake-up therefore reads as on time:
+// Now() is capped at the last wake target until the next wake.
+type laneClock struct {
+	*scaledClock
+	mu    sync.Mutex
+	floor time.Time
+}
+
+func (c *laneClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := c.scaledClock.Now()
+	if !c.floor.IsZero() && c.floor.Before(now) {
+		return c.floor
+	}
+	return now
+}
+
+func (c *laneClock) SleepUntil(ctx context.Context, t time.Time) bool {
+	slept := t.After(c.scaledClock.Now())
+	ok := c.scaledClock.SleepUntil(ctx, t)
+	c.mu.Lock()
+	if ok && slept {
+		c.floor = t
+	} else {
+		c.floor = c.scaledClock.Now()
+	}
+	c.mu.Unlock()
+	return ok
+}
+
 // testScenario is a Custom scenario with minutes scaled to seconds.
 func testScenario() scenario.Scenario {
 	s := time.Second
@@ -609,7 +643,7 @@ func newHarness(t *testing.T) *harness {
 	f := newFakeOSCAR(t, clock, s)
 	f.db = db
 	target := domain.Target{ID: "t1", BaseURL: f.srv.URL}
-	m := worker.NewManager(laneStore{storage.NewLaneLedger(db), db}, target, clock, 30*time.Second)
+	m := worker.NewManager(laneStore{storage.NewLaneLedger(db), db}, target, &laneClock{scaledClock: clock}, 30*time.Second)
 	t.Cleanup(m.Shutdown)
 	w := &fakeWorker{m: m}
 	h := &harness{t: t, clock: clock, db: db, oscar: f, worker: w, s: s, id: "camp_" + strings.ReplaceAll(t.Name(), "/", "_")}
@@ -652,6 +686,7 @@ func (h *harness) scorecard() (c domain.Campaign, card struct {
 	Reasons   []string
 	Headlines []struct{ Name string }
 	Tickets   struct{ Expected, Succeeded, Unknown int }
+	Baseline  struct{ Planned, Offered int }
 }) {
 	c = h.campaign()
 	if c.Verdict != domain.VerdictPass {

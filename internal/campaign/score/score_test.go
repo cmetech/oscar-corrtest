@@ -2,6 +2,7 @@ package score
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -288,5 +289,44 @@ func TestResendExactMatch(t *testing.T) {
 	}
 	if ok, _ := resendOK(ResendCase{Policy: p, Deliveries: ds}); ok {
 		t.Fatal("missing resend passed")
+	}
+}
+
+// TestBaselineUnderDelivered: offered (sent planned seqs in the run window)
+// below 98% of planned FAILs (ruling C34b); missed rows and resolve-all rows
+// beyond the plan never count as offered.
+func TestBaselineUnderDelivered(t *testing.T) {
+	ledger := func(sent, missed int) []domain.LaneRow {
+		var rows []domain.LaneRow
+		for i := 0; i < sent; i++ {
+			rows = append(rows, domain.LaneRow{Seq: i, Kind: "firing", Identity: "a", SentAt: t0, Done: true, Status: 200})
+		}
+		for i := sent; i < sent+missed; i++ {
+			rows = append(rows, domain.LaneRow{Seq: i, Kind: "firing", Identity: "a", ScheduledAt: t0, Done: true, Missed: true, ErrorClass: "missed"})
+		}
+		// resolve-all rows sit beyond every planned seq
+		for i := 0; i < 5; i++ {
+			rows = append(rows, domain.LaneRow{Seq: 1000 + i, Kind: "resolve", Identity: "a", SentAt: t0.Add(time.Minute), Done: true, Status: 200})
+		}
+		return rows
+	}
+	for _, tc := range []struct {
+		sent, missed int
+		fail         bool
+	}{{98, 0, false}, {97, 0, true}, {97, 3, true}, {100, 0, false}} {
+		in := good()
+		in.PlannedBaseline, in.Ledger = 100, ledger(tc.sent, tc.missed)
+		c := Compute(in, lim)
+		got := false
+		for _, r := range c.Reasons {
+			got = got || strings.HasPrefix(r, "baseline_under_delivered")
+		}
+		if got != tc.fail || (tc.fail && c.Verdict != domain.VerdictFail) || c.Baseline.Planned != 100 || c.Baseline.Offered != tc.sent {
+			t.Errorf("sent %d missed %d: verdict %s baseline %+v reasons %v", tc.sent, tc.missed, c.Verdict, c.Baseline, c.Reasons)
+		}
+	}
+	in := good() // unknown plan (0): no gate
+	if c := Compute(in, lim); c.Verdict != domain.VerdictPass {
+		t.Fatalf("no plan: %s %v", c.Verdict, c.Reasons)
 	}
 }

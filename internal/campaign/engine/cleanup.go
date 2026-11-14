@@ -68,6 +68,11 @@ func (r *run) resolveLane(ctx context.Context) {
 
 // haltLane stops the lane without resolving (Close path; recovery resolves).
 func (r *run) haltLane(ctx context.Context) {
+	r.mu.Lock()
+	if r.laneStopAt.IsZero() {
+		r.laneStopAt = r.now() // the baseline window ends here (scoring)
+	}
+	r.mu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	_, _ = r.e.d.Worker.Stop(ctx, r.laneID)

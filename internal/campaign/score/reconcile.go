@@ -60,9 +60,11 @@ func Slope(pts []Point) float64 {
 }
 
 // Baseline summarises the ledger rows. Accepted means the lane recorded a 2xx
-// with no error class.
+// with no error class. Planned is the lane plan's events in the run window
+// (seqs 0..Planned-1; 0 = unknown); Offered is those seqs actually sent.
 type Baseline struct {
 	Rows, Accepted, Missed, Errors int
+	Planned, Offered               int
 	ErrorsByClass                  map[string]int
 }
 
@@ -70,10 +72,13 @@ func accepted(r domain.LaneRow) bool {
 	return r.Done && !r.Missed && r.ErrorClass == "" && r.Status >= 200 && r.Status < 300
 }
 
-func reconcileBaseline(rows []domain.LaneRow) Baseline {
-	b := Baseline{ErrorsByClass: map[string]int{}}
+func reconcileBaseline(rows []domain.LaneRow, planned int) Baseline {
+	b := Baseline{Planned: planned, ErrorsByClass: map[string]int{}}
 	for _, r := range rows {
 		b.Rows++
+		if r.Seq < planned && !r.Missed && r.ErrorClass != lane.ErrClassMissed {
+			b.Offered++
+		}
 		switch {
 		case accepted(r):
 			b.Accepted++

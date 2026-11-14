@@ -45,7 +45,7 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 	} else {
 		r.crossCheckLedger(ctx, ledger)
 	}
-	in := score.Inputs{ScenarioHash: r.s.Hash(), Trigger: r.opts.Trigger, RunBy: r.opts.RunBy, Comparable: r.comparable, CleanupClean: clean,
+	in := score.Inputs{PlannedBaseline: r.plannedBaseline(), ScenarioHash: r.s.Hash(), Trigger: r.opts.Trigger, RunBy: r.opts.RunBy, Comparable: r.comparable, CleanupClean: clean,
 		Start: r.t0, End: end, Phases: r.s.Phases, Ledger: ledger, Correlation: r.corrRuns, NotRun: r.notRun,
 		PlannedCorrelation: r.plannedCorr, FrontOffice: r.fo, PreTasks: r.preTasks,
 		GuardStopped: trip != "" && !lost}
@@ -105,6 +105,30 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 	}
 	report["reasons"] = card.Reasons
 	return card, mustJSON(report)
+}
+
+// laneGrace: plan events due this close to the lane stop may have been in
+// flight; they are left out of the planned count.
+const laneGrace = 2 * time.Second
+
+// plannedBaseline is the number of lane plan events in the window the lane
+// actually ran: the whole plan on a normal end, the events due before the
+// controller stopped the lane otherwise, 0 (unknown) when neither is known.
+// The plan is deterministic (same run id, seed, spec and duration as
+// startLane), sorted by schedule, so the window is a seq prefix.
+func (r *run) plannedBaseline() int {
+	r.mu.Lock()
+	normal, stopAt := r.normalEnd, r.laneStopAt
+	r.mu.Unlock()
+	if !normal && stopAt.IsZero() {
+		return 0
+	}
+	plan := lane.Compile(r.id, r.s.Seed, r.s.Baseline, r.s.Phase("drain").Start)
+	if normal {
+		return len(plan.Events)
+	}
+	cut := stopAt.Sub(r.t0) - laneGrace
+	return sort.Search(len(plan.Events), func(i int) bool { return plan.Events[i].At > cut })
 }
 
 // series runs a range query at the 15 s step, keyed by label.
