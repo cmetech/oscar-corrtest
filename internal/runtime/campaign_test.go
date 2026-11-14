@@ -20,6 +20,7 @@ type fakeEngine struct {
 	gotOpts   CampaignOptions
 	mu        sync.Mutex
 	recovered []string
+	cleaned   []string
 }
 
 func newFakeEngine() *fakeEngine {
@@ -34,6 +35,13 @@ func (f *fakeEngine) Run(ctx context.Context, id string, o CampaignOptions) erro
 	case <-ctx.Done():
 	}
 	return nil
+}
+
+func (f *fakeEngine) Cleanup(_ context.Context, id string) (domain.CleanupStatus, error) {
+	f.mu.Lock()
+	f.cleaned = append(f.cleaned, id)
+	f.mu.Unlock()
+	return domain.CleanupClean, nil
 }
 
 func (f *fakeEngine) Recover(_ context.Context, id string) error {
@@ -237,5 +245,31 @@ func TestWorkerCampaignModeNeedsTarget(t *testing.T) {
 	}
 	if err := r.EnableCampaignWorker(context.Background()); err == nil {
 		t.Fatal("want no-target error")
+	}
+}
+
+// Ruling C40: cleanup is refused while any campaign is active.
+func TestCleanupCampaignRefusedWhileActive(t *testing.T) {
+	e := newFakeEngine()
+	r := openCampaignRuntime(t, t.TempDir(), e)
+	defer r.Close()
+	c, err := r.StartCampaign(context.Background(), CampaignOptions{Scenario: campaignscenario.AlertingDayV1(), Trigger: "cli", RunBy: "human"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-e.started
+	if _, err := r.CleanupCampaign(context.Background(), "camp_old"); !errors.Is(err, ErrCampaignActive) {
+		t.Fatalf("cleanup while active: %v", err)
+	}
+	close(e.release)
+	waitIdle := time.Now().Add(5 * time.Second)
+	for r.campaignActive.Load() && time.Now().Before(waitIdle) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if st, err := r.CleanupCampaign(context.Background(), c.ID); err != nil || st != domain.CleanupClean || len(e.cleaned) != 1 {
+		t.Fatalf("cleanup %s %v %v", st, err, e.cleaned)
+	}
+	if r.campaignActive.Load() {
+		t.Fatal("cleanup left the campaign gate held")
 	}
 }

@@ -230,6 +230,31 @@ func TestLaneLedgerAcceptsEveryEmittedErrorClass(t *testing.T) {
 	}
 }
 
+// SetCampaignCleanup changes only the cleanup status of a COMPLETED campaign
+// and records the change in the audit trail.
+func TestSetCampaignCleanup(t *testing.T) {
+	ctx := context.Background()
+	d := openCampaignDB(t)
+	newCampaign(t, d, "c1")
+	if err := d.SetCampaignCleanup(ctx, "c1", domain.CleanupClean, time.Now(), "x"); err == nil {
+		t.Fatal("a campaign that is not COMPLETED must be refused")
+	}
+	if err := d.CompleteCampaign(ctx, "c1", domain.VerdictFail, domain.CleanupDirty, false, nil, nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetCampaignCleanup(ctx, "c1", domain.CleanupClean, time.Now(), "cleanup re-run: DIRTY -> CLEAN"); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := d.GetCampaign(ctx, "c1")
+	if c.Cleanup != domain.CleanupClean || c.Verdict != domain.VerdictFail || c.Status != domain.CampaignCompleted {
+		t.Fatalf("%+v", c)
+	}
+	evs, _ := d.RecentCampaignEvents(ctx, "c1", 10)
+	if last := evs[len(evs)-1]; last.Type != "campaign.cleanup" || last.Summary != "cleanup re-run: DIRTY -> CLEAN" {
+		t.Fatalf("last event %+v", last)
+	}
+}
+
 // Migration 0007: campaign_mutations accepts pre-check B5's notifier_enable
 // (0006's kind CHECK refused it) and keeps every existing row.
 func TestMigration0007AcceptsNotifierEnable(t *testing.T) {

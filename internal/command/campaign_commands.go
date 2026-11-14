@@ -143,6 +143,8 @@ func (a *App) runCampaign(ctx context.Context, args []string) int {
 		return a.campaignCompare(ctx, args[1:])
 	case "export":
 		return a.campaignExport(ctx, args[1:])
+	case "cleanup":
+		return a.campaignCleanup(ctx, args[1:])
 	default:
 		return a.commandUsageError("campaign", fmt.Sprintf("unknown campaign action %q", args[0]))
 	}
@@ -302,6 +304,38 @@ func (a *App) campaignStop(ctx context.Context, args []string) int {
 	}
 	fmt.Fprintf(a.stdout, "%s\t%s\n", out["id"], out["status"])
 	return 0
+}
+
+// campaignCleanup re-runs restore for a COMPLETED campaign. Exit 4 while the
+// cleanup is still not CLEAN.
+func (a *App) campaignCleanup(ctx context.Context, args []string) int {
+	flags := flag.NewFlagSet("campaign cleanup", flag.ContinueOnError)
+	flags.SetOutput(a.stderr)
+	cf := addCampaignFlags(flags)
+	id, err := parseSinglePositional(flags, args)
+	if err != nil {
+		return 2
+	}
+	c, err := a.newCampaignClient(cf)
+	if err != nil {
+		return a.commandUsageError("campaign cleanup", err.Error())
+	}
+	var out map[string]string
+	if err := c.call(ctx, http.MethodPost, "/api/v1/campaign/runs/"+url.PathEscape(id)+"/cleanup", map[string]string{}, &out); err != nil {
+		return a.campaignFail("campaign cleanup", err)
+	}
+	code := 0
+	if out["cleanup"] != string(domain.CleanupClean) {
+		code = 4
+	}
+	if *cf.output == "json" {
+		if c := a.writeJSON(out); c != 0 {
+			return c
+		}
+		return code
+	}
+	fmt.Fprintf(a.stdout, "%s\t%s\n", out["id"], out["cleanup"])
+	return code
 }
 
 func (a *App) campaignCompare(ctx context.Context, args []string) int {

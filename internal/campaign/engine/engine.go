@@ -54,6 +54,7 @@ type Store interface {
 	OpenMutations(ctx context.Context, campaignID string) ([]domain.CampaignMutation, error)
 	CampaignRuns(ctx context.Context, campaignID string) ([]domain.CampaignRunLink, error)
 	CompleteCampaign(ctx context.Context, id string, v domain.Verdict, cleanup domain.CleanupStatus, comparable bool, scorecard, report json.RawMessage, at time.Time) error
+	SetCampaignCleanup(ctx context.Context, id string, cleanup domain.CleanupStatus, at time.Time, summary string) error
 }
 
 // Worker is the controller's view of the remote worker (*workerclient.Client).
@@ -258,8 +259,14 @@ func (e *Engine) Run(ctx context.Context, id string, o runtime.CampaignOptions) 
 		if !ok {
 			v = domain.VerdictInconclusive
 		}
+		// A pre-check that left a mutation open (the B5 smoke's sink enable)
+		// is restored now and reported, so B8 never blocks on it silently.
+		cleanup := domain.CleanupNotRequired
+		if open, err := e.d.Store.OpenMutations(stable, id); err != nil || len(open) > 0 {
+			cleanup = r.cleanup(stable)
+		}
 		rep, _ := json.Marshal(map[string]any{"precheckOnly": o.PrecheckOnly, "startable": ok, "reason": reason, "results": results})
-		return e.d.Store.CompleteCampaign(stable, id, v, domain.CleanupNotRequired, comparable, nil, rep, r.now())
+		return e.d.Store.CompleteCampaign(stable, id, v, cleanup, comparable, nil, rep, r.now())
 	}
 	if err := r.transition(stable, domain.CampaignRunning, "pre-checks passed"); err != nil {
 		return err
@@ -304,6 +311,31 @@ func (e *Engine) Recover(ctx context.Context, id string) error {
 		r.t0 = t0
 	}
 	return r.finish(ctx, "interrupted: recovered after restart")
+}
+
+// Cleanup re-runs cleanup for a COMPLETED campaign (ruling C40): verify and
+// close its incidents, then restore every open mutation with read-back. The
+// verdict never changes; the cleanup status is recorded with an audit event
+// and may move DIRTY to CLEAN. It never sends new firings.
+func (e *Engine) Cleanup(ctx context.Context, id string) (domain.CleanupStatus, error) {
+	ctx = context.WithoutCancel(ctx)
+	c, err := e.d.Store.GetCampaign(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if c.Status != domain.CampaignCompleted {
+		return "", fmt.Errorf("campaign %s is %s; cleanup re-runs need COMPLETED", id, c.Status)
+	}
+	r := &run{e: e, id: id, laneID: id + "-baseline", cohorts: map[string]*cohortMember{}, fo: map[string][]score.FOSample{}}
+	if s, ok := r.recordedScenario(ctx); ok {
+		r.s = s
+	}
+	r.closeIncidents(ctx)
+	st := r.cleanup(ctx)
+	if err := e.d.Store.SetCampaignCleanup(ctx, id, st, r.now(), fmt.Sprintf("cleanup re-run: %s -> %s", c.Cleanup, st)); err != nil {
+		return "", err
+	}
+	return st, nil
 }
 
 func (r *run) recordedScenario(ctx context.Context) (scenario.Scenario, bool) {

@@ -335,7 +335,7 @@ var helpTopics = map[string]helpTopic{
 		usage:       "oscar-corrtest campaign <action>",
 		description: "Drive the alerting campaign through the running CorrTest service API.",
 		examples:    []string{"oscar-corrtest campaign status --server https://mini:8443 --token-file ./token"},
-		commands:    []helpItem{{"precheck", "Run the pre-check suite only."}, {"run", "Start a campaign."}, {"status", "Show one campaign or list recent ones."}, {"stop", "Stop an active campaign."}, {"compare", "Compare campaigns."}, {"export", "Download a completed campaign bundle."}},
+		commands:    []helpItem{{"precheck", "Run the pre-check suite only."}, {"run", "Start a campaign."}, {"status", "Show one campaign or list recent ones."}, {"stop", "Stop an active campaign."}, {"compare", "Compare campaigns."}, {"export", "Download a completed campaign bundle."}, {"cleanup", "Re-run restore for a completed campaign's open mutations."}},
 	},
 	"campaign precheck": {
 		usage:       "oscar-corrtest campaign precheck --server <url> --token-file <file> [options]",
@@ -371,6 +371,13 @@ var helpTopics = map[string]helpTopic{
 		options:     append([]helpItem{{"--server <url>", "CorrTest base URL (required)."}, {"--token-file <file>", "Bearer token file, re-read per request (required)."}, {"--ca-file <file>", "CA bundle for the server certificate."}, {"--output <format>", "human or json."}}, []helpItem{}...),
 		examples:    []string{"oscar-corrtest campaign compare cmp_1 cmp_2 --server https://mini:8443 --token-file ./token"},
 		notes:       []string{"HTTP client of the running service; never opens the data directory. Exit 0 success, 1 runtime error, 2 usage, 3 refused (precheck failed or campaign active), 4 any non-PASS terminal verdict (FAIL, INCONCLUSIVE, ERROR) with --wait."},
+	},
+	"campaign cleanup": {
+		usage:       "oscar-corrtest campaign cleanup <id> --server <url> --token-file <file> [options]",
+		description: "Re-run restore for the open mutations of a completed campaign.",
+		options:     append([]helpItem{{"--server <url>", "CorrTest base URL (required)."}, {"--token-file <file>", "Bearer token file, re-read per request (required)."}, {"--ca-file <file>", "CA bundle for the server certificate."}, {"--output <format>", "human or json."}}, []helpItem{}...),
+		examples:    []string{"oscar-corrtest campaign cleanup cmp_1 --server https://mini:8443 --token-file ./token"},
+		notes:       []string{"Refused while any campaign is active. Verifies and closes the campaign's incidents, then restores each open mutation with read-back; the verdict never changes, the cleanup status may move from DIRTY to CLEAN. Exit 0 CLEAN, 1 runtime error, 2 usage, 3 refused, 4 cleanup still not CLEAN."},
 	},
 	"campaign export": {
 		usage:       "oscar-corrtest campaign export <id> --output-file <zip> --server <url> --token-file <file> [options]",

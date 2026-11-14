@@ -218,6 +218,34 @@ func (r *Runtime) recoverCampaigns(ctx context.Context) error {
 	return nil
 }
 
+// CampaignCleaner is implemented by an engine that can re-run cleanup for a
+// COMPLETED campaign.
+type CampaignCleaner interface {
+	Cleanup(ctx context.Context, campaignID string) (domain.CleanupStatus, error)
+}
+
+// CleanupCampaign re-runs restore for a COMPLETED campaign's open mutations
+// (ruling C40). It holds the campaign gate for the duration, so it is refused
+// while any campaign (or mutation run) is active, and nothing starts under it.
+func (r *Runtime) CleanupCampaign(ctx context.Context, id string) (domain.CleanupStatus, error) {
+	r.activeMu.Lock()
+	x, ok := r.campaignEngine.(CampaignCleaner)
+	r.activeMu.Unlock()
+	if !ok {
+		return "", errors.New("campaign cleanup unavailable")
+	}
+	cctx, cancel := context.WithCancel(r.rootCtx)
+	defer cancel()
+	if err := r.gateCampaign(id, cancel); err != nil {
+		return "", err
+	}
+	defer r.releaseCampaign()
+	if _, err := r.database.GetCampaign(ctx, id); errors.Is(err, storage.ErrNotFound) {
+		return "", ErrCampaignNotFound
+	}
+	return x.Cleanup(cctx, id)
+}
+
 // CampaignExporter is implemented by an engine that can write campaign bundles.
 type CampaignExporter interface {
 	ExportCampaign(ctx context.Context, campaignID, destination string) (evidence.Result, error)

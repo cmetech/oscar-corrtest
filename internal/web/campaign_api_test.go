@@ -287,3 +287,33 @@ func TestCampaignAPIBodyLimitsAndStrictFields(t *testing.T) {
 		t.Errorf("triggerIdentity status=%d", w.Code)
 	}
 }
+
+type cleanerData struct {
+	fakeDataSourceForCampaign
+	cleanErr error
+	cleaned  []string
+}
+
+func (f *cleanerData) CleanupCampaign(_ context.Context, id string) (domain.CleanupStatus, error) {
+	f.cleaned = append(f.cleaned, id)
+	return domain.CleanupClean, f.cleanErr
+}
+
+// Ruling C40: POST /api/v1/campaign/runs/{id}/cleanup (bearer only; 409 while
+// a campaign is active).
+func TestCampaignCleanupRoute(t *testing.T) {
+	t.Parallel()
+	data := &cleanerData{}
+	h := campaignServer(t, data, false)
+	if w := apiDo(h, http.MethodPost, "/api/v1/campaign/runs/camp_1/cleanup", "", false, nil); w.Code != http.StatusUnauthorized {
+		t.Fatalf("no bearer status=%d", w.Code)
+	}
+	w := apiDo(h, http.MethodPost, "/api/v1/campaign/runs/camp_1/cleanup", "", true, nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"cleanup":"CLEAN"`) || len(data.cleaned) != 1 {
+		t.Fatalf("cleanup status=%d %s", w.Code, w.Body)
+	}
+	data.cleanErr = appruntime.ErrCampaignActive
+	if w := apiDo(h, http.MethodPost, "/api/v1/campaign/runs/camp_1/cleanup", "", true, nil); w.Code != http.StatusConflict {
+		t.Fatalf("active status=%d", w.Code)
+	}
+}

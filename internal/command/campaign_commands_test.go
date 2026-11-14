@@ -161,3 +161,22 @@ func TestCampaignCLIAgainstRealWebHandler(t *testing.T) {
 		t.Fatalf("409 code=%d %s", code, out)
 	}
 }
+
+// Ruling C40: campaign cleanup <id>; exit 4 while still DIRTY.
+func TestCampaignCleanupCommand(t *testing.T) {
+	srv := func(cleanup string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != "POST" || r.URL.Path != "/api/v1/campaign/runs/cmp_1/cleanup" || r.Header.Get("Authorization") != "Bearer secret-token" {
+				w.WriteHeader(404)
+				return
+			}
+			_, _ = w.Write([]byte(`{"data":{"id":"cmp_1","cleanup":"` + cleanup + `"}}`))
+		}
+	}
+	if code, out, _ := campaignCLI(t, srv("CLEAN"), "campaign", "cleanup", "cmp_1"); code != 0 || !strings.Contains(out, "cmp_1\tCLEAN") {
+		t.Fatalf("code=%d out=%q", code, out)
+	}
+	if code, _, _ := campaignCLI(t, srv("DIRTY"), "campaign", "cleanup", "cmp_1"); code != 4 {
+		t.Fatalf("dirty code=%d", code)
+	}
+}

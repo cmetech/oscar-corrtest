@@ -7,10 +7,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/campaign/precheck"
+	"github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
 	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/oscar"
+	"github.com/cmetech/oscar-corrtest/internal/runtime"
 	corr "github.com/cmetech/oscar-corrtest/internal/scenario"
 )
 
@@ -539,5 +542,82 @@ func TestCohortResolveFailureIsDirty(t *testing.T) {
 	}
 	if c := h.campaign(); c.Cleanup != domain.CleanupDirty {
 		t.Fatalf("cleanup %s", c.Cleanup)
+	}
+}
+
+// sinkEnableMutation records what the B5 smoke records: CAMPAIGN_SINK by
+// name, prior status disabled. The sink is left enabled.
+func (h *harness) sinkEnableMutation() {
+	h.t.Helper()
+	if _, err := h.db.RecordMutation(context.Background(), domain.CampaignMutation{CampaignID: h.id, Kind: "notifier_enable", ObjectID: "CAMPAIGN_SINK",
+		Prior: []byte(`{"status":"disabled"}`), RecordedAt: h.clock.Now()}); err != nil {
+		h.t.Fatal(err)
+	}
+	h.oscar.mu.Lock()
+	h.oscar.notifiers["n5"].Status = "enabled"
+	h.oscar.mu.Unlock()
+}
+
+// Ruling C40: restore knows the pre-check's notifier_enable (by name, readback).
+func TestRestoreNotifierEnableByName(t *testing.T) {
+	h := newHarness(t)
+	h.sinkEnableMutation()
+	r := &run{e: New(h.deps, h.clock), id: h.id, laneID: h.id + "-baseline", cohorts: map[string]*cohortMember{}}
+	open, _ := h.db.OpenMutations(context.Background(), h.id)
+	if err := r.restore(context.Background(), open[0]); err != nil {
+		t.Fatal(err)
+	}
+	if st := h.oscar.notifiers["n5"].Status; st != "disabled" {
+		t.Fatalf("CAMPAIGN_SINK %s after restore", st)
+	}
+}
+
+// A pre-check-only campaign that leaves a mutation open restores it and
+// reports the cleanup it did, not NOT_REQUIRED.
+func TestPrecheckOnlyRestoresLeftoverMutation(t *testing.T) {
+	h := newHarness(t)
+	h.deps.Precheck = func(context.Context, scenario.Scenario) []precheck.Result {
+		h.sinkEnableMutation() // the smoke failed to restore
+		return []precheck.Result{{ID: "B1", Tier: precheck.Blocking, Status: precheck.Pass}}
+	}
+	if err := New(h.deps, h.clock).Run(context.Background(), h.id, runtime.CampaignOptions{Scenario: h.s, PrecheckOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+	if c := h.campaign(); c.Cleanup != domain.CleanupClean || c.Verdict != domain.VerdictPass {
+		t.Fatalf("cleanup %s verdict %s", c.Cleanup, c.Verdict)
+	}
+	h.assertRestored()
+}
+
+// Ruling C40: cleanup of a COMPLETED campaign re-runs restore for its open
+// mutations, records the outcome, never changes the verdict, and may move
+// DIRTY to CLEAN.
+func TestCleanupCompletedCampaign(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	e := New(h.deps, h.clock)
+	if _, err := e.Cleanup(ctx, h.id); err == nil {
+		t.Fatal("cleanup of a campaign that is not COMPLETED must be refused")
+	}
+	h.sinkEnableMutation()
+	if err := h.db.CompleteCampaign(ctx, h.id, domain.VerdictInconclusive, domain.CleanupDirty, false, nil, nil, h.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	st, err := e.Cleanup(ctx, h.id)
+	if err != nil || st != domain.CleanupClean {
+		t.Fatalf("cleanup %s %v", st, err)
+	}
+	c := h.campaign()
+	if c.Cleanup != domain.CleanupClean || c.Verdict != domain.VerdictInconclusive || c.Status != domain.CampaignCompleted {
+		t.Fatalf("campaign %s %s %s", c.Status, c.Verdict, c.Cleanup)
+	}
+	h.assertRestored()
+	evs, _ := h.db.RecentCampaignEvents(ctx, h.id, 100)
+	found := false
+	for _, ev := range evs {
+		found = found || ev.Type == "campaign.cleanup" && strings.Contains(ev.Summary, "DIRTY -> CLEAN")
+	}
+	if !found {
+		t.Fatal("no audit event for the cleanup re-run")
 	}
 }

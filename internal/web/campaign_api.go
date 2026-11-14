@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	campaignscenario "github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/workerapi"
@@ -22,6 +23,12 @@ type campaignController interface {
 	CampaignStatus(context.Context, string) (appruntime.CampaignView, error)
 	ListCampaigns(context.Context, domain.CampaignFilter) ([]domain.Campaign, error)
 }
+
+type campaignCleaner interface {
+	CleanupCampaign(context.Context, string) (domain.CleanupStatus, error)
+}
+
+var _ campaignCleaner = (*appruntime.Runtime)(nil)
 
 type campaignExporter interface {
 	ExportCampaign(context.Context, string, string) (evidence.Result, error)
@@ -128,6 +135,23 @@ func registerCampaignRoutes(mux *http.ServeMux, data DataSource, workerMode bool
 				apiData(w, http.StatusOK, map[string]string{"id": view.Campaign.ID, "status": string(view.Campaign.Status)})
 			}
 		})
+		if cl, ok := data.(campaignCleaner); ok {
+			post("/api/v1/campaign/runs/{id}/cleanup", func(w http.ResponseWriter, r *http.Request, _ string) {
+				// Closing incidents can wait minutes for OSCAR's resolution comment.
+				_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+				st, err := cl.CleanupCampaign(r.Context(), r.PathValue("id"))
+				switch {
+				case errors.Is(err, appruntime.ErrCampaignActive):
+					apiError(w, http.StatusConflict, "campaign_active", err.Error())
+				case errors.Is(err, appruntime.ErrCampaignNotFound):
+					apiError(w, http.StatusNotFound, "not_found", err.Error())
+				case err != nil:
+					apiError(w, http.StatusConflict, "cleanup_refused", err.Error())
+				default:
+					apiData(w, http.StatusOK, map[string]string{"id": r.PathValue("id"), "cleanup": string(st)})
+				}
+			})
+		}
 		mux.HandleFunc("GET /api/v1/campaign/runs", func(w http.ResponseWriter, r *http.Request) {
 			list, err := ctl.ListCampaigns(r.Context(), domain.CampaignFilter{Limit: 100})
 			if err != nil {

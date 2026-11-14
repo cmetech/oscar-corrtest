@@ -354,7 +354,21 @@ func (r *run) restoreWithRetry(ctx context.Context, m domain.CampaignMutation) e
 	return err
 }
 
-func (r *run) restore(ctx context.Context, m domain.CampaignMutation) error {
+// notifierID finds a notifier's id by exact (case-insensitive) name.
+func (r *run) notifierID(ctx context.Context, name string) (string, error) {
+	all, err := r.e.d.Target.Notifiers(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, n := range all {
+		if strings.EqualFold(n.Name, name) {
+			return n.ID, nil
+		}
+	}
+	return "", fmt.Errorf("notifier %s not found", name)
+}
+
+func (r *run) restore(ctx context.Context, m domain.CampaignMutation) (err error) {
 	switch m.Kind {
 	case kindIncident:
 		return r.resolveIncident(ctx, m.ObjectID)
@@ -372,13 +386,20 @@ func (r *run) restore(ctx context.Context, m domain.CampaignMutation) error {
 		return r.withRevision(ctx, p.NotifierID, p.Action, func(rev int) (int, error) {
 			return r.e.d.Target.Delete(ctx, p.ID, p.NotifierID, p.Action, rev)
 		})
-	case kindSink, kindNotifier:
+	case kindSink, kindNotifier, kindNotifierEnable:
 		var p notifierPrior
 		if err := json.Unmarshal(m.Prior, &p); err != nil {
 			return err
 		}
+		id := m.ObjectID
+		if m.Kind == kindNotifierEnable { // keyed by name: resolve the id now
+			p.Name = m.ObjectID
+			if id, err = r.notifierID(ctx, m.ObjectID); err != nil {
+				return err
+			}
+		}
 		on := p.Status == "enabled"
-		got, err := r.e.d.Target.SetNotifier(ctx, m.ObjectID, on)
+		got, err := r.e.d.Target.SetNotifier(ctx, id, on)
 		if err != nil {
 			return err
 		}

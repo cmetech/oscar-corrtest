@@ -23,6 +23,9 @@ import (
 const (
 	kindNotifier = "notifier_disable"
 	kindSink     = "sink_enable"
+	// kindNotifierEnable is pre-check B5's smoke: ObjectID is the notifier
+	// NAME (CAMPAIGN_SINK), Prior {"status":"disabled"}.
+	kindNotifierEnable = "notifier_enable"
 	// policy_create is recorded twice: an intent keyed by name before the
 	// create (Prior.ID empty), then the created policy keyed by id.
 	kindPolicyCreate   = "policy_create"
