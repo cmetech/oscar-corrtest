@@ -166,3 +166,23 @@ func TestTieOrdersResolveBeforeFiring(t *testing.T) {
 		t.Fatal("no ties produced")
 	}
 }
+
+func TestPoolIdentityLabelsStable(t *testing.T) {
+	p := Compile("r1", 1, spec(), 10*time.Minute)
+	seen := map[string][2]string{}
+	pool := 0
+	for _, e := range p.Events {
+		if !strings.Contains(e.Identity, "-pool-") {
+			continue
+		}
+		pool++
+		l := [2]string{e.Severity, e.Instance}
+		if prev, ok := seen[e.Identity]; ok && prev != l {
+			t.Fatalf("%s labels changed: %v vs %v", e.Identity, prev, l)
+		}
+		seen[e.Identity] = l
+	}
+	if pool == 0 {
+		t.Fatal("no pool events")
+	}
+}

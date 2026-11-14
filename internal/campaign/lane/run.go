@@ -3,6 +3,7 @@ package lane
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"time"
 )
@@ -29,13 +30,14 @@ type Outcome struct {
 type Counters struct {
 	Offered, Accepted, Failed, Unknown, Missed int
 	MaxLagMillis                               int64
+	Err                                        error // set when a ledger write failed and the lane stopped
 }
 
 // Run sends plan events at start+At. Each event gets a ledger intent before its
 // send. Sends of one kind are spaced at least the plan's firing period apart,
 // and an event more than max(1s, 5% of elapsed) late is recorded Missed and
 // never sent, so a stall is never followed by a catch-up burst. A ledger write
-// failure stops the lane (it must not send what it cannot record).
+// failure stops the lane and is reported in Counters.Err.
 func Run(ctx context.Context, laneID string, plan Plan, start time.Time, s Sender, l Ledger, c Clock, onCount func(Counters)) Counters {
 	var cnt Counters
 	stable := context.WithoutCancel(ctx)
@@ -50,7 +52,11 @@ func Run(ctx context.Context, laneID string, plan Plan, start time.Time, s Sende
 		if ctx.Err() != nil || !c.SleepUntil(ctx, due) {
 			break
 		}
-		if l.Intent(stable, laneID, e, sched) != nil {
+		if err := l.Intent(stable, laneID, e, sched); err != nil {
+			cnt.Err = fmt.Errorf("ledger intent seq %d: %w", e.Seq, err)
+			if onCount != nil {
+				onCount(cnt)
+			}
 			break
 		}
 		cnt.Offered++
@@ -71,6 +77,9 @@ func Run(ctx context.Context, laneID string, plan Plan, start time.Time, s Sende
 			case err != nil:
 				cnt.Unknown++
 				o.ErrorClass = "network"
+				if errors.Is(err, context.Canceled) {
+					o.ErrorClass = "cancelled"
+				}
 				var ne net.Error
 				if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()) {
 					o.ErrorClass = "timeout"
@@ -83,6 +92,9 @@ func Run(ctx context.Context, laneID string, plan Plan, start time.Time, s Sende
 			}
 		}
 		werr := l.Outcome(stable, laneID, e.Seq, o)
+		if werr != nil {
+			cnt.Err = fmt.Errorf("ledger outcome seq %d: %w", e.Seq, werr)
+		}
 		if onCount != nil {
 			onCount(cnt)
 		}

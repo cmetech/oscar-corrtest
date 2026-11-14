@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
@@ -56,6 +57,7 @@ func Compile(runID string, seed int64, spec scenario.BaselineSpec, duration time
 	p := Plan{RunID: runID, Seed: seed}
 	var fires []Event
 	newCount := 0
+	poolLabels := map[string][2]string{}
 	for i := 0; i < n; i++ {
 		e := Event{Kind: Firing, At: time.Duration(float64(i) * float64(time.Second) / spec.Rate)}
 		if rng.Float64() < spec.UniqueRatio {
@@ -75,6 +77,13 @@ func Compile(runID string, seed int64, spec scenario.BaselineSpec, duration time
 			}
 		}
 		e.Instance = fmt.Sprintf("campaign-host-%02d", rng.IntN(spec.Instances)+1)
+		// Pool identities keep the labels of their first draw (RNG use is unchanged),
+		// so every firing and resolve of one identity is the same Alertmanager alert.
+		if l, ok := poolLabels[e.Identity]; ok {
+			e.Severity, e.Instance = l[0], l[1]
+		} else if strings.Contains(e.Identity, "-pool-") {
+			poolLabels[e.Identity] = [2]string{e.Severity, e.Instance}
+		}
 		fires = append(fires, e)
 	}
 	// A firing gets a resolve only if its identity does not fire again within

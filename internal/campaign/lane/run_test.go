@@ -230,3 +230,29 @@ func TestAlertmanagerPayload(t *testing.T) {
 		t.Fatal("expected TLS verification failure")
 	}
 }
+
+type failLedger struct {
+	*memLedger
+	n, failAt int
+}
+
+func (f *failLedger) Intent(ctx context.Context, l string, e Event, at time.Time) error {
+	if f.n++; f.n == f.failAt {
+		return errors.New("disk full")
+	}
+	return f.memLedger.Intent(ctx, l, e, at)
+}
+
+func TestLedgerFailureStopsAndReportsErr(t *testing.T) {
+	clk := &fakeClock{t: t0}
+	led := &failLedger{memLedger: newLedger(), failAt: 3}
+	s := &fakeSender{clock: clk}
+	var last Counters
+	c := Run(context.Background(), "baseline", firingPlan(10*time.Second), t0, s, led, clk, func(c Counters) { last = c })
+	if c.Err == nil || last.Err == nil {
+		t.Fatalf("err not surfaced: %+v / %+v", c, last)
+	}
+	if len(s.sends) != 2 || led.has(2) {
+		t.Fatalf("sends=%d intent for failed seq=%v", len(s.sends), led.has(2))
+	}
+}
