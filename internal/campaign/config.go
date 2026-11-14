@@ -24,7 +24,7 @@ type Config struct {
 
 // LoadConfig reads a strict JSON config; unknown fields are rejected.
 func LoadConfig(path string) (Config, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) // #nosec G304 -- operator-selected --campaign-config path is the CLI contract.
 	if err != nil {
 		return Config{}, fmt.Errorf("read campaign config: %w", err)
 	}

@@ -127,7 +127,7 @@ func (m *Manager) Start(ctx context.Context, s workerapi.LaneSpec) (workerapi.La
 		start = m.clock.Now()
 	}
 	plan := lane.Compile(s.CampaignID, p.Seed, p.Baseline, p.Duration)
-	runCtx, cancel := context.WithCancel(context.Background()) // outlives the request
+	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx)) // outlives the request, keeps its values
 	ls := &laneState{id: s.ID, runID: s.CampaignID, sender: snd, cancel: cancel, done: make(chan struct{}),
 		status: workerapi.LaneStatus{ID: s.ID, State: "running", LastHeartbeat: m.clock.Now()}}
 	m.lanes[s.ID], m.running = ls, s.ID
@@ -151,13 +151,13 @@ func (m *Manager) Start(ctx context.Context, s workerapi.LaneSpec) (workerapi.La
 		}
 		m.mu.Unlock()
 	}()
-	go m.watchdog(ls)
+	go m.watchdog(context.WithoutCancel(ctx), ls)
 	return m.snapshot(ls), nil
 }
 
 // watchdog ticks against clock.Now(); on a stale heartbeat it stops the lane,
 // records the orphan_stop marker and resolves every open alert.
-func (m *Manager) watchdog(ls *laneState) {
+func (m *Manager) watchdog(ctx context.Context, ls *laneState) {
 	t := time.NewTicker(m.tick)
 	defer t.Stop()
 	for {
@@ -178,7 +178,7 @@ func (m *Manager) watchdog(ls *laneState) {
 		m.mu.Unlock()
 		if stale {
 			<-ls.done
-			if _, err := m.ResolveAll(context.Background(), ls.id); err != nil {
+			if _, err := m.ResolveAll(ctx, ls.id); err != nil {
 				m.mu.Lock()
 				ls.status.Error = "orphan resolve-all: " + err.Error()
 				m.mu.Unlock()

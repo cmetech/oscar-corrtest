@@ -125,7 +125,7 @@ func campaignIDFrom(ctx context.Context) string {
 func httpClient(caFile string) (*http.Client, error) {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	if caFile != "" {
-		pem, err := os.ReadFile(caFile)
+		pem, err := os.ReadFile(caFile) // #nosec G304 -- operator-configured CA path from the campaign config, not request input.
 		if err != nil {
 			return nil, fmt.Errorf("read CA file: %w", err)
 		}

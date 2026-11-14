@@ -150,7 +150,7 @@ func (r *run) fetchLedger(ctx context.Context) ([]domain.LaneRow, error) {
 }
 
 func readLedger(path string) ([]domain.LaneRow, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- ledger path is built from the campaign data dir, not request input.
 	if err != nil {
 		return nil, err
 	}

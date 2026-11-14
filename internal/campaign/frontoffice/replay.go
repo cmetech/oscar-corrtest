@@ -37,7 +37,7 @@ func LoadUsers(dir string, n int) ([]User, error) {
 	var us []User
 	for i := 1; i <= n; i++ {
 		name := fmt.Sprintf("fo-%02d", i)
-		b, err := os.ReadFile(filepath.Join(dir, name+".json"))
+		b, err := os.ReadFile(filepath.Join(dir, name+".json")) // #nosec G304 -- operator-configured front-office directory plus a fixed fo-NN name.
 		if err != nil {
 			return nil, err
 		}
@@ -70,7 +70,7 @@ func Run(ctx context.Context, base string, client *http.Client, users []User, in
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			runUser(ctx, base, client, u, rand.New(rand.NewSource(seed+int64(i)*7919)), instances, spec, clock, emit)
+			runUser(ctx, base, client, u, rand.New(rand.NewSource(seed+int64(i)*7919)) /* #nosec G404 -- deterministic seeded replay; not security-sensitive */, instances, spec, clock, emit)
 		}()
 	}
 	wg.Wait()
@@ -106,7 +106,7 @@ func queries(action string, rng *rand.Rand, instances int, now time.Time) []stri
 	const hist = "/alerts/history"
 	h := func(kv ...string) string {
 		v := url.Values{"page": {"1"}, "perPage": {"50"}, "view_status": {"firing"}}
-		for i := 0; i < len(kv); i += 2 {
+		for i := 0; i+1 < len(kv); i += 2 {
 			v.Set(kv[i], kv[i+1])
 		}
 		return hist + "?" + v.Encode()
@@ -143,8 +143,8 @@ func call(ctx context.Context, client *http.Client, base string, u User, action,
 	start := time.Now()
 	resp, err := client.Do(req)
 	if err == nil {
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body) // best-effort drain so the connection can be reused
+		_ = resp.Body.Close()                 // read-only response; close error is not actionable
 		res.Status = resp.StatusCode
 	}
 	// latency is wall time, independent of the injected clock.

@@ -31,7 +31,7 @@ func NewAlertmanagerSender(ingestURL string, caFile string, timeout time.Duratio
 		pool = x509.NewCertPool()
 	}
 	if caFile != "" {
-		pem, err := os.ReadFile(caFile)
+		pem, err := os.ReadFile(caFile) // #nosec G304 -- operator-configured CA path from the worker config, not request input.
 		if err != nil {
 			return nil, err
 		}

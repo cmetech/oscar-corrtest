@@ -70,7 +70,7 @@ func New(baseURL, tokenFile, caFile string) (*Client, error) {
 		pool = x509.NewCertPool()
 	}
 	if caFile != "" {
-		pem, err := os.ReadFile(caFile)
+		pem, err := os.ReadFile(caFile) // #nosec G304 -- operator-configured CA path from the campaign/worker config, not request input.
 		if err != nil {
 			return nil, fmt.Errorf("read worker CA file: %w", err)
 		}

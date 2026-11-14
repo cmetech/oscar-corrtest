@@ -45,6 +45,7 @@ type Plan struct {
 // identities fire once, so they resolve once. Plan.Resolves counts episodes.
 // Events are sorted by At, then Seq.
 func Compile(runID string, seed int64, spec scenario.BaselineSpec, duration time.Duration) Plan {
+	// #nosec G404 G115 -- deterministic seeded plan, not security-sensitive; int64->uint64 is a bit-preserving reinterpretation of the seed, any value is valid.
 	rng := rand.New(rand.NewPCG(uint64(seed), 0x9e3779b97f4a7c15))
 	// Sorted keys so the severity pick is deterministic despite map order.
 	keys := make([]string, 0, len(spec.Severity))

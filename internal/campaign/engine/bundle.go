@@ -266,7 +266,7 @@ func (e *Engine) childBundle(ctx context.Context, runID string) ([]byte, error) 
 	if _, err := e.d.ExportRun(ctx, runID, dest); err != nil {
 		return nil, err
 	}
-	b, err := os.ReadFile(dest)
+	b, err := os.ReadFile(dest) // #nosec G304 -- dest is a file this code just wrote inside the bundle directory.
 	if err != nil {
 		return nil, err
 	}

@@ -434,7 +434,7 @@ func (a *PrecheckAdapter) ingest(ctx context.Context, labels map[string]string, 
 	if err != nil {
 		return errors.New("ingest request failed")
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close() // status already read; close error is not actionable
 	if resp.StatusCode/100 != 2 {
 		return fmt.Errorf("ingest HTTP %d", resp.StatusCode)
 	}
@@ -518,6 +518,6 @@ func (a *PrecheckAdapter) get(ctx context.Context, hc *http.Client, url string, 
 	if err != nil {
 		return 0, errors.New("request failed") // no wrapped err: the URL may carry secrets
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close() // status already read; close error is not actionable
 	return resp.StatusCode, nil
 }

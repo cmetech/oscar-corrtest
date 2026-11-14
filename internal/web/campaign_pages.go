@@ -231,7 +231,7 @@ func registerCampaignPages(mux *http.ServeMux, info version.Info, data DataSourc
 	})
 	mux.HandleFunc("GET /campaigns/{id}/events", func(w http.ResponseWriter, r *http.Request) {
 		var after int
-		fmt.Sscanf(r.URL.Query().Get("after"), "%d", &after)
+		_, _ = fmt.Sscanf(r.URL.Query().Get("after"), "%d", &after) // bad input leaves after=0 (replay from start)
 		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
