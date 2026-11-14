@@ -83,8 +83,10 @@ type PrecheckQueries struct {
 
 // DefaultPrecheckQueries are the homelab defaults.
 var DefaultPrecheckQueries = PrecheckQueries{
-	HostsDown:    `up{job="node"} == 0`,
-	ScrapeDown:   `up == 0`,
+	// HostsDown and ScrapeDown return every series; zero-valued ones are down.
+	// An empty result is an error (fail closed).
+	HostsDown:    `up{job="node"}`,
+	ScrapeDown:   `up`,
 	DiskFreePct:  `min(100 * node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"})`,
 	MemAvailPct:  `min(100 * node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)`,
 	FiringAlerts: `sum(alertmanager_alerts{state="active"})`,
@@ -263,9 +265,14 @@ func (a *PrecheckAdapter) labelsFrom(ctx context.Context, q, label string) ([]st
 	if err != nil {
 		return nil, err
 	}
+	if len(v) == 0 {
+		return nil, fmt.Errorf("no series for %s", q)
+	}
 	var out []string
 	for _, s := range v {
-		out = append(out, s.Metric[label])
+		if s.Value == 0 {
+			out = append(out, s.Metric[label])
+		}
 	}
 	sort.Strings(out)
 	return out, nil

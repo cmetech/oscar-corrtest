@@ -36,6 +36,12 @@ const ingestPath = "/ext/alertmanager/api/v2/alerts"
 
 // NewFromConfig wires the engine to the real clients named by cfg.
 func NewFromConfig(ctx context.Context, cfg campaign.Config, host Host) (*Engine, error) {
+	for name, path := range map[string]string{"worker token": cfg.WorkerTokenFile, "sink admin token": cfg.SinkAdminTokenFile,
+		"metrics credential": cfg.MetricsCredentialFile, "SNOW credential": cfg.SNOWCredentialFile, "probe key": cfg.ProbeKeyFile} {
+		if _, err := os.Stat(path); err != nil { // fail at startup, not mid-campaign
+			return nil, fmt.Errorf("%s file is not readable", name)
+		}
+	}
 	target, oc, err := host.CampaignTarget(ctx, cfg.TargetID)
 	if err != nil {
 		return nil, fmt.Errorf("campaign target: %w", err)
@@ -144,6 +150,9 @@ func (t oscarTarget) Delete(ctx context.Context, id, nid, action string, rev int
 }
 func (t oscarTarget) PolicyStatus(ctx context.Context, nid, action, policyID string) (targetops.PolicyStatus, error) {
 	return targetops.Status(ctx, t.c, nid, action, policyID)
+}
+func (t oscarTarget) ListPolicies(ctx context.Context, nid, action, name string) ([]targetops.PolicyItem, error) {
+	return targetops.ListPolicies(ctx, t.c, nid, action, name)
 }
 func (t oscarTarget) History(ctx context.Context, run string, start, end time.Time) ([]oscar.HistoryRecord, error) {
 	return t.c.HistoryByLabel(ctx, "campaign_run", run, start, end)

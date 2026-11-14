@@ -16,16 +16,18 @@ import (
 // drainAndFinish is step 8 then 9 for a run that reached traffic. On a guard
 // trip or Stop the lane is stopped and resolved at once; otherwise the lane
 // finishes its scheduled resolves first. ctx must not be cancellable.
-func (r *run) drainAndFinish(ctx context.Context) error {
-	trip := r.tripped()
+func (r *run) drainAndFinish(ctx context.Context, stopped bool) error {
+	if stopped && r.tripped() == "" {
+		r.mu.Lock()
+		r.stopped = true
+		r.mu.Unlock()
+	}
 	if err := r.transition(ctx, domain.CampaignDraining, "drain"); err != nil {
 		return err
 	}
 	hbCtx, stopHB := context.WithCancel(ctx)
 	defer stopHB()
 	go r.heartbeats(hbCtx)
-	c, _ := r.store().GetCampaign(ctx, r.id)
-	stopped := trip != "" || c.Status == domain.CampaignStopping
 	if !stopped {
 		r.waitLane(ctx, r.at("drain", true))
 	}
@@ -109,31 +111,118 @@ func (r *run) waitQueues(ctx context.Context) {
 	r.event(ctx, "campaign.drain", "warn", "queues did not return to idle within 30m", nil)
 }
 
-// closeIncidents reads this run's open incidents and closes the ones with
-// OSCAR's resolution comment (recorded, read back by number). It returns the
-// incidents as read before closing, for scoring.
+const (
+	commentWait   = 5 * time.Minute
+	resolveRetry  = 3
+	restoreTries  = 3
+	setBTicketRun = "setB_ticket:" // link kind prefix; the pattern follows
+)
+
+// corrTicketStats is the correlation-ticket figure (set B), kept apart from
+// the baseline Tickets score.
+type corrTicketStats struct {
+	Runs, Incidents, Closed, Open int
+}
+
+type corrRun struct{ pattern, token string }
+
+// ticketedRuns re-derives the ticketed set B runs from the link rows, so
+// recovery finds them too.
+func (r *run) ticketedRuns(ctx context.Context) []corrRun {
+	links, err := r.store().CampaignRuns(ctx, r.id)
+	if err != nil {
+		r.noteMissing("campaign run links: " + err.Error())
+		return nil
+	}
+	var out []corrRun
+	for _, l := range links {
+		if p, ok := strings.CutPrefix(l.Kind, setBTicketRun); ok {
+			out = append(out, corrRun{p, domain.RunID(l.RunID).Short()})
+		}
+	}
+	return out
+}
+
+func (r *run) noteMissing(why string) {
+	r.mu.Lock()
+	r.missing = append(r.missing, why)
+	r.mu.Unlock()
+}
+
+// closeIncidents waits (<= 5 min, every 15 s) for OSCAR's resolution comment
+// on this run's incidents (campaign alerts and ticketed set B runs), then
+// records, resolves and reads back each one. Cohort resolves are re-posted
+// up to 3 times while waiting. Incidents still open at the deadline make
+// cleanup DIRTY. It returns the campaign incidents as last read, for scoring.
 func (r *run) closeIncidents(ctx context.Context) []targetops.Incident {
 	if r.e.d.SNOW == nil {
 		return nil
 	}
-	incs, err := r.e.d.SNOW.OpenCampaignIncidents(ctx, r.id)
-	if err != nil {
-		r.event(ctx, "campaign.tickets", "warn", "incident listing failed: "+err.Error(), nil)
-		return nil
-	}
-	for _, inc := range incs {
-		if !resolvedComment(inc) {
-			continue
+	corr := r.ticketedRuns(ctx)
+	campaign := map[string]targetops.Incident{}
+	corrSeen := map[string]bool{}
+	closed := map[string]bool{}
+	deadline := r.now().Add(commentWait)
+	for retry := 0; ; retry++ {
+		var pending []string
+		visit := func(inc targetops.Incident) {
+			if closed[inc.Number] {
+				return
+			}
+			if !resolvedComment(inc) {
+				pending = append(pending, inc.Number)
+				return
+			}
+			mid, err := r.record(ctx, kindIncident, inc.Number, map[string]string{"state": inc.State})
+			if err == nil && r.resolveIncident(ctx, inc.Number) == nil {
+				_ = r.restored(ctx, mid)
+				closed[inc.Number] = true
+				return
+			}
+			pending = append(pending, inc.Number)
 		}
-		mid, err := r.record(ctx, kindIncident, inc.Number, map[string]string{"state": inc.State})
+		incs, err := r.e.d.SNOW.OpenCampaignIncidents(ctx, r.id)
 		if err != nil {
-			continue
+			r.noteMissing("incident listing: " + err.Error())
 		}
-		if r.resolveIncident(ctx, inc.Number) == nil {
-			_ = r.restored(ctx, mid)
+		for _, inc := range incs {
+			campaign[inc.Number] = inc
+			visit(inc)
 		}
+		for _, c := range corr {
+			incs, err := r.e.d.SNOW.OpenCorrTestIncidents(ctx, c.pattern, c.token)
+			if err != nil {
+				r.noteMissing("correlation incident listing: " + err.Error())
+			}
+			for _, inc := range incs {
+				corrSeen[inc.Number] = true
+				visit(inc)
+			}
+		}
+		if len(pending) == 0 || !r.now().Before(deadline) {
+			r.mu.Lock()
+			r.openIncidents = pending
+			r.corrTickets = corrTicketStats{Runs: len(corr), Incidents: len(corrSeen)}
+			for n := range corrSeen {
+				if closed[n] {
+					r.corrTickets.Closed++
+				} else {
+					r.corrTickets.Open++
+				}
+			}
+			r.mu.Unlock()
+			break
+		}
+		if retry < resolveRetry {
+			r.reresolveCohorts(ctx)
+		}
+		r.e.clock.SleepUntil(ctx, r.now().Add(guardEvery))
 	}
-	return incs
+	out := make([]targetops.Incident, 0, len(campaign))
+	for _, inc := range campaign {
+		out = append(out, inc)
+	}
+	return out
 }
 
 func (r *run) resolveIncident(ctx context.Context, number string) error {
@@ -148,7 +237,13 @@ func (r *run) resolveIncident(ctx context.Context, number string) error {
 func (r *run) cleanup(ctx context.Context) domain.CleanupStatus {
 	r.restoreKinds(ctx) // all kinds
 	open, err := r.store().OpenMutations(ctx, r.id)
-	if err != nil || len(open) > 0 {
+	r.mu.Lock()
+	incidents := append([]string{}, r.openIncidents...)
+	r.mu.Unlock()
+	if len(incidents) > 0 {
+		r.event(ctx, "campaign.cleanup", "error", "incidents still open: "+strings.Join(incidents, ","), incidents)
+	}
+	if err != nil || len(open) > 0 || len(incidents) > 0 {
 		return domain.CleanupDirty
 	}
 	return domain.CleanupClean
@@ -167,12 +262,26 @@ func (r *run) restoreKinds(ctx context.Context, kinds ...string) {
 		if len(kinds) > 0 && !containsFold(kinds, m.Kind) {
 			continue
 		}
-		if err := r.restore(ctx, m); err != nil {
+		if err := r.restoreWithRetry(ctx, m); err != nil {
 			r.event(ctx, "campaign.cleanup", "warn", fmt.Sprintf("restore %s %s: %v", m.Kind, m.ObjectID, err), nil)
 			continue
 		}
 		_ = r.restored(ctx, m.ID)
 	}
+}
+
+// restoreWithRetry tries a restore 3 times with 1 s, 2 s backoff.
+func (r *run) restoreWithRetry(ctx context.Context, m domain.CampaignMutation) error {
+	var err error
+	for i := 0; i < restoreTries; i++ {
+		if i > 0 {
+			r.e.clock.SleepUntil(ctx, r.now().Add(time.Duration(i)*time.Second))
+		}
+		if err = r.restore(ctx, m); err == nil {
+			return nil
+		}
+	}
+	return err
 }
 
 func (r *run) restore(ctx context.Context, m domain.CampaignMutation) error {
@@ -185,7 +294,7 @@ func (r *run) restore(ctx context.Context, m domain.CampaignMutation) error {
 			return err
 		}
 		if p.ID == "" {
-			return errors.New("draft create outcome unknown; check the target for " + p.Name)
+			return r.removeByName(ctx, p)
 		}
 		if m.Kind == kindPolicyActivate {
 			return r.deactivatePolicy(ctx, p)
@@ -235,4 +344,32 @@ func resolvedComment(i targetops.Incident) bool {
 		}
 	}
 	return false
+}
+
+// removeByName resolves a create intent that never got an id: an exact-name
+// match is deactivated and deleted; no match means the create never landed.
+func (r *run) removeByName(ctx context.Context, p policyPrior) error {
+	items, err := r.e.d.Target.ListPolicies(ctx, p.NotifierID, p.Action, p.Name)
+	if err != nil {
+		return err
+	}
+	var match []targetops.PolicyItem
+	for _, it := range items {
+		if it.Name == p.Name {
+			match = append(match, it)
+		}
+	}
+	switch len(match) {
+	case 0:
+		return nil
+	case 1:
+		p.ID = match[0].ID
+		if err := r.deactivatePolicy(ctx, p); err != nil {
+			return err
+		}
+		return r.withRevision(ctx, p.NotifierID, p.Action, func(rev int) (int, error) {
+			return r.e.d.Target.Delete(ctx, p.ID, p.NotifierID, p.Action, rev)
+		})
+	}
+	return fmt.Errorf("%d policies named %s; resolve by hand", len(match), p.Name)
 }

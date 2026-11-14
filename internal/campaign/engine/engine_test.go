@@ -3,10 +3,15 @@ package engine
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
+	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
+	"github.com/cmetech/oscar-corrtest/internal/oscar"
+	corr "github.com/cmetech/oscar-corrtest/internal/scenario"
 )
 
 func waitFor(t *testing.T, what string, cond func() bool) {
@@ -47,7 +52,7 @@ func TestEngineHappyPathPass(t *testing.T) {
 	for _, hl := range card.Headlines {
 		names[hl.Name] = true
 	}
-	for _, want := range []string{"queue.drain_seconds", "latency.history_p95", "latency.sink_p95", "latency.correlation_p95",
+	for _, want := range []string{"queue.drain_seconds", "latency.history_p95", "latency.sink_p95", "latency.correlation_run_wall_p95",
 		"correlation.success", "tickets.success", "resend.success", "frontoffice.p95", "frontoffice.p99"} {
 		if !names[want] {
 			t.Errorf("missing headline %s (have %v)", want, names)
@@ -60,6 +65,20 @@ func TestEngineHappyPathPass(t *testing.T) {
 	}
 	if card.Tickets.Expected == 0 {
 		t.Error("no tickets expected; the scenario should ticket")
+	}
+	h.oscar.mu.Lock()
+	defer h.oscar.mu.Unlock()
+	tokens := map[string]int{}
+	for _, inc := range h.oscar.corrInc {
+		tokens[inc.ShortDescription[strings.Index(inc.ShortDescription, "[TRIGGER][")+10:][:8]]++
+	}
+	if len(tokens) == 0 {
+		t.Fatal("ticketed set B runs opened no incidents")
+	}
+	for tok, n := range tokens {
+		if n != 1 {
+			t.Errorf("run %s ticketed %d sources, want exactly 1", tok, n)
+		}
 	}
 }
 
@@ -159,6 +178,9 @@ func TestEngineRecoveryAfterRestartRestoresEverything(t *testing.T) {
 	h.assertRestored()
 	h.oscar.mu.Lock()
 	defer h.oscar.mu.Unlock()
+	if len(h.oscar.corrInc) == 0 {
+		t.Fatal("no set B incidents existed before the kill; recovery closing them is untested")
+	}
 	if h.oscar.allFirings != firings {
 		t.Fatalf("%d firings sent after the kill", h.oscar.allFirings-firings)
 	}
@@ -209,5 +231,199 @@ func TestSetAOverrunMarksNotRun(t *testing.T) {
 	}
 	if !hasReason(card.Reasons, "correlation: no evidence") {
 		t.Fatalf("correlation gate not INCONCLUSIVE: %v", card.Reasons)
+	}
+}
+
+func TestStopHaltsLaneAndCleansUp(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	var mu sync.Mutex
+	var firstStop time.Time
+	h.worker.onStop = func() {
+		mu.Lock()
+		if firstStop.IsZero() {
+			firstStop = h.clock.Now()
+		}
+		mu.Unlock()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- h.run(ctx) }()
+	waitFor(t, "correlation phase", func() bool { return h.oscar.correlates.Load() > 0 })
+	// What runtime.StopCampaign does: STOPPING, then cancel.
+	stopAt := h.clock.Now()
+	if err := h.db.TransitionCampaign(context.Background(), h.id, domain.CampaignStopping, stopAt, "stop requested"); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	if firstStop.IsZero() || firstStop.Sub(stopAt) > guardEvery {
+		t.Fatalf("worker Stop at %s, want within one tick of %s", firstStop, stopAt)
+	}
+	mu.Unlock()
+	c, card := h.scorecard()
+	if c.Status != domain.CampaignCompleted || c.Cleanup != domain.CleanupClean {
+		t.Fatalf("status %s cleanup %s", c.Status, c.Cleanup)
+	}
+	if c.Verdict != domain.VerdictInconclusive || card.Reasons[0] != "stopped: operator stop" {
+		t.Fatalf("verdict %s reasons %v", c.Verdict, card.Reasons)
+	}
+	h.assertRestored()
+	h.oscar.mu.Lock()
+	defer h.oscar.mu.Unlock()
+	for _, at := range h.oscar.laneFires {
+		if at.After(stopAt.Add(guardEvery)) {
+			t.Fatalf("lane fired at %s after the stop at %s", at, stopAt)
+		}
+	}
+}
+
+func TestIncidentWithoutResolutionCommentIsDirty(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.oscar.withholdComments = true
+	if err := h.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	c, card := h.scorecard()
+	if c.Cleanup != domain.CleanupDirty || c.Verdict == domain.VerdictPass || !hasReason(card.Reasons, "incidents still open: INC") {
+		t.Fatalf("cleanup %s verdict %s reasons %v", c.Cleanup, c.Verdict, card.Reasons)
+	}
+	h.oscar.mu.Lock()
+	defer h.oscar.mu.Unlock()
+	for _, inc := range h.oscar.incidents {
+		if inc.State == "6" {
+			t.Fatalf("incident %s closed without OSCAR's resolution comment", inc.Number)
+		}
+	}
+}
+
+func TestMissingEvidenceIsNotPass(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.oscar.sinkErr = true
+	if err := h.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	c, card := h.scorecard()
+	if c.Verdict == domain.VerdictPass || !hasReason(card.Reasons, "missing evidence: sink receipts") {
+		t.Fatalf("verdict %s reasons %v", c.Verdict, card.Reasons)
+	}
+}
+
+func TestRestoreRetriesTransientFailures(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.oscar.failEnable = 2 // the first two re-enables fail
+	if err := h.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if c := h.campaign(); c.Cleanup != domain.CleanupClean {
+		t.Fatalf("cleanup %s", c.Cleanup)
+	}
+	h.assertRestored()
+}
+
+func TestDraftRefusedMarksIntentRestored(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.oscar.draftErr = &oscar.MachineError{Operation: "POST /api/v1/resend-policies", StatusCode: 422, Code: "http_error", Detail: "invalid"}
+	if err := h.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := h.scorecard()
+	if c.Verdict != domain.VerdictError || c.Cleanup != domain.CleanupClean {
+		t.Fatalf("verdict %s cleanup %s", c.Verdict, c.Cleanup)
+	}
+	h.assertRestored()
+}
+
+func TestRestoreIntentWithoutIDByName(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	r := &run{e: New(h.deps, h.clock), id: h.id, laneID: h.id + "-baseline", cohorts: map[string]*cohortMember{}}
+	intent := func(name string) domain.CampaignMutation {
+		return domain.CampaignMutation{Kind: kindPolicyCreate, ObjectID: name, Prior: mustJSON(policyPrior{Name: name, NotifierID: "n5", Action: "notification"})}
+	}
+	mk := func(name string, active bool) {
+		p, err := h.oscar.CreateDraft(ctx, targetops.PolicyDefinition{NotifierID: "n5", Name: name, Action: "notification"}, h.oscar.revs["n5/notification"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.oscar.policies[p.ID].enabled = active
+	}
+	mk("Campaign-x-R1", true)
+	if err := r.restore(ctx, intent("Campaign-x-R1")); err != nil {
+		t.Fatalf("one match: %v", err)
+	}
+	for id, p := range h.oscar.policies {
+		if !p.deleted || p.enabled {
+			t.Fatalf("policy %s not deactivated and deleted", id)
+		}
+	}
+	if err := r.restore(ctx, intent("Campaign-x-R2")); err != nil {
+		t.Fatalf("no match must count as restored: %v", err)
+	}
+	mk("Campaign-x-R3", false)
+	mk("Campaign-x-R3", false)
+	if err := r.restore(ctx, intent("Campaign-x-R3")); err == nil {
+		t.Fatal("two exact matches must be an error")
+	}
+}
+
+func TestUnknownOutcome(t *testing.T) {
+	sent := time.Now()
+	for _, tc := range []struct {
+		row  domain.LaneRow
+		want bool
+	}{
+		{domain.LaneRow{SentAt: sent, ErrorClass: "timeout"}, true},
+		{domain.LaneRow{SentAt: sent, ErrorClass: "network"}, true},
+		{domain.LaneRow{SentAt: sent}, true}, // sent, no answer recorded
+		{domain.LaneRow{SentAt: sent, Done: true, Status: 500, ErrorClass: "http"}, false},
+		{domain.LaneRow{Missed: true, ErrorClass: "missed"}, false},
+		{domain.LaneRow{}, false}, // never sent
+	} {
+		if got := unknownOutcome(tc.row); got != tc.want {
+			t.Errorf("%+v: got %v", tc.row, got)
+		}
+	}
+}
+
+// TestTicketFirstTriggerCompiles checks ruling C27 against the real compiler:
+// each ticketed pattern still validates and compiles, and exactly one source
+// alert per trigger case carries create_ticket=snow.
+func TestTicketFirstTriggerCompiles(t *testing.T) {
+	for _, pattern := range []string{"flood", "threshold"} {
+		doc := corr.Builtin(pattern)
+		ticketFirstTrigger(&doc)
+		if err := corr.Validate(doc); err != nil {
+			t.Fatalf("%s: %v", pattern, err)
+		}
+		plan, err := compiler.Compile(domain.Run{ID: "crt_0123456789ABCDEFGHJKMNPQRS", ShortToken: "01234567"}, doc, compiler.Capabilities{PipelineMode: correlationRun})
+		if err != nil {
+			t.Fatalf("%s: %v", pattern, err)
+		}
+		for _, c := range plan.Cases {
+			n := 0
+			for _, a := range c.Alerts {
+				if a.Labels["create_ticket"] == "snow" {
+					n++
+					if !strings.HasPrefix(a.Annotations["summary"], "[CORRTEST]["+pattern+"][TRIGGER][01234567]") {
+						t.Errorf("%s: ticketed alert summary %q", pattern, a.Annotations["summary"])
+					}
+				}
+			}
+			want := 0
+			if strings.Contains(c.Name, "emits") || c.Polarity == "positive" {
+				want = 1
+			}
+			if n != want {
+				t.Errorf("%s case %s: %d ticketed alerts, want %d", pattern, c.Name, n, want)
+			}
+		}
 	}
 }

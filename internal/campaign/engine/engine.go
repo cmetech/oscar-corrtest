@@ -51,6 +51,7 @@ type Store interface {
 	RecordMutation(ctx context.Context, m domain.CampaignMutation) (int64, error)
 	MarkMutationRestored(ctx context.Context, id int64, at time.Time) error
 	OpenMutations(ctx context.Context, campaignID string) ([]domain.CampaignMutation, error)
+	CampaignRuns(ctx context.Context, campaignID string) ([]domain.CampaignRunLink, error)
 	CompleteCampaign(ctx context.Context, id string, v domain.Verdict, cleanup domain.CleanupStatus, comparable bool, scorecard, report json.RawMessage, at time.Time) error
 }
 
@@ -82,6 +83,7 @@ type Target interface {
 	Deactivate(ctx context.Context, id, notifierID, action string, rev int) (int, error)
 	Delete(ctx context.Context, id, notifierID, action string, rev int) (int, error)
 	PolicyStatus(ctx context.Context, notifierID, action, policyID string) (targetops.PolicyStatus, error)
+	ListPolicies(ctx context.Context, notifierID, action, nameFilter string) ([]targetops.PolicyItem, error)
 	// PostAlert sends one alert on the cohort route. status is the HTTP
 	// status, 0 when the outcome is unknown (timeout, transport error).
 	PostAlert(ctx context.Context, a Alert) (status int, err error)
@@ -91,6 +93,7 @@ type Target interface {
 // SNOW is the PDI surface (*targetops.SNOW).
 type SNOW interface {
 	OpenCampaignIncidents(ctx context.Context, campaignRun string) ([]targetops.Incident, error)
+	OpenCorrTestIncidents(ctx context.Context, pattern, shortToken string) ([]targetops.Incident, error)
 	Resolve(ctx context.Context, number, note string) (targetops.Incident, error)
 }
 
@@ -159,6 +162,11 @@ type run struct {
 	notifiers  map[string]string // name -> id
 
 	mu            sync.Mutex
+	normalEnd     bool // phases reached the drain start untouched
+	stopped       bool // operator Stop
+	missing       []string
+	openIncidents []string
+	corrTickets   corrTicketStats
 	trip          string // guard name that tripped
 	workerLost    bool
 	lastHeartbeat time.Time
@@ -339,6 +347,20 @@ func (r *run) execute(ctx context.Context) error {
 		return r.abort(ctx, "lane start failed")
 	}
 
+	// On Stop, Close or a guard trip, halt the lane the moment phaseCtx ends
+	// (within one guard tick), before waiting for in-flight phase work.
+	halted := make(chan struct{})
+	go func() {
+		defer close(halted)
+		<-phaseCtx.Done()
+		r.mu.Lock()
+		normal := r.normalEnd
+		r.mu.Unlock()
+		if !normal {
+			r.haltLane(stable)
+		}
+	}()
+
 	var bg sync.WaitGroup
 	bg.Add(3)
 	go func() { defer bg.Done(); r.heartbeats(phaseCtx) }()
@@ -351,9 +373,14 @@ func (r *run) execute(ctx context.Context) error {
 	go func() { defer work.Done(); r.resendPhase(phaseCtx) }()
 	work.Wait()
 	// Firings end at the drain phase start (or earlier on a trip/stop).
-	r.e.clock.SleepUntil(phaseCtx, r.at("drain", false))
+	if r.e.clock.SleepUntil(phaseCtx, r.at("drain", false)) {
+		r.mu.Lock()
+		r.normalEnd = true // the lane must finish its scheduled resolves
+		r.mu.Unlock()
+	}
 	stopPhases()
 	bg.Wait()
+	<-halted
 
 	if ctx.Err() != nil && r.tripped() == "" {
 		c, err := r.store().GetCampaign(stable, r.id)
@@ -363,7 +390,7 @@ func (r *run) execute(ctx context.Context) error {
 			return errors.New("runtime closing; campaign left for recovery")
 		}
 	}
-	return r.drainAndFinish(stable)
+	return r.drainAndFinish(stable, ctx.Err() != nil || r.tripped() != "")
 }
 
 // abort ends a campaign that failed before traffic: no lane, straight to cleanup.
@@ -371,6 +398,9 @@ func (r *run) abort(ctx context.Context, why string) error {
 	stable := context.WithoutCancel(ctx)
 	if err := r.transition(stable, domain.CampaignDraining, why); err != nil {
 		return err
+	}
+	if !r.t0.IsZero() { // the lane start was attempted
+		r.resolveLane(stable)
 	}
 	return r.finishAfterDrain(stable, domain.VerdictError, why)
 }

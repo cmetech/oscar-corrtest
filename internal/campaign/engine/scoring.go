@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/guard"
+	"github.com/cmetech/oscar-corrtest/internal/campaign/lane"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/score"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
@@ -39,7 +41,9 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 	}
 	ledger, ledgerErr := r.fetchLedger(ctx)
 	if ledgerErr != nil {
-		report["ledgerError"] = ledgerErr.Error()
+		r.noteMissing("ledger: " + ledgerErr.Error())
+	} else {
+		r.crossCheckLedger(ctx, ledger)
 	}
 	in := score.Inputs{ScenarioHash: r.s.Hash(), Trigger: r.opts.Trigger, RunBy: r.opts.RunBy, Comparable: r.comparable, CleanupClean: clean,
 		Start: r.t0, End: end, Phases: r.s.Phases, Ledger: ledger, Correlation: r.corrRuns, NotRun: r.notRun,
@@ -47,11 +51,11 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 		GuardStopped: trip != "" && !lost}
 	var err error
 	if in.History, err = r.e.d.Target.History(ctx, r.id, r.t0, end); err != nil {
-		report["historyError"] = err.Error()
+		r.noteMissing("history: " + err.Error())
 	}
 	if r.e.d.Sink != nil {
 		if in.Receipts, err = r.e.d.Sink.Receipts(ctx, "campaign", r.id, r.t0); err != nil {
-			report["sinkError"] = err.Error()
+			r.noteMissing("sink receipts: " + err.Error())
 		}
 	}
 	in.QueueDepth = r.series(ctx, queueDepthQuery, "queue", end)
@@ -70,6 +74,22 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 		in.PlannedResend += p.Cohort
 	}
 	card := score.Compute(in, r.s.Limits)
+	r.mu.Lock()
+	missing, stopped, open, corrT := append([]string{}, r.missing...), r.stopped, r.openIncidents, r.corrTickets
+	r.mu.Unlock()
+	report["correlationTickets"] = corrT
+	if len(open) > 0 {
+		card.Reasons = append(card.Reasons, "incidents still open: "+strings.Join(open, ","))
+		if card.Verdict == domain.VerdictPass {
+			card.Verdict = domain.VerdictInconclusive
+		}
+	}
+	for _, m := range missing { // no PASS on missing evidence
+		card.Reasons = append(card.Reasons, "missing evidence: "+m)
+		if card.Verdict == domain.VerdictPass {
+			card.Verdict = domain.VerdictInconclusive
+		}
+	}
 	switch {
 	case forced != "":
 		card.Verdict, card.Reasons = forced, append([]string{why}, card.Reasons...)
@@ -77,6 +97,8 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 		card.Verdict, card.Reasons = domain.VerdictInconclusive, append([]string{"guard:" + guard.GuardHeartbeatLost + ": worker lost"}, card.Reasons...)
 	case trip != "":
 		card.Verdict, card.Reasons = domain.VerdictFail, append([]string{"guard:" + trip}, card.Reasons...)
+	case stopped:
+		card.Verdict, card.Reasons = domain.VerdictInconclusive, append([]string{"stopped: operator stop"}, card.Reasons...)
 	case resendIncon != "" && card.Verdict == domain.VerdictPass:
 		card.Verdict, card.Reasons = domain.VerdictInconclusive, []string{resendIncon}
 	}
@@ -150,7 +172,9 @@ func (r *run) ticketInputs(ledger []domain.LaneRow, hist []oscar.HistoryRecord, 
 	in := score.TicketInputs{Incidents: map[string][]targetops.Incident{}, Bound: map[string]bool{}}
 	seen := map[string]bool{}
 	for _, row := range ledger {
-		if row.Kind == "firing" && row.Ticket && row.Done && row.Status/100 == 2 && !seen[row.Identity] {
+		// Accepted ticketed firings, plus ones with an unknown outcome (they may
+		// have created an incident; with none found they score as Unknown).
+		if row.Kind == "firing" && row.Ticket && (row.Done && row.Status/100 == 2 || unknownOutcome(row)) && !seen[row.Identity] {
 			seen[row.Identity] = true
 			in.Expected = append(in.Expected, row.Identity)
 		}
@@ -241,4 +265,33 @@ func (r *run) resendCases(ctx context.Context, receipts []targetops.Receipt, inc
 		out = append(out, c)
 	}
 	return out
+}
+
+// unknownOutcome is a ledger row sent without a definite answer.
+func unknownOutcome(row domain.LaneRow) bool {
+	switch row.ErrorClass {
+	case lane.ErrClassTimeout, lane.ErrClassNetwork, lane.ErrClassCancelled:
+		return true
+	}
+	return !row.SentAt.IsZero() && row.Status == 0 && !row.Missed
+}
+
+// crossCheckLedger compares accepted ledger rows with the worker's own
+// accepted count (Status.Sent + Status.Resolved): the planned tickets come
+// from the ledger, so a short ledger must not pass.
+func (r *run) crossCheckLedger(ctx context.Context, ledger []domain.LaneRow) {
+	st, err := r.e.d.Worker.Status(ctx, r.laneID)
+	if err != nil {
+		r.noteMissing("worker status for the ledger cross-check: " + err.Error())
+		return
+	}
+	accepted := 0
+	for _, row := range ledger {
+		if row.Done && row.Status/100 == 2 {
+			accepted++
+		}
+	}
+	if accepted != st.Sent+st.Resolved {
+		r.noteMissing(fmt.Sprintf("ledger has %d accepted rows, worker reports %d", accepted, st.Sent+st.Resolved))
+	}
 }

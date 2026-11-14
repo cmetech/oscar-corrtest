@@ -15,6 +15,7 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/workerapi"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
+	"github.com/cmetech/oscar-corrtest/internal/oscar"
 	corr "github.com/cmetech/oscar-corrtest/internal/scenario"
 )
 
@@ -62,7 +63,7 @@ func (r *run) isolate(ctx context.Context) error {
 		if strings.EqualFold(n.Name, r.e.d.CampaignNotifier) {
 			r.sinkID = n.ID
 		}
-		if n.Status == "enabled" && !containsFold(keep, n.Name) {
+		if n.Status != "disabled" && !containsFold(keep, n.Name) {
 			external = append(external, n)
 		}
 	}
@@ -162,6 +163,9 @@ func (r *run) createDrafts(ctx context.Context) error {
 			return pol.Revision, err
 		})
 		if err != nil {
+			if definite4xx(err) { // the create was refused, so nothing exists to clean up
+				_ = r.restored(stable, intent)
+			}
 			return fmt.Errorf("draft %s: %w", p.Key, err)
 		}
 		if _, err := r.record(stable, kindPolicyCreate, pol.ID, policyPrior{pol.ID, name, nid, p.Action}); err != nil {
@@ -173,6 +177,14 @@ func (r *run) createDrafts(ctx context.Context) error {
 		r.policies = append(r.policies, &policyState{spec: p, id: pol.ID, name: name, notifierID: nid})
 	}
 	return nil
+}
+
+// definite4xx reports a request the server definitely refused (4xx).
+func definite4xx(err error) bool {
+	var me *oscar.MachineError
+	var conflict *targetops.ConflictError
+	return errors.As(err, &conflict) || errors.Is(err, targetops.ErrRevisionMismatch) ||
+		errors.As(err, &me) && me.StatusCode >= 400 && me.StatusCode < 500
 }
 
 // withRevision runs op with the notifier/action's current revision. A stale
@@ -341,10 +353,13 @@ func (r *run) correlation(ctx context.Context) {
 
 // correlate executes one case document through the runtime and links it.
 //
-// Ticket path (C15): the compiler's synthetic parent carries only the fixed
-// identityLabels (compiler.go RulePlan.EmitLabels), so rule plans cannot put
-// labels on the parent. create_ticket=snow therefore goes on the source
-// alerts (Case.Labels) for the ticketed patterns (flood, threshold).
+// Ticket path (C15, ruling C27): the compiler's synthetic parent carries only
+// the fixed identityLabels (compiler.go RulePlan.EmitLabels), so rule plans
+// cannot put labels on the parent. For the ticketed patterns (flood,
+// threshold) create_ticket=snow goes on ONE source alert per trigger case:
+// its first firing event. That bounds PDI volume. Ticketed runs are linked
+// as "setB_ticket:<pattern>" so drain and recovery can find their incidents
+// by the run's short token.
 func (r *run) correlate(ctx context.Context, ref scenario.CaseRef, kind string, ticket bool) {
 	stable := context.WithoutCancel(ctx)
 	r.mu.Lock()
@@ -356,14 +371,8 @@ func (r *run) correlate(ctx context.Context, ref scenario.CaseRef, kind string, 
 	cr := score.CorrRun{Verdict: domain.VerdictError, Cleanup: domain.CleanupDirty}
 	if err == nil {
 		if ticket {
-			for i := range doc.Cases {
-				labels := map[string]string{}
-				for k, v := range doc.Cases[i].Labels {
-					labels[k] = v
-				}
-				labels["create_ticket"] = "snow"
-				doc.Cases[i].Labels = labels
-			}
+			ticketFirstTrigger(&doc)
+			kind = setBTicketRun + ref.Pattern
 		}
 		var res domain.Run
 		res, err = r.e.d.Correlate(ctx, r.e.d.TargetID, doc, correlationRun)
@@ -382,4 +391,32 @@ func (r *run) correlate(ctx context.Context, ref scenario.CaseRef, kind string, 
 	r.mu.Lock()
 	r.corrRuns = append(r.corrRuns, cr)
 	r.mu.Unlock()
+}
+
+// ticketFirstTrigger labels the first firing event of each trigger
+// (positive) case with create_ticket=snow.
+func ticketFirstTrigger(doc *corr.Scenario) {
+	for i := range doc.Cases {
+		c := &doc.Cases[i]
+		if c.Polarity != "positive" {
+			continue
+		}
+		if len(c.Events) == 0 { // Repeat cases: expand exactly as the compiler does
+			for range c.Repeat {
+				c.Events = append(c.Events, corr.Event{Role: c.Role, Status: "firing"})
+			}
+			c.Repeat, c.Role = 0, ""
+		}
+		for j := range c.Events {
+			if strings.EqualFold(c.Events[j].Status, "resolved") {
+				continue
+			}
+			labels := map[string]string{"create_ticket": "snow"}
+			for k, v := range c.Events[j].Labels {
+				labels[k] = v
+			}
+			c.Events[j].Labels = labels
+			break
+		}
+	}
 }

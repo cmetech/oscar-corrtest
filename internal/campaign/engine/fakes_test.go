@@ -119,11 +119,18 @@ type fakeOSCAR struct {
 	posts      map[string]int                 // cohort firing posts per alertname
 	laneFires  []time.Time
 	allFirings int
-	restartAt  time.Time // probe reports a restart from here
-	ambiguous  string    // first cohort post of this alertname has an unknown outcome
-	correlates atomic.Int32
-	slow       time.Duration
-	onCorr     func()
+	restartAt  time.Time             // probe reports a restart from here
+	ambiguous  string                // first cohort post of this alertname has an unknown outcome
+	corrInc    []*targetops.Incident // set B source-alert incidents
+	// fault injection
+	withholdComments bool  // resolves never get OSCAR's comment
+	sinkErr          bool  // Receipts fails
+	failEnable       int   // next N notifier enables fail
+	draftErr         error // CreateDraft fails with this
+	db               *storage.Database
+	correlates       atomic.Int32
+	slow             time.Duration
+	onCorr           func()
 }
 
 func newFakeOSCAR(t *testing.T, clock *scaledClock, s scenario.Scenario) *fakeOSCAR {
@@ -170,7 +177,7 @@ func (f *fakeOSCAR) ingest(labels map[string]string, resolved, lane bool) {
 		if h := f.history[name]; h != nil {
 			h.Status = "resolved"
 		}
-		if inc := f.incidents[name]; inc != nil {
+		if inc := f.incidents[name]; inc != nil && !f.withholdComments {
 			inc.Comments = append(inc.Comments, targetops.Comment{Value: "[OSCAR AUTO-UPDATE 1] Alert has been resolved"})
 		}
 		return
@@ -212,6 +219,10 @@ func (f *fakeOSCAR) SetNotifier(_ context.Context, id string, on bool) (targetop
 	if n == nil {
 		return targetops.Notifier{}, errors.New("no notifier")
 	}
+	if on && f.failEnable > 0 {
+		f.failEnable--
+		return targetops.Notifier{}, errors.New("transient 502")
+	}
 	n.Status = statusWord(on)
 	return *n, nil
 }
@@ -228,6 +239,9 @@ func (f *fakeOSCAR) bump(nid, action string, rev int) (int, error) {
 func (f *fakeOSCAR) CreateDraft(_ context.Context, def targetops.PolicyDefinition, rev int) (targetops.Policy, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.draftErr != nil {
+		return targetops.Policy{}, f.draftErr
+	}
 	nr, err := f.bump(def.NotifierID, def.Action, rev)
 	if err != nil {
 		return targetops.Policy{}, err
@@ -359,9 +373,46 @@ func (f *fakeOSCAR) OpenCampaignIncidents(context.Context, string) ([]targetops.
 	return out, nil
 }
 
+func (f *fakeOSCAR) OpenCorrTestIncidents(_ context.Context, pattern, token string) ([]targetops.Incident, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []targetops.Incident
+	for _, kind := range []string{"TRIGGER", "NON-TRIGGER"} {
+		prefix := "[CORRTEST][" + pattern + "][" + kind + "][" + strings.ToUpper(token) + "]"
+		for _, inc := range f.corrInc {
+			if strings.HasPrefix(inc.ShortDescription, prefix) && inc.State != "6" && inc.State != "7" {
+				out = append(out, *inc)
+			}
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeOSCAR) ListPolicies(_ context.Context, nid, action, name string) ([]targetops.PolicyItem, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []targetops.PolicyItem
+	for id, p := range f.policies {
+		if !p.deleted && p.def.NotifierID == nid && p.def.Action == action && strings.Contains(p.def.Name, name) {
+			st := "draft"
+			if p.enabled {
+				st = "active"
+			}
+			out = append(out, targetops.PolicyItem{ID: id, Name: p.def.Name, Status: st})
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeOSCAR) Resolve(_ context.Context, number, _ string) (targetops.Incident, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	for _, inc := range f.corrInc {
+		if inc.Number == number {
+			inc.State = "6"
+			return *inc, nil
+		}
+	}
 	for _, inc := range f.incidents {
 		if inc.Number == number {
 			inc.State = "6"
@@ -376,6 +427,9 @@ func (f *fakeOSCAR) Resolve(_ context.Context, number, _ string) (targetops.Inci
 func (f *fakeOSCAR) Receipts(context.Context, string, string, time.Time) ([]targetops.Receipt, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.sinkErr {
+		return nil, errors.New("sink unavailable")
+	}
 	out := append([]targetops.Receipt{}, f.receipts...)
 	for name := range f.cohort {
 		spec, origin, exp := f.expected(name)
@@ -433,26 +487,56 @@ func (f *fakeOSCAR) probe(context.Context) (targetops.ProbeResult, error) {
 	return targetops.ProbeResult{Containers: []targetops.ProbeContainer{{Name: "oscar-notifier-1", RestartCount: restarts}}}, nil
 }
 
+// correlate stands in for the runtime runner: it stores a real run row, opens
+// an incident per create_ticket source (compiler summary format) and adds
+// OSCAR's resolution comment when the run's cleanup resolves its sources.
 func (f *fakeOSCAR) correlate(ctx context.Context, _ string, doc corr.Scenario, _ string) (domain.Run, error) {
 	n := f.correlates.Add(1)
 	if f.onCorr != nil {
 		f.onCorr()
 	}
 	start := f.clock.Now()
+	id := fmt.Sprintf("crt_%08dABCDEFGHJKMNPQRS", n)
+	short := id[4:12]
+	if err := f.db.CreateRun(context.WithoutCancel(ctx), domain.Run{ID: id, ShortToken: short, Status: domain.RunQueued,
+		CleanupStatus: domain.CleanupNotRequired, HarnessVersion: "test", CreatedAt: start, UpdatedAt: start}); err != nil {
+		f.t.Errorf("create run: %v", err)
+	}
+	var mine []*targetops.Incident
+	f.mu.Lock()
+	for _, c := range doc.Cases {
+		for _, e := range c.Events {
+			if e.Labels["create_ticket"] == "snow" {
+				inc := &targetops.Incident{Number: fmt.Sprintf("INC9%06d", len(f.corrInc)+1), State: "1",
+					ShortDescription: fmt.Sprintf("[CORRTEST][%s][TRIGGER][%s] %s: source alert 1 of 2", doc.Pattern, short, c.Name)}
+				f.corrInc = append(f.corrInc, inc)
+				mine = append(mine, inc)
+			}
+		}
+	}
+	f.mu.Unlock()
+	defer func() {
+		f.mu.Lock()
+		for _, inc := range mine {
+			inc.Comments = append(inc.Comments, targetops.Comment{Value: "[OSCAR AUTO-UPDATE 1] Alert has been resolved"})
+		}
+		f.mu.Unlock()
+	}()
 	d := 3 * time.Second
 	if f.slow > 0 {
 		d = f.slow
 	}
 	f.clock.SleepUntil(ctx, start.Add(d))
 	end := f.clock.Now()
-	return domain.Run{ID: fmt.Sprintf("run-%d", n), Verdict: domain.VerdictPass, CleanupStatus: domain.CleanupClean, StartedAt: &start, EndedAt: &end}, nil
+	return domain.Run{ID: id, ShortToken: short, Verdict: domain.VerdictPass, CleanupStatus: domain.CleanupClean, StartedAt: &start, EndedAt: &end}, nil
 }
 
 // fakeWorker is the in-process worker: the real C7 Manager, reachable until
 // down is set (then every call fails like a lost network).
 type fakeWorker struct {
-	m    *worker.Manager
-	down atomic.Bool
+	m      *worker.Manager
+	down   atomic.Bool
+	onStop func()
 }
 
 var errDown = errors.New("dial tcp: connection refused")
@@ -478,6 +562,9 @@ func (w *fakeWorker) Status(ctx context.Context, id string) (workerapi.LaneStatu
 func (w *fakeWorker) Stop(ctx context.Context, id string) (workerapi.LaneStatus, error) {
 	if w.down.Load() {
 		return workerapi.LaneStatus{}, errDown
+	}
+	if w.onStop != nil {
+		w.onStop()
 	}
 	if err := w.m.Stop(ctx, id); err != nil {
 		return workerapi.LaneStatus{}, err
@@ -520,6 +607,7 @@ func newHarness(t *testing.T) *harness {
 	clock := newClock()
 	s := testScenario()
 	f := newFakeOSCAR(t, clock, s)
+	f.db = db
 	target := domain.Target{ID: "t1", BaseURL: f.srv.URL}
 	m := worker.NewManager(laneStore{storage.NewLaneLedger(db), db}, target, clock, 30*time.Second)
 	t.Cleanup(m.Shutdown)
@@ -600,6 +688,11 @@ func (h *harness) assertRestored() {
 	for name, inc := range f.incidents {
 		if inc.State != "6" && inc.State != "7" {
 			h.t.Errorf("incident %s for %s not closed (state %s)", inc.Number, name, inc.State)
+		}
+	}
+	for _, inc := range f.corrInc {
+		if inc.State != "6" {
+			h.t.Errorf("set B incident %s (%s) not closed", inc.Number, inc.ShortDescription)
 		}
 	}
 	for name, h2 := range f.history {

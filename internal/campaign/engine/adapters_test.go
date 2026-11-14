@@ -3,18 +3,23 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/campaign"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/oscar"
 	storage "github.com/cmetech/oscar-corrtest/internal/persistence/sqlite"
+	corr "github.com/cmetech/oscar-corrtest/internal/scenario"
 )
 
 // promFake answers Query from a table keyed by PromQL text.
@@ -79,13 +84,19 @@ func TestAdapterFreshness(t *testing.T) {
 func TestAdapterHostsDownAndHeadroom(t *testing.T) {
 	q := DefaultPrecheckQueries
 	a := adapter(map[string]targetops.Vector{
-		q.HostsDown:   {sample(map[string]string{"instance": "hl02:9100"}, 0, 0)},
+		q.HostsDown:   {sample(map[string]string{"instance": "hl02:9100"}, 0, 0), sample(map[string]string{"instance": "hl01:9100"}, 1, 0)},
 		q.DiskFreePct: {sample(nil, 42, 0)},
 		q.MemAvailPct: {sample(nil, 61, 0)},
 	})
 	down, err := a.HostsDown(context.Background())
 	if err != nil || !reflect.DeepEqual(down, []string{"hl02:9100"}) {
 		t.Fatalf("hosts down %v %v", down, err)
+	}
+	if _, err := adapter(nil).HostsDown(context.Background()); err == nil {
+		t.Fatal("an empty up{job=node} result must be an error (fail closed)")
+	}
+	if _, err := adapter(nil).ScrapeDown(context.Background()); err == nil {
+		t.Fatal("an empty up result must be an error (fail closed)")
 	}
 	disk, mem, err := a.TargetHeadroom(context.Background())
 	if err != nil || disk != 42 || mem != 61 {
@@ -223,5 +234,72 @@ func TestPostAlertUnknownOutcomeIsStatusZero(t *testing.T) {
 	time.Sleep(time.Millisecond)
 	if st, err := tgt.PostAlert(ctx, a); err == nil || st != 0 {
 		t.Fatalf("timed-out post must be status 0 (unknown), got %d %v", st, err)
+	}
+}
+
+type stubHost struct {
+	db  *storage.Database
+	url string
+	err error
+}
+
+func (h stubHost) CampaignDatabase() *storage.Database { return h.db }
+func (h stubHost) CampaignTarget(context.Context, string) (domain.Target, *oscar.Client, error) {
+	if h.err != nil {
+		return domain.Target{}, nil, h.err
+	}
+	t := domain.Target{ID: "t1", APIProfile: "public-v1", BaseURL: h.url + "/ext/mw"}
+	c, err := oscar.New(t, oscar.Options{Getenv: func(string) string { return "k" }})
+	return t, c, err
+}
+func (stubHost) ExecuteScenarioForCampaign(context.Context, string, corr.Scenario, string) (domain.Run, error) {
+	return domain.Run{}, nil
+}
+
+func TestNewFromConfig(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	token := write("token", "secret")
+	cred := write("snow.json", `{"username":"u","password":"p"}`)
+	fo := filepath.Join(dir, "fo")
+	_ = os.Mkdir(fo, 0o700)
+	for i := 1; i <= 4; i++ {
+		_ = os.WriteFile(filepath.Join(fo, fmt.Sprintf("fo-%02d.json", i)), []byte(`{"api_key":"k"}`), 0o600)
+	}
+	good := campaign.Config{TargetID: "t1", WorkerURL: "https://mini:8443", WorkerTokenFile: token, SinkURL: "https://mini:9443",
+		SinkAdminTokenFile: token, MetricsURL: "https://vm:8428", MetricsCredentialFile: token, SNOWInstanceURL: "https://dev.service-now.com",
+		SNOWCredentialFile: cred, FrontOfficeDir: fo, ProbeHost: "oscar", ProbeKeyFile: token}
+	db := testDB(t)
+	host := stubHost{db: db, url: "https://oscar.home.arpa"}
+	for _, tc := range []struct {
+		name string
+		edit func(*campaign.Config)
+		host stubHost
+		ok   bool
+	}{
+		{"valid", func(*campaign.Config) {}, host, true},
+		{"unknown target", func(*campaign.Config) {}, stubHost{db: db, err: errors.New("not found")}, false},
+		{"missing worker token", func(c *campaign.Config) { c.WorkerTokenFile = filepath.Join(dir, "nope") }, host, false},
+		{"missing snow credential", func(c *campaign.Config) { c.SNOWCredentialFile = filepath.Join(dir, "nope") }, host, false},
+		{"short front-office dir", func(c *campaign.Config) { c.FrontOfficeDir = dir }, host, false},
+		{"bad sink CA", func(c *campaign.Config) { c.SinkCAFile = token }, host, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := good
+			tc.edit(&cfg)
+			e, err := NewFromConfig(context.Background(), cfg, tc.host)
+			if tc.ok != (err == nil) {
+				t.Fatalf("err %v", err)
+			}
+			if tc.ok && (e.d.CampaignNotifier != "CAMPAIGN_SINK" || e.d.IngestURL != "https://oscar.home.arpa" || len(e.d.FrontOfficeUsers) != 4 || e.d.Precheck == nil) {
+				t.Fatalf("deps %+v", e.d)
+			}
+		})
 	}
 }

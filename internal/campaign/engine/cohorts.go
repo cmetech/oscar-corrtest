@@ -131,6 +131,20 @@ func (r *run) deliver(ctx context.Context, m *cohortMember, tick time.Time) {
 	}
 }
 
+// reresolveCohorts re-posts every cohort resolve (in-process members, or the
+// recorded ones during recovery).
+func (r *run) reresolveCohorts(ctx context.Context) {
+	ms := r.members()
+	if len(ms) == 0 {
+		r.recoverCohorts(ctx)
+		return
+	}
+	for _, m := range ms {
+		m.resolved = false
+	}
+	r.resolveCohorts(ctx)
+}
+
 // resolveCohorts resolves every delivered cohort member now.
 func (r *run) resolveCohorts(ctx context.Context) {
 	for _, m := range r.members() {
