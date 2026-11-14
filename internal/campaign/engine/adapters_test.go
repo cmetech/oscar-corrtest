@@ -17,6 +17,7 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/campaign"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
+	"github.com/cmetech/oscar-corrtest/internal/evidence"
 	"github.com/cmetech/oscar-corrtest/internal/oscar"
 	storage "github.com/cmetech/oscar-corrtest/internal/persistence/sqlite"
 	corr "github.com/cmetech/oscar-corrtest/internal/scenario"
@@ -251,6 +252,9 @@ func (h stubHost) CampaignTarget(context.Context, string) (domain.Target, *oscar
 	t := domain.Target{ID: "t1", APIProfile: "public-v1", BaseURL: h.url + "/ext/mw"}
 	c, err := oscar.New(t, oscar.Options{Getenv: func(string) string { return "k" }})
 	return t, c, err
+}
+func (stubHost) ExportRun(context.Context, string, string) (evidence.Result, error) {
+	return evidence.Result{}, nil
 }
 func (stubHost) ExecuteScenarioForCampaign(context.Context, string, corr.Scenario, string) (domain.Run, error) {
 	return domain.Run{}, nil

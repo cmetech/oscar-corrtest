@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OSCAR campaign {{.ID}}</title><style>
+body{font:16px system-ui,sans-serif;line-height:1.5;max-width:70rem;margin:2rem auto;padding:0 1rem;color:#172033;background:#fff}
+dl{display:grid;grid-template-columns:max-content 1fr;gap:.5rem 1rem}dt{font-weight:700}table{border-collapse:collapse}td,th{border:1px solid #9aa5b8;padding:.25rem .6rem;text-align:left}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f4f6fa;padding:1rem;border-radius:.5rem}
+@media(prefers-color-scheme:dark){body{color:#edf2ff;background:#111827}pre{background:#1f2937}}
+</style></head><body><h1>OSCAR campaign evidence</h1>
+<dl><dt>Campaign</dt><dd>{{.ID}}</dd><dt>Scenario</dt><dd>{{.Scenario}} ({{.Hash}})</dd><dt>Status</dt><dd>{{.Status}}</dd><dt>Verdict</dt><dd>{{.Verdict}}</dd>
+<dt>Cleanup</dt><dd>{{.Cleanup}}</dd><dt>Comparable</dt><dd>{{.Comparable}}</dd><dt>Run by</dt><dd>{{.RunBy}} via {{.Trigger}}</dd></dl>
+{{if .Reasons}}<h2>Reasons</h2><ul>{{range .Reasons}}<li>{{.}}</li>{{end}}</ul>{{end}}
+{{if .Headlines}}<h2>Headlines</h2><table><tr><th>Name</th><th>Value</th></tr>{{range .Headlines}}<tr><td>{{.Name}}</td><td>{{.Value}}</td></tr>{{end}}</table>{{end}}
+<h2>Guards</h2><pre>{{.Guards}}</pre>
+<h2>Scorecard</h2><pre>{{.Scorecard}}</pre>
+<h2>Correlation runs</h2><ul>{{range .Runs}}<li>{{.}}</li>{{else}}<li>none</li>{{end}}</ul>
+</body></html>

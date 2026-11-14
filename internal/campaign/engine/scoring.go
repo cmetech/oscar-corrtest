@@ -70,6 +70,7 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 	if resendIncon == "" {
 		in.Resend = r.resendCases(ctx, in.Receipts, incidents)
 	}
+	report["tickets"], report["resend"], report["frontoffice"], report["cohorts"] = in.Tickets, in.Resend, r.foSnapshot(), r.cohortSnapshot()
 	for _, p := range r.s.Resend {
 		in.PlannedResend += p.Cohort
 	}

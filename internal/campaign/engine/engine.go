@@ -22,6 +22,7 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/workerapi"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
+	"github.com/cmetech/oscar-corrtest/internal/evidence"
 	"github.com/cmetech/oscar-corrtest/internal/oscar"
 	"github.com/cmetech/oscar-corrtest/internal/runtime"
 	corr "github.com/cmetech/oscar-corrtest/internal/scenario"
@@ -130,6 +131,8 @@ type Deps struct {
 	FrontOfficeHTTP  *http.Client
 	FrontOfficeUsers []frontoffice.User
 	ReportDir        string // ledger files; default os.TempDir()
+	// ExportRun writes a correlation run's standard bundle (Runtime.ExportRun).
+	ExportRun func(ctx context.Context, runID, destination string) (evidence.Result, error)
 }
 
 // Engine implements runtime.CampaignEngine.
@@ -238,6 +241,7 @@ func (e *Engine) Run(ctx context.Context, id string, o runtime.CampaignOptions) 
 	ok, comparable, reason := precheck.Startable(results, o.Acknowledged)
 	r.comparable = comparable
 	detail, _ := json.Marshal(map[string]any{"results": results, "reason": reason, "comparable": comparable})
+	_ = e.d.Store.AppendCampaignEvent(stable, id, precheckEvent, "info", "pre-check results", detail, r.now())
 	if err := e.d.Store.RecordPrecheck(stable, id, domain.PrecheckResult{Passed: ok, Detail: detail, At: r.now()}); err != nil {
 		return fmt.Errorf("record pre-checks: %w", err)
 	}
@@ -260,6 +264,7 @@ func (e *Engine) Run(ctx context.Context, id string, o runtime.CampaignOptions) 
 
 const (
 	scenarioEvent = "campaign.scenario"
+	precheckEvent = "campaign.precheck"
 	maxEvents     = 1 << 20 // read the whole event log
 )
 

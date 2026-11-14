@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/cmetech/oscar-corrtest/internal/evidence"
 	"time"
 
 	campaignscenario "github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
@@ -215,4 +216,21 @@ func (r *Runtime) recoverCampaigns(ctx context.Context) error {
 		}
 	}()
 	return nil
+}
+
+// CampaignExporter is implemented by an engine that can write campaign bundles.
+type CampaignExporter interface {
+	ExportCampaign(ctx context.Context, campaignID, destination string) (evidence.Result, error)
+}
+
+// ExportCampaign writes the evidence bundle of a completed campaign.
+func (r *Runtime) ExportCampaign(ctx context.Context, id, destination string) (evidence.Result, error) {
+	r.activeMu.Lock()
+	e := r.campaignEngine
+	r.activeMu.Unlock()
+	x, ok := e.(CampaignExporter)
+	if !ok {
+		return evidence.Result{}, errors.New("campaign export unavailable")
+	}
+	return x.ExportCampaign(ctx, id, destination)
 }

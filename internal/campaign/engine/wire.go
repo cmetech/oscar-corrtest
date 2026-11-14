@@ -20,6 +20,7 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/campaign/workerclient"
 	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
+	"github.com/cmetech/oscar-corrtest/internal/evidence"
 	"github.com/cmetech/oscar-corrtest/internal/oscar"
 	storage "github.com/cmetech/oscar-corrtest/internal/persistence/sqlite"
 	corr "github.com/cmetech/oscar-corrtest/internal/scenario"
@@ -29,6 +30,7 @@ import (
 type Host interface {
 	CampaignDatabase() *storage.Database
 	CampaignTarget(ctx context.Context, targetID string) (domain.Target, *oscar.Client, error)
+	ExportRun(ctx context.Context, runID, destination string) (evidence.Result, error)
 	ExecuteScenarioForCampaign(ctx context.Context, targetID string, s corr.Scenario, mode string) (domain.Run, error)
 }
 
@@ -91,7 +93,7 @@ func NewFromConfig(ctx context.Context, cfg campaign.Config, host Host) (*Engine
 		notifier = "CAMPAIGN_SINK"
 	}
 	d := Deps{Store: db, Worker: wc, Target: oscarTarget{oc}, SNOW: snow, Sink: sink, Metrics: metrics, Probe: probe,
-		Correlate: host.ExecuteScenarioForCampaign, TargetID: target.ID, IngestURL: root, CampaignNotifier: notifier,
+		Correlate: host.ExecuteScenarioForCampaign, ExportRun: host.ExportRun, TargetID: target.ID, IngestURL: root, CampaignNotifier: notifier,
 		FrontOfficeURL: root, FrontOfficeHTTP: targetHTTP, FrontOfficeUsers: users}
 	d.Precheck = func(ctx context.Context, s scenario.Scenario) []precheck.Result {
 		a := &PrecheckAdapter{ID: campaignIDFrom(ctx), Clock: clock, Oscar: oc, Metrics: metrics, ProbeFn: probe, WorkerInfoFn: wc.Info,
