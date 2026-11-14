@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Go 1.27.3 or newer
+- Go 1.27.4 or newer
 - GNU Make
 - Git
 - GNU tar for release packaging (`tar` on Linux, commonly `gtar` from Homebrew on macOS)
