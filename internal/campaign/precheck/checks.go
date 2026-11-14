@@ -173,7 +173,7 @@ func b3(ctx context.Context, d Deps, s scenario.Scenario) Result {
 	}
 	var probs []string
 	for _, q := range qs {
-		if q.Depth > s.Precheck.IdleQueueDepth || q.OldestAge > s.Precheck.IdleQueueAge {
+		if !s.Precheck.QueueIdle(float64(q.Depth)) || q.OldestAge > s.Precheck.IdleQueueAge {
 			probs = append(probs, fmt.Sprintf("queue %s depth %d age %s", q.Name, q.Depth, q.OldestAge))
 		}
 	}

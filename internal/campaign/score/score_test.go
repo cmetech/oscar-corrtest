@@ -342,3 +342,24 @@ func TestDefinite5xxReported(t *testing.T) {
 		t.Fatalf("baseline %+v", b)
 	}
 }
+
+// Ruling C37: drained means every queue back at or below the idle depth
+// (pre-check B3's threshold), not exactly 0.
+func TestDrainedAtIdleDepth(t *testing.T) {
+	in := good()
+	in.Precheck = scenario.PrecheckLimits{IdleQueueDepth: 50}
+	in.QueueDepth["q"] = dense(func(s float64) float64 {
+		if s < 120 {
+			return 400
+		}
+		return 40 // a steady background level, never 0
+	})
+	c := Compute(in, lim)
+	if q := c.Queue["q"]; !q.Drained || q.DrainSeconds > 120 || c.Verdict != domain.VerdictPass {
+		t.Fatalf("queue %+v verdict %s reasons %v", q, c.Verdict, c.Reasons)
+	}
+	in.QueueDepth["q"] = flat(60)
+	if c := Compute(in, lim); c.Queue["q"].Drained {
+		t.Fatal("a queue above the idle depth is not drained")
+	}
+}

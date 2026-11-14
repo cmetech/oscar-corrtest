@@ -145,6 +145,7 @@ type Inputs struct {
 	FrontOffice     map[string][]FOSample // API-level only
 	Tasks, PreTasks []targetops.TaskRun
 	GuardStopped    bool
+	Precheck        scenario.PrecheckLimits // QueueIdle decides drained (ruling C37)
 	NotRun          []string
 }
 
@@ -218,10 +219,10 @@ func queueStats(in Inputs, incon *[]string) map[string]QueueStats {
 			*incon = append(*incon, "no accepted resolve to time the drain from")
 			continue
 		}
-		// the series is covered to the end of drain, so no zero means undrained
+		// the series is covered to the end of drain, so never idle means undrained
 		qs.DrainSeconds = depth[len(depth)-1].Time - lastResolve
 		for _, p := range depth {
-			if p.Time >= lastResolve && p.Value <= 0 {
+			if p.Time >= lastResolve && in.Precheck.QueueIdle(p.Value) {
 				qs.Drained, qs.DrainSeconds = true, p.Time-lastResolve
 				break
 			}

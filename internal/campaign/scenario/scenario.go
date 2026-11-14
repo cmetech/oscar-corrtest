@@ -88,6 +88,12 @@ type PrecheckLimits struct {
 	HistoryRowsAdvisory int64         `json:"historyRowsAdvisory"`
 }
 
+// QueueIdle is the one per-queue idle rule: pre-check B3 (quiet target), the
+// drain wait and the scorecard's drained flag all use it (ruling C37).
+func (p PrecheckLimits) QueueIdle(depth float64) bool {
+	return depth <= float64(p.IdleQueueDepth)
+}
+
 type Scenario struct {
 	ID          string          `json:"id"`
 	Version     string          `json:"version"`

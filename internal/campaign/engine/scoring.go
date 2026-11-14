@@ -48,7 +48,7 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 	in := score.Inputs{PlannedBaseline: r.plannedBaseline(), ScenarioHash: r.s.Hash(), Trigger: r.opts.Trigger, RunBy: r.opts.RunBy, Comparable: r.comparable, CleanupClean: clean,
 		Start: r.t0, End: end, Phases: r.s.Phases, Ledger: ledger, Correlation: r.corrRuns, NotRun: r.notRun,
 		PlannedCorrelation: r.plannedCorr, FrontOffice: r.fo, PreTasks: r.preTasks,
-		GuardStopped: trip != "" && !lost}
+		GuardStopped: trip != "" && !lost, Precheck: r.s.Precheck}
 	var err error
 	if in.History, err = r.e.d.Target.History(ctx, r.id, r.t0, end); err != nil {
 		r.noteMissing("history: " + err.Error())

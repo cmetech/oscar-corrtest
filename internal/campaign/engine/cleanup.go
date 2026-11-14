@@ -132,20 +132,19 @@ func (r *run) finishAfterDrain(ctx context.Context, forced domain.Verdict, why s
 
 func mustJSON(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
 
-// waitQueues waits (<= 30 min) for queue depth to return to the idle limit.
+// waitQueues waits (<= 30 min) for every queue to return to the idle depth.
 func (r *run) waitQueues(ctx context.Context) {
-	limit := float64(r.s.Precheck.IdleQueueDepth)
 	deadline := r.now().Add(maxQueueWait)
 	for next := r.now(); next.Before(deadline) && r.e.clock.SleepUntil(ctx, next); next = next.Add(guardEvery) {
 		v, err := r.e.d.Metrics.Query(ctx, queueDepthQuery, r.now())
 		if err != nil {
 			continue
 		}
-		total := 0.0
+		idle := true
 		for _, s := range v {
-			total += s.Value
+			idle = idle && r.s.Precheck.QueueIdle(s.Value)
 		}
-		if total <= limit {
+		if idle {
 			return
 		}
 	}

@@ -325,3 +325,32 @@ func TestNewFromConfig(t *testing.T) {
 		})
 	}
 }
+
+type queueMetrics struct {
+	Metrics
+	depths []float64
+	calls  int
+}
+
+func (q *queueMetrics) Query(context.Context, string, time.Time) (targetops.Vector, error) {
+	q.calls++
+	var v targetops.Vector
+	for i, d := range q.depths {
+		v = append(v, targetops.Sample{Metric: map[string]string{"queue": fmt.Sprint("q", i)}, Value: d})
+	}
+	return v, nil
+}
+
+// Ruling C37: waitQueues uses the per-queue idle rule (every queue <= the
+// idle depth), not the sum of all queues.
+func TestWaitQueuesPerQueueRule(t *testing.T) {
+	h := newHarness(t)
+	m := &queueMetrics{depths: []float64{30, 30}} // sum 60 > 50, each queue idle
+	h.deps.Metrics = m
+	r := &run{e: New(h.deps, h.clock), id: h.id, s: h.s}
+	r.s.Precheck.IdleQueueDepth = 50
+	r.waitQueues(context.Background())
+	if m.calls != 1 {
+		t.Fatalf("waitQueues polled %d times; every queue was already idle", m.calls)
+	}
+}
