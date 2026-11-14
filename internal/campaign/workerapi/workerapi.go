@@ -20,6 +20,8 @@ var ErrLaneExists = errors.New("lane already exists")
 type Info struct {
 	Version string
 	Now     time.Time
+	// DiskFreeBytes is the free space where the worker runs; 0 means unknown.
+	DiskFreeBytes uint64
 }
 
 // LaneSpec asks a worker to start one lane. Params is lane-kind specific and is

@@ -169,6 +169,7 @@ func (c *Client) Info(ctx context.Context) (workerapi.Info, error) {
 	var d struct {
 		Version string `json:"version"`
 		Now     string `json:"now"`
+		Disk    uint64 `json:"diskFreeBytes"`
 	}
 	if err := c.call(ctx, c.short, http.MethodGet, "/info", nil, &d); err != nil {
 		return workerapi.Info{}, err
@@ -177,7 +178,7 @@ func (c *Client) Info(ctx context.Context) (workerapi.Info, error) {
 	if err != nil {
 		return workerapi.Info{}, fmt.Errorf("worker info: bad clock %q", d.Now)
 	}
-	return workerapi.Info{Version: d.Version, Now: now}, nil
+	return workerapi.Info{Version: d.Version, Now: now, DiskFreeBytes: d.Disk}, nil
 }
 
 func (c *Client) Start(ctx context.Context, s workerapi.LaneSpec) (workerapi.LaneStatus, error) {

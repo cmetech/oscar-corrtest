@@ -169,7 +169,7 @@ func registerWorkerRoutes(mux *http.ServeMux, wk campaignWorker, post func(strin
 	}
 	mux.HandleFunc("GET "+base+"/info", func(w http.ResponseWriter, r *http.Request) {
 		info := wk.Info(r.Context())
-		apiData(w, http.StatusOK, map[string]string{"version": info.Version, "now": info.Now.UTC().Format("2006-01-02T15:04:05.000Z07:00")})
+		apiData(w, http.StatusOK, map[string]any{"version": info.Version, "now": info.Now.UTC().Format("2006-01-02T15:04:05.000Z07:00"), "diskFreeBytes": info.DiskFreeBytes})
 	})
 	post(base+"/lanes", func(w http.ResponseWriter, r *http.Request, _ string) {
 		var spec workerapi.LaneSpec

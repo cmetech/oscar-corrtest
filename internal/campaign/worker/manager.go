@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/cmetech/oscar-corrtest/internal/campaign/diskfree"
 	"io"
 	"net/url"
 	"strings"
@@ -71,7 +72,8 @@ func NewManager(store Store, target domain.Target, clock lane.Clock, heartbeatTi
 }
 
 func (m *Manager) Info(context.Context) workerapi.Info {
-	return workerapi.Info{Version: version.Current().Version, Now: m.clock.Now().UTC()}
+	free, _ := diskfree.Bytes(".") // 0 = unknown; the pre-check treats that as a failure
+	return workerapi.Info{Version: version.Current().Version, Now: m.clock.Now().UTC(), DiskFreeBytes: free}
 }
 
 func hostOf(raw string) (string, error) {
