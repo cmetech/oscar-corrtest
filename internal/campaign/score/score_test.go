@@ -14,25 +14,49 @@ import (
 
 var t0 = time.Unix(1_800_000_000, 0)
 
-var lim = scenario.Limits{HistoryP95: 40 * time.Second, Drain: 15 * time.Minute, ParentAnonSlopeMiBPerHour: 25,
+var lim = scenario.Limits{HistoryP95: 40 * time.Second, Drain: 15 * time.Minute,
 	ContainerSlopeMiBPerHour: 100, FrontOfficeP95: 2 * time.Second, FrontOfficeP99: 5 * time.Second,
 	CorrelationSuccess: 1, TicketSuccess: 1, ResendSuccess: 1, RegressionPct: 20, QuerySetVersion: "q1"}
 
-func flat(v float64) []Point {
-	return []Point{{Time: float64(t0.Unix()), Value: v}, {Time: float64(t0.Unix()) + 3600, Value: v}}
+func dense(f func(sec float64) float64) []Point {
+	var p []Point
+	for sec := 0.0; sec <= 7200; sec += 60 {
+		p = append(p, Point{Time: float64(t0.Unix()) + sec, Value: f(sec)})
+	}
+	return p
 }
 
+func flat(v float64) []Point { return dense(func(float64) float64 { return v }) }
+
 func slopeSeries(perHour float64) []Point {
-	return []Point{{Time: float64(t0.Unix()), Value: 0}, {Time: float64(t0.Unix()) + 3600, Value: perHour}}
+	return dense(func(sec float64) float64 { return perHour * sec / 3600 })
 }
+
+var worker = map[string]string{"alertmanager": "oscar-alertmanager-alertmanager_worker-1", "taskmanager": "oscar-taskmanager-worker-1",
+	"notifier": "oscar-taskmanager-notifier_worker-1", "history": "oscar-taskmanager-history_worker-1", "handoff": "oscar-taskmanager-history_handoff_worker-1"}
 
 // good returns inputs that pass every gate.
 func good() Inputs {
-	in := Inputs{ScenarioHash: "h", Start: t0, CleanupClean: true, Comparable: true,
-		QueueDepth: map[string][]Point{"q": {{Time: float64(t0.Unix()), Value: 5}, {Time: float64(t0.Unix()) + 60, Value: 0}}},
-		Memory:     map[string]MemSeries{}, FrontOffice: map[string][]FOSample{"grid": {{Seconds: 0.5}}}}
-	for _, r := range Roles {
-		in.Memory[r] = MemSeries{Parent: flat(100), Container: flat(200)}
+	in := Inputs{ScenarioHash: "h", Start: t0, End: t0.Add(2 * time.Hour), CleanupClean: true, Comparable: true,
+		Ledger: []domain.LaneRow{
+			{Kind: "firing", Identity: "a", SentAt: t0, Done: true, Status: 200},
+			{Kind: "resolve", Identity: "a", SentAt: t0.Add(time.Minute), Done: true, Status: 200}},
+		History:  []oscar.HistoryRecord{{AlertName: "a", CreatedAt: t0.Add(5 * time.Second)}},
+		Receipts: []targetops.Receipt{{ReceivedAt: t0.Add(6 * time.Second), Alerts: []targetops.SinkAlert{{AlertName: "a", Status: "firing"}}}},
+		QueueDepth: map[string][]Point{"q": dense(func(s float64) float64 {
+			if s < 60 {
+				return 5
+			}
+			return 0
+		})},
+		QueueAge:    map[string][]Point{"q": flat(0)},
+		Containers:  map[string][]Point{},
+		FrontOffice: map[string][]FOSample{}}
+	for _, n := range worker {
+		in.Containers[n] = flat(200)
+	}
+	for _, a := range FOActions {
+		in.FrontOffice[a] = []FOSample{{Seconds: 0.5}}
 	}
 	return in
 }
@@ -123,9 +147,9 @@ func TestMemoryLimitBoundary(t *testing.T) {
 	for _, tc := range []struct {
 		slope float64
 		want  domain.Verdict
-	}{{25.0, domain.VerdictPass}, {25.1, domain.VerdictFail}} {
+	}{{100.0, domain.VerdictPass}, {100.1, domain.VerdictFail}} {
 		in := good()
-		in.Memory["history"] = MemSeries{Parent: slopeSeries(tc.slope), Container: flat(1)}
+		in.Containers[worker["history"]] = slopeSeries(tc.slope)
 		if c := Compute(in, lim); c.Verdict != tc.want {
 			t.Fatalf("%v: %v %v", tc.slope, c.Verdict, c.Reasons)
 		}
@@ -134,7 +158,7 @@ func TestMemoryLimitBoundary(t *testing.T) {
 
 func TestMissingMetricSeriesIsInconclusive(t *testing.T) {
 	in := good()
-	delete(in.Memory, "handoff")
+	delete(in.Containers, worker["handoff"])
 	if c := Compute(in, lim); c.Verdict != domain.VerdictInconclusive {
 		t.Fatal(c.Verdict, c.Reasons)
 	}
@@ -180,14 +204,22 @@ func TestNotComparableExcludedFromReference(t *testing.T) {
 
 func TestRoleOfLiveNames(t *testing.T) {
 	for name, want := range map[string]string{
-		"oscar-taskmanager-alertmanager-1":      "alertmanager",
-		"oscar-taskmanager-alertmanager_worker": "alertmanager",
-		"oscar-taskmanager-notifier_worker-1":   "notifier",
-		"oscar-taskmanager-worker-1":            "taskmanager",
-		"notifier":                              "notifier",
-		"history":                               "history",
-		"handoff":                               "handoff",
-		"oscar-mysql":                           "",
+		"oscar-alertmanager-alertmanager_worker-1":   "alertmanager",
+		"oscar-taskmanager-alert_hooks_beat-1":       "taskmanager",
+		"oscar-taskmanager-alert_hooks_worker-1":     "taskmanager",
+		"oscar-taskmanager-discovery_worker-1":       "taskmanager",
+		"oscar-taskmanager-history_handoff_worker-1": "handoff",
+		"oscar-taskmanager-history_worker-1":         "history",
+		"oscar-taskmanager-monitor_worker-1":         "taskmanager",
+		"oscar-taskmanager-notifier_worker-1":        "notifier",
+		"oscar-taskmanager-probe_worker-1":           "taskmanager",
+		"oscar-taskmanager-tasks_worker-1":           "taskmanager",
+		"oscar-taskmanager-ticket_control_worker-1":  "taskmanager",
+		"oscar-taskmanager-ticket_pump_worker-1":     "taskmanager",
+		"oscar-taskmanager-worker-1":                 "taskmanager",
+		"oscar-taskmanager-worklog_worker-1":         "taskmanager",
+		"oscar-workflow-airflow-worker-1":            "",
+		"oscarui":                                    "",
 	} {
 		if got := RoleOf(name); got != want {
 			t.Errorf("%s: %q want %q", name, got, want)
@@ -195,12 +227,64 @@ func TestRoleOfLiveNames(t *testing.T) {
 	}
 }
 
+func TestNoEvidenceIsInconclusive(t *testing.T) {
+	in := good()
+	in.PlannedTickets = 5 // plan has tickets, evidence has none
+	if c := Compute(in, lim); c.Verdict != domain.VerdictInconclusive {
+		t.Fatal(c.Verdict, c.Reasons)
+	}
+	in = good()
+	in.History = nil
+	in.Ledger = in.Ledger[1:] // only a resolve: no accepted firing, nothing in History
+	if c := Compute(in, lim); c.Verdict != domain.VerdictInconclusive {
+		t.Fatal(c.Verdict, c.Reasons)
+	}
+}
+
+func TestSparseOrTruncatedSeriesInconclusive(t *testing.T) {
+	in := good()
+	pts := flat(1)
+	in.Containers[worker["notifier"]] = append(append([]Point{}, pts[:10]...), pts[40:]...) // 30 min hole
+	if c := Compute(in, lim); c.Verdict != domain.VerdictInconclusive {
+		t.Fatal(c.Verdict, c.Reasons)
+	}
+	in = good()
+	in.QueueDepth["q"] = flat(5)[:30] // truncated before the drain completed
+	in.QueueAge["q"] = flat(0)[:30]
+	if c := Compute(in, lim); c.Verdict != domain.VerdictInconclusive {
+		t.Fatal(c.Verdict, c.Reasons)
+	}
+}
+
+func TestFrontOfficeActionRequired(t *testing.T) {
+	in := good()
+	delete(in.FrontOffice, "search")
+	if c := Compute(in, lim); c.Verdict != domain.VerdictInconclusive {
+		t.Fatal(c.Verdict, c.Reasons)
+	}
+}
+
+func TestHigherBetterRegressionUsesReferenceBase(t *testing.T) {
+	mk := func(v float64) Scorecard {
+		return Scorecard{Headlines: []Headline{{Name: "r", Value: v, HigherBetter: true}}}
+	}
+	if d := CompareTo(mk(0.8), mk(1)); d[0].Regressed {
+		t.Fatal("exactly 20% worse regressed")
+	}
+	if d := CompareTo(mk(0.79), mk(1)); !d[0].Regressed {
+		t.Fatal("not regressed")
+	}
+}
+
 func TestResendExactMatch(t *testing.T) {
 	p := scenario.PolicySpec{Mode: "time", Interval: time.Minute}
 	ds := []resend.Delivery{{At: 0}, {At: 70 * time.Second}}
-	ok, err := resendOK(ResendCase{Policy: p, Deliveries: ds, Observed: []time.Duration{70 * time.Second}})
+	ok, err := resendOK(ResendCase{Policy: p, Deliveries: ds, Observed: []time.Duration{70*time.Second + 60*time.Second}})
 	if err != nil || !ok {
 		t.Fatal(ok, err)
+	}
+	if ok, _ := resendOK(ResendCase{Policy: p, Deliveries: ds, Observed: []time.Duration{70*time.Second + 61*time.Second}}); ok {
+		t.Fatal("late resend passed")
 	}
 	if ok, _ := resendOK(ResendCase{Policy: p, Deliveries: ds}); ok {
 		t.Fatal("missing resend passed")

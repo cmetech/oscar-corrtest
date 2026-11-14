@@ -65,17 +65,14 @@ func CompareTo(card, ref Scorecard) []Delta {
 			if r.Name != h.Name || r.Value <= 0 {
 				continue
 			}
-			worse, base := h.Value, r.Value
+			// both directions use the reference as the base
+			worse := h.Value - r.Value
 			if h.HigherBetter {
-				worse, base = r.Value, h.Value
-				if base <= 0 { // ratio fell to zero
-					out = append(out, Delta{h.Name, h.Value, r.Value, 100, true})
-					continue
-				}
+				worse = r.Value - h.Value
 			}
-			d := Delta{Name: h.Name, Value: h.Value, Ref: r.Value, WorsePct: (worse - base) / base * 100}
+			d := Delta{Name: h.Name, Value: h.Value, Ref: r.Value, WorsePct: worse / r.Value * 100}
 			// integer-scaled compare so exactly 20% is not regressed
-			d.Regressed = worse*100 > base*(100+pct)
+			d.Regressed = worse*100 > r.Value*pct
 			out = append(out, d)
 		}
 	}

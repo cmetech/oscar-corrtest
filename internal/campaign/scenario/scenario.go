@@ -64,17 +64,16 @@ type FrontOfficeSpec struct {
 }
 
 type Limits struct {
-	HistoryP95                time.Duration `json:"historyP95"`
-	Drain                     time.Duration `json:"drain"`
-	ParentAnonSlopeMiBPerHour float64       `json:"parentAnonSlopeMiBPerHour"`
-	ContainerSlopeMiBPerHour  float64       `json:"containerSlopeMiBPerHour"`
-	FrontOfficeP95            time.Duration `json:"frontOfficeP95"`
-	FrontOfficeP99            time.Duration `json:"frontOfficeP99"`
-	CorrelationSuccess        float64       `json:"correlationSuccess"`
-	TicketSuccess             float64       `json:"ticketSuccess"`
-	ResendSuccess             float64       `json:"resendSuccess"`
-	RegressionPct             float64       `json:"regressionPct"`
-	QuerySetVersion           string        `json:"querySetVersion"`
+	HistoryP95               time.Duration `json:"historyP95"`
+	Drain                    time.Duration `json:"drain"`
+	ContainerSlopeMiBPerHour float64       `json:"containerSlopeMiBPerHour"`
+	FrontOfficeP95           time.Duration `json:"frontOfficeP95"`
+	FrontOfficeP99           time.Duration `json:"frontOfficeP99"`
+	CorrelationSuccess       float64       `json:"correlationSuccess"`
+	TicketSuccess            float64       `json:"ticketSuccess"`
+	ResendSuccess            float64       `json:"resendSuccess"`
+	RegressionPct            float64       `json:"regressionPct"`
+	QuerySetVersion          string        `json:"querySetVersion"`
 }
 
 type PrecheckLimits struct {
@@ -132,7 +131,7 @@ func AlertingDayV1() Scenario {
 		},
 		Redelivery: 60 * time.Second, ResendUntil: 118 * min,
 		FrontOffice: FrontOfficeSpec{Users: 4, Interval: 15 * time.Second, Jitter: 3 * time.Second, SearchEvery: 2 * min},
-		Limits: Limits{HistoryP95: 40 * time.Second, Drain: 15 * min, ParentAnonSlopeMiBPerHour: 25, ContainerSlopeMiBPerHour: 100,
+		Limits: Limits{HistoryP95: 40 * time.Second, Drain: 15 * min, ContainerSlopeMiBPerHour: 100,
 			FrontOfficeP95: 2 * time.Second, FrontOfficeP99: 5 * time.Second, CorrelationSuccess: 1, TicketSuccess: 1, ResendSuccess: 1,
 			RegressionPct: 20, QuerySetVersion: "q1"},
 		Precheck: PrecheckLimits{IdleQueueDepth: 50, IdleQueueAge: 30 * time.Second, ClockSkew: 250 * time.Millisecond,

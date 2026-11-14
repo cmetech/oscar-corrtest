@@ -23,7 +23,7 @@ type Rate struct {
 }
 
 func (r *Rate) finish() {
-	r.Ratio = 1
+	// No evidence is never a pass: Ratio stays 0 and Compute decides from the plan.
 	if r.Expected > 0 {
 		r.Ratio = float64(r.Succeeded) / float64(r.Expected)
 	}
@@ -183,9 +183,10 @@ func reconcileTickets(in TicketInputs) Rate {
 	return r
 }
 
-// ResendCase is one identity: the policy, its deliveries, and the resend
-// offsets (from the initial action) observed in the status, sink or SNOW
-// resend_comment evidence, plus whether the status reported sticky exhaustion.
+// ResendCase is one identity: the policy, its deliveries, and the observed
+// resends from the status, sink or SNOW resend_comment evidence. Observed
+// offsets use the same time frame as the deliveries (offset from the initial
+// action). Exhausted is the status's sticky_exhausted.
 type ResendCase struct {
 	Policy     scenario.PolicySpec
 	Deliveries []resend.Delivery
@@ -196,7 +197,7 @@ type ResendCase struct {
 const resendTolerance = 60 * time.Second
 
 // resendOK: the observed resend count equals the modelled one, exhaustion
-// agrees, and no action came later than interval + 60 s after the previous one.
+// agrees, and each resend is within 60 s of its modelled time (either way).
 func resendOK(c ResendCase) (ok bool, err error) {
 	exp, err := resend.Expect(c.Policy, c.Deliveries)
 	if err != nil {
@@ -205,12 +206,10 @@ func resendOK(c ResendCase) (ok bool, err error) {
 	if len(c.Observed) != len(exp.Resends) || c.Exhausted != exp.Exhausted {
 		return false, nil
 	}
-	prev := exp.InitialAt
 	for i, o := range c.Observed {
-		if c.Policy.Interval > 0 && o-prev > c.Policy.Interval+resendTolerance && o-exp.Resends[i] > resendTolerance {
+		if d := o - exp.Resends[i]; d > resendTolerance || d < -resendTolerance {
 			return false, nil
 		}
-		prev = o
 	}
 	return true, nil
 }
@@ -247,7 +246,7 @@ func reconcileCorrelation(runs []CorrRun) (Rate, []float64) {
 		case c.Verdict == domain.VerdictPass && c.Cleanup == domain.CleanupClean:
 			r.Succeeded++
 			lat = append(lat, c.LatencySeconds)
-		case c.Verdict == domain.VerdictInconclusive:
+		case c.Verdict == domain.VerdictInconclusive: // unknown counts as failure
 			r.Unknown++
 		default:
 			r.Failed++
