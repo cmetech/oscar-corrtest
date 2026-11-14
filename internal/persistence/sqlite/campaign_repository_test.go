@@ -63,7 +63,7 @@ func TestMigration0006AppliesOnTopOf0005(t *testing.T) {
 		t.Fatal(err)
 	}
 	var n, runs int
-	if err := db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 6 {
+	if err := db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 7 {
 		t.Fatalf("n=%d err=%v", n, err)
 	}
 	if err := db.QueryRow(`SELECT count(*) FROM runs`).Scan(&runs); err != nil || runs != 1 {
@@ -227,5 +227,51 @@ func TestLaneLedgerAcceptsEveryEmittedErrorClass(t *testing.T) {
 		if err := l.Outcome(ctx, "L", i, lane.Outcome{SentAt: now, ErrorClass: class, Missed: class == lane.ErrClassMissed}); err != nil {
 			t.Fatalf("class %q: %v", class, err)
 		}
+	}
+}
+
+// Migration 0007: campaign_mutations accepts pre-check B5's notifier_enable
+// (0006's kind CHECK refused it) and keeps every existing row.
+func TestMigration0007AcceptsNotifierEnable(t *testing.T) {
+	ctx := context.Background()
+	db := openTestSQL(t)
+	old := fstest.MapFS{}
+	entries, _ := fs.ReadDir(embeddedMigrations, "migrations")
+	for _, e := range entries {
+		if e.Name() < "0007" {
+			data, _ := embeddedMigrations.ReadFile("migrations/" + e.Name())
+			old["migrations/"+e.Name()] = &fstest.MapFile{Data: data}
+		}
+	}
+	if err := migrate(ctx, db, old); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO campaigns(id, scenario_id, scenario_hash, custom, trigger, run_by, trigger_identity, status, started_at) VALUES('c1','s','h',0,'cli','agent','me','COMPLETED','2026-01-01T00:00:00Z')`,
+		`INSERT INTO campaign_mutations(campaign_id, kind, object_id, prior_json, recorded_at) VALUES('c1','sink_enable','n5','{"status":"disabled"}','2026-01-01T00:00:00Z')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO campaign_mutations(campaign_id, kind, object_id, recorded_at) VALUES('c1','notifier_enable','CAMPAIGN_SINK','2026-01-01T00:00:00Z')`); err == nil {
+		t.Fatal("0006 should refuse notifier_enable (the bug 0007 fixes)")
+	}
+	if err := migrate(ctx, db, embeddedMigrations); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO campaign_mutations(campaign_id, kind, object_id, recorded_at) VALUES('c1','notifier_enable','CAMPAIGN_SINK','2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatalf("notifier_enable after 0007: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO campaign_mutations(campaign_id, kind, object_id, recorded_at) VALUES('c1','bogus','x','2026-01-01T00:00:00Z')`); err == nil {
+		t.Fatal("unknown kinds must still be refused")
+	}
+	var ids string
+	if err := db.QueryRow(`SELECT group_concat(id || ':' || kind) FROM campaign_mutations ORDER BY id`).Scan(&ids); err != nil || ids != "1:sink_enable,2:notifier_enable" {
+		t.Fatalf("rows %q err %v", ids, err)
+	}
+	var idx int
+	if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type='index' AND name='campaign_mutations_open_idx'`).Scan(&idx); err != nil || idx != 1 {
+		t.Fatal("open-mutations index missing after 0007")
 	}
 }

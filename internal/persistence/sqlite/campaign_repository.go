@@ -206,6 +206,29 @@ func (d *Database) CompleteCampaign(ctx context.Context, id string, v domain.Ver
 	})
 }
 
+// SetCampaignCleanup records a cleanup re-run on a COMPLETED campaign: only
+// the cleanup status changes (never the verdict), with an audit event.
+func (d *Database) SetCampaignCleanup(ctx context.Context, id string, cleanup domain.CleanupStatus, at time.Time, summary string) error {
+	return d.campaignTx(ctx, func(tx *sql.Tx) error {
+		var current domain.CampaignStatus
+		var prior sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT status, cleanup_status FROM campaigns WHERE id=?`, id).Scan(&current, &prior); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		if current != domain.CampaignCompleted {
+			return fmt.Errorf("campaign %s is %s; cleanup re-runs need COMPLETED", id, current)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE campaigns SET cleanup_status=? WHERE id=?`, string(cleanup), id); err != nil {
+			return fmt.Errorf("update campaign cleanup: %w", err)
+		}
+		detail, _ := json.Marshal(map[string]string{"from": prior.String, "to": string(cleanup)})
+		return campaignEvent(ctx, tx, id, "campaign.cleanup", "info", summary, detail, at)
+	})
+}
+
 const campaignSelect = `SELECT id, scenario_id, scenario_hash, custom, trigger, run_by, trigger_identity, status, verdict, cleanup_status,
     comparable, started_at, ended_at, scorecard_json, report_json FROM campaigns`
 
