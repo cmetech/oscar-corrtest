@@ -125,10 +125,10 @@ func AlertingDayV1() Scenario {
 			ResolveAfter: 15 * min, TicketEveryNth: 20, TicketFrom: 60 * min, TicketTo: 120 * min},
 		Correlation: CorrelationSpec{SetA: setA, SetB: setB, TicketedPatterns: []string{"flood", "threshold"}},
 		Resend: []PolicySpec{
-			{"R1", "notification", "time", 120 * time.Second, 0, n(5), false, 10, "CAMPAIGN_SINK"},
+			{"R1", "notification", "time", 110 * time.Second, 0, n(5), false, 10, "CAMPAIGN_SINK"},
 			{"R2", "notification", "occurrences", 0, 3, nil, true, 10, "CAMPAIGN_SINK"},
 			{"R3", "notification", "either", 300 * time.Second, 5, n(2), true, 10, "CAMPAIGN_SINK"},
-			{"R4", "ticket", "time", 600 * time.Second, 0, n(2), false, 10, "ALERTHISTORY"},
+			{"R4", "ticket", "time", 590 * time.Second, 0, n(2), false, 10, "ALERTHISTORY"},
 		},
 		Redelivery: 60 * time.Second, ResendUntil: 118 * min,
 		FrontOffice: FrontOfficeSpec{Users: 4, Interval: 15 * time.Second, Jitter: 3 * time.Second, SearchEvery: 2 * min},

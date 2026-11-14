@@ -13,7 +13,11 @@ func run(p scenario.PolicySpec, fresh func(i int) bool) Expected {
 	for i := 0; i <= 28; i++ {
 		ds = append(ds, Delivery{At: time.Duration(i) * time.Minute, Fresh: fresh(i)})
 	}
-	return Expect(p, ds)
+	e, err := Expect(p, ds)
+	if err != nil {
+		panic(err)
+	}
+	return e
 }
 
 func allFresh(int) bool { return true }
@@ -34,9 +38,9 @@ func check(t *testing.T, got Expected, want []time.Duration, exhausted bool) {
 }
 
 func TestR1TimeEvery120Max5(t *testing.T) {
-	p := scenario.PolicySpec{Mode: "time", Interval: 120 * time.Second, MaxResends: ip(5)}
-	// deliveries are 60s apart, so 120s gaps land on even minutes
-	check(t, run(p, allFresh), mins(2, 4, 6, 8, 10), true)
+	p := scenario.PolicySpec{Mode: "time", Interval: 110 * time.Second, Fresh: false, MaxResends: ip(5)}
+	// R1 is fed unchanged repeats, as in the real scenario
+	check(t, run(p, func(i int) bool { return i == 0 }), mins(2, 4, 6, 8, 10), true)
 }
 
 func TestR2OccurrencesEvery3Uncapped(t *testing.T) {
@@ -50,7 +54,7 @@ func TestR3EitherCap2(t *testing.T) {
 }
 
 func TestR4Time600Max2(t *testing.T) {
-	p := scenario.PolicySpec{Mode: "time", Interval: 600 * time.Second, MaxResends: ip(2)}
+	p := scenario.PolicySpec{Mode: "time", Interval: 590 * time.Second, MaxResends: ip(2)}
 	check(t, run(p, allFresh), mins(10, 20), true)
 }
 
@@ -69,10 +73,22 @@ func TestMaxResendsZeroInitialOnly(t *testing.T) {
 // count 5), 5 (occurrence, count 6).
 func TestEitherTimeBetweenMultiples(t *testing.T) {
 	p := scenario.PolicySpec{Mode: "either", Interval: 100 * time.Second, Every: 3}
-	got := Expect(p, []Delivery{{0, true}, {60 * time.Second, true}, {120 * time.Second, true},
+	got, _ := Expect(p, []Delivery{{0, true}, {60 * time.Second, true}, {120 * time.Second, true},
 		{180 * time.Second, true}, {240 * time.Second, true}, {300 * time.Second, true}, {360 * time.Second, true}})
 	want := []time.Duration{120 * time.Second, 240 * time.Second, 300 * time.Second}
 	if !reflect.DeepEqual(got.Resends, want) {
 		t.Fatalf("got %v want %v", got.Resends, want)
+	}
+}
+
+func TestOccDueCrossedMultipleStillFires(t *testing.T) {
+	if !occDue(7, 3, 1) || occDue(5, 3, 1) || occDue(6, 3, 2) {
+		t.Fatal("occDue must fire once per crossed, unhandled multiple regardless of exact count")
+	}
+}
+
+func TestUnknownModeErrors(t *testing.T) {
+	if _, err := Expect(scenario.PolicySpec{}, nil); err == nil {
+		t.Fatal("want error")
 	}
 }

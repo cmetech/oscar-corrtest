@@ -7,7 +7,7 @@ import (
 	corr "github.com/cmetech/oscar-corrtest/internal/scenario"
 )
 
-const goldenHash = "091bdc8356c653f7496b912cad4f259b379cdf79f9efd5068844ad55eff3fcb3"
+const goldenHash = "3a1dd27ad9e085882c1a66fa682a889c34241c6a6003308dc8ed6cf167abf26c"
 
 func TestAlertingDayV1Values(t *testing.T) {
 	s := AlertingDayV1()
@@ -51,7 +51,7 @@ func TestAlertingDayV1Values(t *testing.T) {
 		}
 	}
 	r1, r2, r3, r4 := s.Resend[0], s.Resend[1], s.Resend[2], s.Resend[3]
-	if r1.Key != "R1" || r1.Notifier != "CAMPAIGN_SINK" || r1.Action != "notification" || r1.Mode != "time" || r1.Interval != 120*time.Second || *r1.MaxResends != 5 || r1.Fresh {
+	if r1.Key != "R1" || r1.Notifier != "CAMPAIGN_SINK" || r1.Action != "notification" || r1.Mode != "time" || r1.Interval != 110*time.Second || *r1.MaxResends != 5 || r1.Fresh {
 		t.Errorf("R1 %+v", r1)
 	}
 	if r2.Key != "R2" || r2.Mode != "occurrences" || r2.Every != 3 || r2.MaxResends != nil || !r2.Fresh || r2.Notifier != "CAMPAIGN_SINK" || r2.Action != "notification" {
@@ -60,7 +60,7 @@ func TestAlertingDayV1Values(t *testing.T) {
 	if r3.Key != "R3" || r3.Mode != "either" || r3.Interval != 300*time.Second || r3.Every != 5 || *r3.MaxResends != 2 || !r3.Fresh || r3.Notifier != "CAMPAIGN_SINK" {
 		t.Errorf("R3 %+v", r3)
 	}
-	if r4.Key != "R4" || r4.Notifier != "ALERTHISTORY" || r4.Action != "ticket" || r4.Mode != "time" || r4.Interval != 600*time.Second || *r4.MaxResends != 2 || r4.Fresh {
+	if r4.Key != "R4" || r4.Notifier != "ALERTHISTORY" || r4.Action != "ticket" || r4.Mode != "time" || r4.Interval != 590*time.Second || *r4.MaxResends != 2 || r4.Fresh {
 		t.Errorf("R4 %+v", r4)
 	}
 	l := s.Limits
