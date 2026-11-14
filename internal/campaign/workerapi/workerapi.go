@@ -43,6 +43,14 @@ type BaselineParams struct {
 	StartAt   time.Time             `json:"startAt,omitempty"` // zero = now
 }
 
+// ResolveResult is one resolve-all pass: identities resolved now, identities
+// still open after it (failed sends), and the first send error, if any.
+type ResolveResult struct {
+	Resolved  int    `json:"resolved"`
+	Remaining int    `json:"remaining"`
+	Error     string `json:"error,omitempty"`
+}
+
 // LaneStatus is a lane's current state.
 type LaneStatus struct {
 	ID       string `json:"id"`

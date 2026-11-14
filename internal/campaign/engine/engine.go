@@ -62,7 +62,7 @@ type Worker interface {
 	Heartbeat(ctx context.Context, id string) (workerapi.LaneStatus, error)
 	Status(ctx context.Context, id string) (workerapi.LaneStatus, error)
 	Stop(ctx context.Context, id string) (workerapi.LaneStatus, error)
-	ResolveAll(ctx context.Context, id string) (int, error)
+	ResolveAll(ctx context.Context, id string) (workerapi.ResolveResult, error)
 	Ledger(ctx context.Context, id string, w io.Writer) error
 }
 
@@ -181,6 +181,7 @@ type run struct {
 	policies      []*policyState
 	resendIncon   string
 	cohorts       map[string]*cohortMember // alertname -> member
+	cohortOpen    map[string]bool          // recovered cohort alerts whose resolve failed
 	corrRuns      []score.CorrRun
 	notRun        []string
 	plannedCorr   int

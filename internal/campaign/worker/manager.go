@@ -178,7 +178,11 @@ func (m *Manager) watchdog(ctx context.Context, ls *laneState) {
 		m.mu.Unlock()
 		if stale {
 			<-ls.done
-			if _, err := m.ResolveAll(ctx, ls.id); err != nil {
+			res, err := m.ResolveAll(ctx, ls.id)
+			if err == nil && res.Remaining > 0 {
+				err = fmt.Errorf("%d still open: %s", res.Remaining, res.Error)
+			}
+			if err != nil {
 				m.mu.Lock()
 				ls.status.Error = "orphan resolve-all: " + err.Error()
 				m.mu.Unlock()
@@ -253,16 +257,22 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 // present, so a timed-out send that reached OSCAR counts) whose identity has no
 // later accepted resolve. It derives this from the ledger alone (rows are in seq
 // order; appended resolves sit after all planned seqs), so it also works for a
-// lane this process no longer holds in memory (worker restart). Idempotent. A
-// lane still running in this process must be stopped first.
-func (m *Manager) ResolveAll(ctx context.Context, id string) (int, error) {
+// lane this process no longer holds in memory (worker restart). Idempotent: a
+// repeat resolves only what is still open. Failed sends are reported as
+// Remaining (with the first error), not as an error, so the controller can
+// repeat until nothing remains. It runs detached from ctx's cancellation: an
+// abandoned HTTP request must not cut a resolve pass short. A lane still
+// running in this process must be stopped first.
+func (m *Manager) ResolveAll(ctx context.Context, id string) (workerapi.ResolveResult, error) {
+	ctx = context.WithoutCancel(ctx)
+	var res workerapi.ResolveResult
 	m.resolveMu.Lock()
 	defer m.resolveMu.Unlock()
 	m.mu.Lock()
 	ls := m.lanes[id]
 	if ls != nil && ls.status.State == "running" {
 		m.mu.Unlock()
-		return 0, fmt.Errorf("lane %s is still running; stop it first", id)
+		return res, fmt.Errorf("lane %s is still running; stop it first", id)
 	}
 	m.mu.Unlock()
 	if ls != nil {
@@ -270,17 +280,17 @@ func (m *Manager) ResolveAll(ctx context.Context, id string) (int, error) {
 	}
 	rows, err := m.store.LaneLedger(ctx, id)
 	if err != nil {
-		return 0, err
+		return res, err
 	}
 	if len(rows) == 0 {
-		return 0, workerapi.ErrLaneNotFound
+		return res, workerapi.ErrLaneNotFound
 	}
 	var snd lane.Sender
 	runID := strings.TrimSuffix(id, "-baseline")
 	if ls != nil {
 		snd, runID = ls.sender, ls.runID
 	} else if snd, err = m.newSender(); err != nil {
-		return 0, err
+		return res, err
 	}
 	open := map[string]domain.LaneRow{}
 	next := 0
@@ -307,7 +317,8 @@ func (m *Manager) ResolveAll(ctx context.Context, id string) (int, error) {
 		next++
 		now := m.clock.Now()
 		if err := m.store.Intent(ctx, id, e, now); err != nil {
-			return n, err
+			res.Resolved, res.Remaining = n, len(todo)-n
+			return res, err
 		}
 		status, serr := snd.Send(ctx, e, runID, id)
 		o := lane.Outcome{SentAt: now, Status: status, LatencyMillis: m.clock.Now().Sub(now).Milliseconds()}
@@ -322,7 +333,8 @@ func (m *Manager) ResolveAll(ctx context.Context, id string) (int, error) {
 			n++
 		}
 		if err := m.store.Outcome(ctx, id, e.Seq, o); err != nil {
-			return n, err
+			res.Resolved, res.Remaining = n, len(todo)-n
+			return res, err
 		}
 	}
 	if ls != nil {
@@ -330,7 +342,11 @@ func (m *Manager) ResolveAll(ctx context.Context, id string) (int, error) {
 		ls.status.Resolved += n
 		m.mu.Unlock()
 	}
-	return n, firstErr
+	res.Resolved, res.Remaining = n, len(todo)-n
+	if firstErr != nil {
+		res.Error = firstErr.Error()
+	}
+	return res, nil
 }
 
 type ledgerRow struct {

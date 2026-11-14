@@ -59,7 +59,9 @@ func (d data) Stop(ctx context.Context, id string) (workerapi.LaneStatus, error)
 	}
 	return d.m.Status(ctx, id)
 }
-func (d data) ResolveAll(ctx context.Context, id string) (int, error) { return d.m.ResolveAll(ctx, id) }
+func (d data) ResolveAll(ctx context.Context, id string) (workerapi.ResolveResult, error) {
+	return d.m.ResolveAll(ctx, id)
+}
 func (d data) Status(ctx context.Context, id string) (workerapi.LaneStatus, error) {
 	return d.m.Status(ctx, id)
 }
@@ -141,9 +143,9 @@ func TestClientRoundTrip(t *testing.T) {
 	if st, err = c.Stop(ctx, spec.ID); err != nil || st.State != "stopped" {
 		t.Fatalf("stop %+v %v", st, err)
 	}
-	n, err := c.ResolveAll(ctx, spec.ID)
-	if err != nil || n == 0 {
-		t.Fatalf("resolve-all %d %v", n, err)
+	res, err := c.ResolveAll(ctx, spec.ID)
+	if err != nil || res.Resolved == 0 || res.Remaining != 0 {
+		t.Fatalf("resolve-all %+v %v", res, err)
 	}
 	var buf bytes.Buffer
 	if err := c.Ledger(ctx, spec.ID, &buf); err != nil {

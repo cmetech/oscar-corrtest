@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -54,16 +55,51 @@ func (r *run) waitLane(ctx context.Context, deadline time.Time) {
 	}
 }
 
+// resolveAllBudget bounds how long the controller repeats resolve-all.
+const resolveAllBudget = 15 * time.Minute
+
 // resolveLane stops the lane and has the worker resolve everything it fired
-// (idempotent, ledger-driven). A lost worker orphan-stops and resolves itself.
+// (idempotent, ledger-driven), repeating until the worker reports nothing
+// still open or the 15 min budget is spent; then cleanup is DIRTY (ruling
+// C36). A lost worker orphan-stops and resolves itself, but the controller
+// cannot confirm that, so it stays DIRTY.
 func (r *run) resolveLane(ctx context.Context) {
-	_, err := r.e.d.Worker.Stop(ctx, r.laneID)
-	if err == nil || errors.Is(err, workerapi.ErrLaneNotFound) {
-		_, err = r.e.d.Worker.ResolveAll(ctx, r.laneID)
+	deadline := r.now().Add(resolveAllBudget)
+	backoff := time.Second
+	for {
+		left, err := r.resolveLaneOnce(ctx)
+		if err == nil && left == 0 {
+			return
+		}
+		if !r.now().Before(deadline) {
+			why := fmt.Sprintf("lane resolve-all: %d identities still open after %s", left, resolveAllBudget)
+			if err != nil {
+				why = "lane stop/resolve-all failed: " + err.Error()
+			}
+			r.addDirty(why)
+			return
+		}
+		r.e.clock.SleepUntil(ctx, r.now().Add(backoff))
+		backoff = min(2*backoff, guardEvery)
 	}
-	if err != nil && !errors.Is(err, workerapi.ErrLaneNotFound) {
-		r.event(ctx, "campaign.lane", "warn", "lane stop/resolve-all failed: "+err.Error(), nil)
+}
+
+func (r *run) resolveLaneOnce(ctx context.Context) (remaining int, err error) {
+	if _, err := r.e.d.Worker.Stop(ctx, r.laneID); err != nil && !errors.Is(err, workerapi.ErrLaneNotFound) {
+		return 0, err
 	}
+	res, err := r.e.d.Worker.ResolveAll(ctx, r.laneID)
+	if errors.Is(err, workerapi.ErrLaneNotFound) { // no ledger rows: the lane never fired
+		return 0, nil
+	}
+	return res.Remaining, err
+}
+
+// addDirty records a cleanup failure that is not an open mutation.
+func (r *run) addDirty(why string) {
+	r.mu.Lock()
+	r.dirty = append(r.dirty, why)
+	r.mu.Unlock()
 }
 
 // haltLane stops the lane without resolving (Close path; recovery resolves).
@@ -258,7 +294,20 @@ func (r *run) cleanup(ctx context.Context) domain.CleanupStatus {
 	r.mu.Lock()
 	incidents := append([]string{}, r.openIncidents...)
 	dirty := append([]string{}, r.dirty...)
+	var cohorts []string
+	for n := range r.cohortOpen {
+		cohorts = append(cohorts, n)
+	}
 	r.mu.Unlock()
+	for _, m := range r.members() {
+		if m.recorded && !m.resolved {
+			cohorts = append(cohorts, m.alert.Name)
+		}
+	}
+	if len(cohorts) > 0 {
+		sort.Strings(cohorts)
+		dirty = append(dirty, "cohort alerts not resolved: "+strings.Join(cohorts, ","))
+	}
 	if len(incidents) > 0 {
 		r.event(ctx, "campaign.cleanup", "error", "incidents still open: "+strings.Join(incidents, ","), incidents)
 	}

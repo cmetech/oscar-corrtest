@@ -38,7 +38,7 @@ type campaignWorker interface {
 	Start(context.Context, workerapi.LaneSpec) (workerapi.LaneStatus, error)
 	Heartbeat(context.Context, string) (workerapi.LaneStatus, error)
 	Stop(context.Context, string) (workerapi.LaneStatus, error)
-	ResolveAll(context.Context, string) (int, error)
+	ResolveAll(context.Context, string) (workerapi.ResolveResult, error)
 	Status(context.Context, string) (workerapi.LaneStatus, error)
 	Ledger(context.Context, string, io.Writer) error
 }
@@ -241,12 +241,12 @@ func registerWorkerRoutes(mux *http.ServeMux, wk campaignWorker, post func(strin
 		apiData(w, http.StatusOK, st)
 	})
 	post(base+"/lanes/{id}/resolve-all", func(w http.ResponseWriter, r *http.Request, _ string) {
-		n, err := wk.ResolveAll(r.Context(), r.PathValue("id"))
+		res, err := wk.ResolveAll(r.Context(), r.PathValue("id")) // the worker detaches it from the request
 		if err != nil {
 			laneErr(w, err)
 			return
 		}
-		apiData(w, http.StatusOK, map[string]int{"resolved": n})
+		apiData(w, http.StatusOK, res)
 	})
 	mux.HandleFunc("GET "+base+"/lanes/{id}/ledger", func(w http.ResponseWriter, r *http.Request) {
 		// Streaming contract: NDJSON rows, then a terminal record {"type":"end","ok":true}

@@ -206,12 +206,11 @@ func (c *Client) Stop(ctx context.Context, id string) (workerapi.LaneStatus, err
 	return st, err
 }
 
-func (c *Client) ResolveAll(ctx context.Context, id string) (int, error) {
-	var d struct {
-		Resolved int `json:"resolved"`
-	}
-	err := c.call(ctx, c.long, http.MethodPost, "/lanes/"+url.PathEscape(id)+"/resolve-all", nil, &d)
-	return d.Resolved, err
+// ResolveAll runs one idempotent resolve pass; Remaining > 0 means repeat it.
+func (c *Client) ResolveAll(ctx context.Context, id string) (workerapi.ResolveResult, error) {
+	var res workerapi.ResolveResult
+	err := c.call(ctx, c.long, http.MethodPost, "/lanes/"+url.PathEscape(id)+"/resolve-all", nil, &res)
+	return res, err
 }
 
 // Ledger streams the lane's NDJSON rows to w, excluding the terminal end record.

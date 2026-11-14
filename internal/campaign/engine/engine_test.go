@@ -491,3 +491,50 @@ func TestIncidentListingRetried(t *testing.T) {
 	}
 	h.assertRestored()
 }
+
+// TestResolveAllRepeatedUntilNoneRemain: the controller repeats resolve-all
+// until the worker reports nothing still open (ruling C36).
+func TestResolveAllRepeatedUntilNoneRemain(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.worker.stuck.Store(2)
+	if err := h.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if c := h.campaign(); c.Cleanup != domain.CleanupClean {
+		t.Fatalf("cleanup %s", c.Cleanup)
+	}
+	if n := h.worker.resolves.Load(); n < 3 {
+		t.Fatalf("resolve-all called %d times, want it repeated past the 2 stuck answers", n)
+	}
+	h.assertRestored()
+}
+
+// TestResolveAllStillOpenIsDirty: identities still open after the resolve-all
+// budget make cleanup DIRTY (ruling C36).
+func TestResolveAllStillOpenIsDirty(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.worker.stuck.Store(-1)
+	if err := h.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if c := h.campaign(); c.Cleanup != domain.CleanupDirty {
+		t.Fatalf("cleanup %s", c.Cleanup)
+	}
+}
+
+// TestCohortResolveFailureIsDirty: a cohort alert that could not be resolved
+// makes cleanup DIRTY (ruling C36).
+func TestCohortResolveFailureIsDirty(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.s.Resend = h.s.Resend[:3] // no ticket cohort: an open incident must not be what makes it DIRTY
+	h.oscar.failResolves = true
+	if err := h.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if c := h.campaign(); c.Cleanup != domain.CleanupDirty {
+		t.Fatalf("cleanup %s", c.Cleanup)
+	}
+}

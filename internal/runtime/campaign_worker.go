@@ -87,10 +87,10 @@ func (r *Runtime) Stop(ctx context.Context, id string) (workerapi.LaneStatus, er
 	return m.Status(ctx, id)
 }
 
-func (r *Runtime) ResolveAll(ctx context.Context, id string) (int, error) {
+func (r *Runtime) ResolveAll(ctx context.Context, id string) (workerapi.ResolveResult, error) {
 	m, err := r.workerMgr()
 	if err != nil {
-		return 0, err
+		return workerapi.ResolveResult{}, err
 	}
 	return m.ResolveAll(ctx, id)
 }

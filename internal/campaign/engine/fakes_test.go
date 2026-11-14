@@ -157,6 +157,7 @@ type fakeOSCAR struct {
 	// fault injection
 	withholdComments bool  // resolves never get OSCAR's comment
 	listErr          int   // next N campaign incident listings fail (-1: always)
+	failResolves     bool  // cohort resolve posts get HTTP 500
 	sinkErr          bool  // Receipts fails
 	failEnable       int   // next N notifier enables fail
 	draftErr         error // CreateDraft fails with this
@@ -359,6 +360,10 @@ func (f *fakeOSCAR) PostAlert(_ context.Context, a Alert) (int, error) {
 	firing := a.EndsAt.IsZero()
 	if firing {
 		f.posts[a.Name]++
+	}
+	if !firing && f.failResolves {
+		f.mu.Unlock()
+		return 500, errors.New("HTTP 500")
 	}
 	amb := firing && a.Name == f.ambiguous && f.posts[a.Name] == 1
 	if !amb && a.EndsAt.IsZero() {
@@ -576,6 +581,10 @@ type fakeWorker struct {
 	m      *worker.Manager
 	down   atomic.Bool
 	onStop func()
+	// stuck: the next N resolve-all calls report one identity still open
+	// without resolving anything (-1: always).
+	stuck    atomic.Int32
+	resolves atomic.Int32 // resolve-all calls
 }
 
 var errDown = errors.New("dial tcp: connection refused")
@@ -610,9 +619,16 @@ func (w *fakeWorker) Stop(ctx context.Context, id string) (workerapi.LaneStatus,
 	}
 	return w.m.Status(ctx, id)
 }
-func (w *fakeWorker) ResolveAll(ctx context.Context, id string) (int, error) {
+func (w *fakeWorker) ResolveAll(ctx context.Context, id string) (workerapi.ResolveResult, error) {
+	w.resolves.Add(1)
 	if w.down.Load() {
-		return 0, errDown
+		return workerapi.ResolveResult{}, errDown
+	}
+	if n := w.stuck.Load(); n != 0 {
+		if n > 0 {
+			w.stuck.Add(-1)
+		}
+		return workerapi.ResolveResult{Remaining: 1, Error: "resolve x: status 503"}, nil
 	}
 	return w.m.ResolveAll(ctx, id)
 }

@@ -72,7 +72,9 @@ func (f *fakeWorkerData) Heartbeat(_ context.Context, id string) (workerapi.Lane
 func (f *fakeWorkerData) Stop(_ context.Context, id string) (workerapi.LaneStatus, error) {
 	return workerapi.LaneStatus{ID: id, State: "stopped"}, nil
 }
-func (f *fakeWorkerData) ResolveAll(context.Context, string) (int, error) { return 3, nil }
+func (f *fakeWorkerData) ResolveAll(context.Context, string) (workerapi.ResolveResult, error) {
+	return workerapi.ResolveResult{Resolved: 3, Remaining: 1}, nil
+}
 func (f *fakeWorkerData) Status(_ context.Context, id string) (workerapi.LaneStatus, error) {
 	if id == "nope" {
 		return workerapi.LaneStatus{}, workerapi.ErrLaneNotFound
@@ -207,6 +209,9 @@ func TestWorkerRoutesAbsentUnlessWorkerMode(t *testing.T) {
 		if w := apiDo(h, http.MethodPost, "/api/v1/campaign-worker/lanes/l1/"+p, "", true, nil); w.Code != http.StatusOK {
 			t.Errorf("%s status=%d %s", p, w.Code, w.Body)
 		}
+	}
+	if w := apiDo(h, http.MethodPost, "/api/v1/campaign-worker/lanes/l1/resolve-all", "", true, nil); !strings.Contains(w.Body.String(), `"remaining":1`) {
+		t.Errorf("resolve-all must report the remaining count: %s", w.Body)
 	}
 	w = apiDo(h, http.MethodGet, "/api/v1/campaign-worker/lanes/l1/ledger", "", true, nil)
 	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "application/x-ndjson" || w.Body.String() != "{\"seq\":1}\n{\"type\":\"end\",\"ok\":true}\n" {

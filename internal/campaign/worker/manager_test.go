@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -72,14 +73,21 @@ func (s *memStore) LaneLedger(_ context.Context, id string) ([]domain.LaneRow, e
 }
 
 type fakeSender struct {
-	mu    sync.Mutex
-	sends []lane.Event
+	mu     sync.Mutex
+	sends  []lane.Event
+	status int // 0 = 200
 }
 
-func (f *fakeSender) Send(_ context.Context, e lane.Event, _, _ string) (int, error) {
+func (f *fakeSender) Send(ctx context.Context, e lane.Event, _, _ string) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if ctx.Err() != nil {
+		return 0, ctx.Err()
+	}
 	f.sends = append(f.sends, e)
+	if f.status != 0 {
+		return f.status, nil
+	}
 	return 200, nil
 }
 func (f *fakeSender) count(k lane.EventKind) (n int) {
@@ -205,13 +213,13 @@ func TestResolveAllIdempotent(t *testing.T) {
 	if err := m.Stop(ctx, "r1-baseline"); err != nil {
 		t.Fatal(err)
 	}
-	n, err := m.ResolveAll(ctx, "r1-baseline")
-	if err != nil || n != 5 {
-		t.Fatalf("n=%d err=%v", n, err)
+	res, err := m.ResolveAll(ctx, "r1-baseline")
+	if err != nil || res.Resolved != 5 || res.Remaining != 0 {
+		t.Fatalf("res=%+v err=%v", res, err)
 	}
-	n, err = m.ResolveAll(ctx, "r1-baseline")
-	if err != nil || n != 0 || snd.count(lane.Resolve) != 5 {
-		t.Fatalf("second n=%d err=%v resolves=%d", n, err, snd.count(lane.Resolve))
+	res, err = m.ResolveAll(ctx, "r1-baseline")
+	if err != nil || res.Resolved != 0 || res.Remaining != 0 || snd.count(lane.Resolve) != 5 {
+		t.Fatalf("second res=%+v err=%v resolves=%d", res, err, snd.count(lane.Resolve))
 	}
 }
 
@@ -278,11 +286,11 @@ func TestResolveAllRecoversAfterRestart(t *testing.T) {
 	if _, err := m2.ResolveAll(ctx, "nope-baseline"); !errors.Is(err, workerapi.ErrLaneNotFound) {
 		t.Fatalf("err=%v", err)
 	}
-	if n, err := m2.ResolveAll(ctx, "r1-baseline"); err != nil || n != 3 {
-		t.Fatalf("n=%d err=%v", n, err)
+	if res, err := m2.ResolveAll(ctx, "r1-baseline"); err != nil || res.Resolved != 3 {
+		t.Fatalf("res=%+v err=%v", res, err)
 	}
-	if n, _ := m2.ResolveAll(ctx, "r1-baseline"); n != 0 {
-		t.Fatalf("second n=%d", n)
+	if res, _ := m2.ResolveAll(ctx, "r1-baseline"); res.Resolved != 0 || res.Remaining != 0 {
+		t.Fatalf("second res=%+v", res)
 	}
 	if _, err := m2.Start(ctx, spec("r1-baseline", "https://oscar.home.arpa:8443", time.Hour)); !errors.Is(err, workerapi.ErrLaneExists) {
 		t.Fatalf("reused lane id err=%v", err)
@@ -299,9 +307,9 @@ func TestResolveAllIncludesUnknownOutcomeAndTicket(t *testing.T) {
 	_ = st.Outcome(ctx, "r1-baseline", 0, lane.Outcome{SentAt: clk.Now(), ErrorClass: lane.ErrClassTimeout})
 	_ = st.Intent(ctx, "r1-baseline", lane.Event{Seq: 1, Kind: lane.Firing, Identity: "B", Severity: "critical", Instance: "h"}, clk.Now())
 	_ = st.Outcome(ctx, "r1-baseline", 1, lane.Outcome{SentAt: clk.Now(), ErrorClass: lane.ErrClassMissed, Missed: true})
-	n, err := m.ResolveAll(ctx, "r1-baseline")
-	if err != nil || n != 1 || len(snd.sends) != 1 || !snd.sends[0].Ticket || snd.sends[0].Identity != "A" {
-		t.Fatalf("n=%d err=%v sends=%+v", n, err, snd.sends)
+	res, err := m.ResolveAll(ctx, "r1-baseline")
+	if err != nil || res.Resolved != 1 || len(snd.sends) != 1 || !snd.sends[0].Ticket || snd.sends[0].Identity != "A" {
+		t.Fatalf("res=%+v err=%v sends=%+v", res, err, snd.sends)
 	}
 }
 
@@ -311,5 +319,27 @@ func TestSnapshotSeparatesDefiniteFailuresFromUnknown(t *testing.T) {
 	s := m.snapshot(&laneState{counts: lane.Counters{Accepted: 5, Failed: 2, Unknown: 1, Missed: 3}})
 	if s.Sent != 5 || s.Failed != 2 || s.Unknown != 1 || s.Missed != 3 {
 		t.Fatalf("snapshot %+v", s)
+	}
+}
+
+// Ruling C36: resolve-all is detached from the request context and reports
+// how many identities are still open, so the controller can repeat it.
+func TestResolveAllDetachedAndReportsRemaining(t *testing.T) {
+	m, clk, st, snd := newMgr(t)
+	for i := 0; i < 3; i++ {
+		_ = st.Intent(context.Background(), "r1-baseline", lane.Event{Seq: i, Kind: lane.Firing, Identity: fmt.Sprint("A", i), Severity: "critical", Instance: "h"}, clk.Now())
+		_ = st.Outcome(context.Background(), "r1-baseline", i, lane.Outcome{SentAt: clk.Now(), Status: 200})
+	}
+	snd.status = 503
+	res, err := m.ResolveAll(context.Background(), "r1-baseline")
+	if err != nil || res.Resolved != 0 || res.Remaining != 3 || res.Error == "" {
+		t.Fatalf("failing sends: res=%+v err=%v", res, err)
+	}
+	snd.status = 0
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the HTTP request is gone; the resolves must still go out
+	res, err = m.ResolveAll(ctx, "r1-baseline")
+	if err != nil || res.Resolved != 3 || res.Remaining != 0 {
+		t.Fatalf("cancelled request: res=%+v err=%v", res, err)
 	}
 }

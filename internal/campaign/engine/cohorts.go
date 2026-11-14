@@ -180,7 +180,18 @@ func (r *run) recoverCohorts(ctx context.Context) {
 		if ev.Type != cohortEvent || json.Unmarshal(ev.Detail, &p) != nil {
 			continue
 		}
-		if err := r.resolveAlert(ctx, Alert{Name: p.Name, Labels: p.Labels, StartsAt: p.StartsAt}); err != nil {
+		err := r.resolveAlert(ctx, Alert{Name: p.Name, Labels: p.Labels, StartsAt: p.StartsAt})
+		r.mu.Lock()
+		if r.cohortOpen == nil {
+			r.cohortOpen = map[string]bool{}
+		}
+		if err != nil { // cleanup is DIRTY while any stays unresolved (ruling C36)
+			r.cohortOpen[p.Name] = true
+		} else {
+			delete(r.cohortOpen, p.Name)
+		}
+		r.mu.Unlock()
+		if err != nil {
 			r.event(ctx, "campaign.cohort", "warn", err.Error(), nil)
 		}
 	}
