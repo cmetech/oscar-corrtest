@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -177,22 +178,29 @@ func (s *SNOW) OpenCampaignIncidents(ctx context.Context, campaignRun string) ([
 		return nil, fmt.Errorf("invalid campaign run id")
 	}
 	marker := "Campaign-" + campaignRun + "-"
-	res, err := s.call(ctx, http.MethodGet, "/api/now/table/incident", url.Values{
-		"sysparm_query":  {"short_descriptionSTARTSWITH" + marker + "^stateNOT IN6,7,8"},
-		"sysparm_limit":  {"500"},
-		"sysparm_fields": {incidentFields}}, nil)
-	if err != nil {
-		return nil, err
-	}
-	var rows []incidentWire
-	if json.Unmarshal(res, &rows) != nil {
-		return nil, fmt.Errorf("malformed incident list")
-	}
-	out := make([]Incident, 0, len(rows))
-	for _, r := range rows {
-		if strings.HasPrefix(r.ShortDescription, marker) {
-			out = append(out, r.inc())
+	const pageSize, maxPages = 500, 20 // hard cap 10,000 rows: error rather than silently truncate
+	out := []Incident{}
+	for page := 0; page < maxPages; page++ {
+		res, err := s.call(ctx, http.MethodGet, "/api/now/table/incident", url.Values{
+			"sysparm_query":  {"short_descriptionSTARTSWITH" + marker + "^stateNOT IN6,7,8^ORDERBYsys_id"},
+			"sysparm_limit":  {strconv.Itoa(pageSize)},
+			"sysparm_offset": {strconv.Itoa(page * pageSize)},
+			"sysparm_fields": {incidentFields}}, nil)
+		if err != nil {
+			return nil, err
+		}
+		var rows []incidentWire
+		if json.Unmarshal(res, &rows) != nil {
+			return nil, fmt.Errorf("malformed incident list")
+		}
+		for _, r := range rows {
+			if strings.HasPrefix(r.ShortDescription, marker) {
+				out = append(out, r.inc())
+			}
+		}
+		if len(rows) < pageSize {
+			return out, nil
 		}
 	}
-	return out, nil
+	return nil, fmt.Errorf("incident listing exceeded %d rows", pageSize*maxPages)
 }

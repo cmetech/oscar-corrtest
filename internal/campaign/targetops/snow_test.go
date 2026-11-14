@@ -2,10 +2,12 @@ package targetops
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -120,5 +122,36 @@ func TestSnowIncidentJournalQuery(t *testing.T) {
 	inc, err := s.Incident(context.Background(), "INC1")
 	if err != nil || len(inc.Comments) != 1 || inc.Comments[0].Value != "OSCAR resolution comment" {
 		t.Fatal(inc, err)
+	}
+}
+
+func fakeIncidentPages(total int) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		off, _ := strconv.Atoi(r.URL.Query().Get("sysparm_offset"))
+		lim, _ := strconv.Atoi(r.URL.Query().Get("sysparm_limit"))
+		if lim != 500 || !strings.Contains(r.URL.Query().Get("sysparm_query"), "ORDERBY") {
+			http.Error(w, "bad paging", 400)
+			return
+		}
+		var rows []string
+		for i := off; i < off+lim && i < total; i++ {
+			rows = append(rows, fmt.Sprintf(`{"number":"INC%d","sys_id":"s%d","state":"1","short_description":"Campaign-run001-%d"}`, i, i, i))
+		}
+		w.Write([]byte(`{"result":[` + strings.Join(rows, ",") + `]}`))
+	}
+}
+
+func TestSnowOpenCampaignIncidentsPaginates(t *testing.T) {
+	s := newTestSNOW(t, fakeIncidentPages(620))
+	got, err := s.OpenCampaignIncidents(context.Background(), "run001")
+	if err != nil || len(got) != 620 {
+		t.Fatalf("got %d err=%v", len(got), err)
+	}
+}
+
+func TestSnowOpenCampaignIncidentsCapErrors(t *testing.T) {
+	s := newTestSNOW(t, fakeIncidentPages(20000))
+	if _, err := s.OpenCampaignIncidents(context.Background(), "run001"); err == nil {
+		t.Fatal("want cap error")
 	}
 }
