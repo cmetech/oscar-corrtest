@@ -395,7 +395,11 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 	}
 	completionCtx, completionCancel := context.WithTimeout(context.WithoutCancel(ctx), r.opts.CleanupTimeout)
 	defer completionCancel()
-	cleanup, resolutions, cleanupError := r.cleanup(completionCtx, run.ID, resources, observedHistory(results), nil)
+	// Observation keeps only the latest occurrence per fingerprint; discovery
+	// finds every History occurrence the run's sends produced.
+	cleanup, resolutions, cleanupError := r.cleanup(completionCtx, run.ID, resources, observedHistory(results), func(ctx context.Context) ([]oscar.HistoryRecord, error) {
+		return r.discoverAttemptedHistory(ctx, run, plan, attempts)
+	})
 	if cleanupError != nil {
 		cleanup = domain.CleanupDirty
 	}
@@ -440,7 +444,7 @@ func (r *Runner) cleanup(ctx context.Context, runID string, resources []domain.R
 	}
 	if discover != nil {
 		recovered, err := discover(ctx)
-		histories = append(histories, recovered...)
+		histories = uniqueHistory(append(histories, recovered...))
 		if err != nil {
 			failures = append(failures, "alert history recovery: "+err.Error())
 		}
@@ -552,22 +556,35 @@ func retainLatestHistory(records map[string]oscar.HistoryRecord, next oscar.Hist
 	}
 }
 
+// uniqueHistory drops only repeated copies of the same History row (same ID,
+// else same fingerprint and startsAt). Repeated occurrences of one alert are
+// distinct rows and each must be resolved with its own startsAt.
 func uniqueHistory(records []oscar.HistoryRecord) []oscar.HistoryRecord {
-	byFingerprint := make(map[string]oscar.HistoryRecord, len(records))
+	byRow := make(map[string]oscar.HistoryRecord, len(records))
 	for _, record := range records {
-		if record.Fingerprint != "" {
-			retainLatestHistory(byFingerprint, record)
+		if record.Fingerprint == "" {
+			continue
 		}
+		key := "id\x00" + record.ID
+		if record.ID == "" {
+			key = "fp\x00" + record.Fingerprint + "\x00" + record.StartsAt.UTC().Format(time.RFC3339Nano)
+		}
+		byRow[key] = record
 	}
-	keys := make([]string, 0, len(byFingerprint))
-	for fingerprint := range byFingerprint {
-		keys = append(keys, fingerprint)
+	result := make([]oscar.HistoryRecord, 0, len(byRow))
+	for _, record := range byRow {
+		result = append(result, record)
 	}
-	sort.Strings(keys)
-	result := make([]oscar.HistoryRecord, 0, len(keys))
-	for _, fingerprint := range keys {
-		result = append(result, byFingerprint[fingerprint])
-	}
+	sort.Slice(result, func(i, j int) bool {
+		a, b := result[i], result[j]
+		if a.Fingerprint != b.Fingerprint {
+			return a.Fingerprint < b.Fingerprint
+		}
+		if !a.StartsAt.Equal(b.StartsAt) {
+			return a.StartsAt.Before(b.StartsAt)
+		}
+		return a.ID < b.ID
+	})
 	return result
 }
 
@@ -641,7 +658,7 @@ func (r *Runner) discoverAttemptedHistory(ctx context.Context, run domain.Run, p
 		start = run.StartedAt.UTC()
 	}
 	end := r.opts.Now().UTC().Add(time.Minute)
-	byFingerprint := map[string]oscar.HistoryRecord{}
+	var recovered []oscar.HistoryRecord
 	var failures []string
 	alertNames := make([]string, 0, len(expected))
 	for alertName := range expected {
@@ -654,7 +671,8 @@ func (r *Runner) discoverAttemptedHistory(ctx context.Context, run domain.Run, p
 			failures = append(failures, alertName+": "+err.Error())
 			continue
 		}
-		candidates := map[string]map[string]oscar.HistoryRecord{}
+		candidates := map[string]map[string]oscar.HistoryRecord{} // per event, by fingerprint: ambiguity check
+		matched := map[string][]oscar.HistoryRecord{}             // per event, every occurrence
 		for _, record := range records {
 			eventID := record.Labels["oscar_test_event_id"]
 			wanted, exists := expected[alertName][eventID]
@@ -681,6 +699,7 @@ func (r *Runner) discoverAttemptedHistory(ctx context.Context, run domain.Run, p
 				candidates[eventID] = map[string]oscar.HistoryRecord{}
 			}
 			retainLatestHistory(candidates[eventID], record)
+			matched[eventID] = append(matched[eventID], record)
 		}
 		for eventID, wanted := range expected[alertName] {
 			rows := candidates[eventID]
@@ -688,9 +707,7 @@ func (r *Runner) discoverAttemptedHistory(ctx context.Context, run domain.Run, p
 				failures = append(failures, alertName+"/"+eventID+": exact attempted history not found or ambiguous")
 				continue
 			}
-			for _, record := range rows {
-				retainLatestHistory(byFingerprint, record)
-			}
+			recovered = append(recovered, matched[eventID]...)
 		}
 	}
 	alertNames = alertNames[:0]
@@ -706,13 +723,9 @@ func (r *Runner) discoverAttemptedHistory(ctx context.Context, run domain.Run, p
 		}
 		for _, record := range records {
 			if record.AlertName == alertName && record.Labels["oscar_test_run_id"] == run.ID && record.Fingerprint != "" {
-				retainLatestHistory(byFingerprint, record)
+				recovered = append(recovered, record)
 			}
 		}
-	}
-	recovered := make([]oscar.HistoryRecord, 0, len(byFingerprint))
-	for _, record := range byFingerprint {
-		recovered = append(recovered, record)
 	}
 	recovered = uniqueHistory(recovered)
 	if len(failures) != 0 {

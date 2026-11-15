@@ -72,7 +72,9 @@ target add ──► doctor ──► plan (compile, offline) ──► run ─�
    (`runner.go:531`).
 
 6. **Cleanup** — `Runner.cleanup` (`runner.go:289`) deletes only rule IDs OSCAR
-   returned, then resolves every observed alert by echoing the History row's
+   returned, then resolves every History occurrence the run produced
+   (observed plus discovered; repeated occurrences of one alert are distinct
+   rows, de-duplicated only by History ID) by echoing each row's
    native transport fingerprint (`am_fingerprint` label → `fingerPrint`) and
    its exact original `startsAt` (`ResolveHistory`, `client.go:198`;
    `BuildResolutionRequest`, `request.go:96`; no startsAt → no resolve, OSCAR

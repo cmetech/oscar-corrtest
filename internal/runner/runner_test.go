@@ -100,6 +100,42 @@ func TestRunnerCleanupIsDirtyWhenHistoryStillFiringAfterResolve(t *testing.T) {
 	}
 }
 
+// Repeated occurrences share an OSCAR fingerprint but differ by startsAt;
+// cleanup must resolve and verify each one, not only the latest.
+func TestRunnerCleanupResolvesEveryOccurrenceOfARunAlert(t *testing.T) {
+	database := openDatabase(t)
+	run := newRun()
+	if err := database.CreateRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := compiler.Compile(run, scenario.Builtin("flood"), compiler.Capabilities{PipelineMode: "phase_b_dispatch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := &fakeAPI{priorOccurrence: true}
+	engine := runner.New(database, api, runner.Options{PollInterval: time.Millisecond, ObservationWindow: 3 * time.Millisecond, Stabilization: time.Millisecond})
+	if err := engine.Execute(context.Background(), run, plan, runner.CapabilitySnapshot{PipelineMode: "phase_b_dispatch", Ready: true, LabelsSurvived: true}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := database.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := map[string]bool{}
+	for _, record := range api.resolved {
+		resolved[record.ID] = true
+	}
+	for _, alert := range api.injected {
+		id := "source-" + alert.Labels["oscar_test_event_id"]
+		if !resolved[id] || !resolved[id+"-prior"] {
+			t.Fatalf("occurrence of %s not resolved: resolved=%v", id, resolved)
+		}
+	}
+	if stored.CleanupStatus != domain.CleanupClean {
+		t.Fatalf("cleanup=%s terminal=%q", stored.CleanupStatus, stored.TerminalError)
+	}
+}
+
 func TestRunnerPhaseAScoresAuditAndSkipsSyntheticAssertions(t *testing.T) {
 	database := openDatabase(t)
 	run := newRun()
@@ -428,6 +464,7 @@ type fakeAPI struct {
 	hideHistoryOnAuditError  bool
 	resolved                 []oscar.HistoryRecord
 	ignoreResolve            bool
+	priorOccurrence          bool // History also holds an older still-firing occurrence per source event
 }
 
 // withResolved reports History rows the harness resolved, as OSCAR would
@@ -524,11 +561,16 @@ func (f *fakeAPI) FindHistory(_ context.Context, query oscar.HistoryQuery) ([]os
 		for key, value := range alert.Labels {
 			labels[key] = value
 		}
-		byEvent[eventID] = oscar.HistoryRecord{ID: "source-" + eventID, AlertName: query.AlertName, Fingerprint: "server-" + eventID, Status: alert.Status, CreatedAt: query.Start.Add(time.Millisecond), Labels: labels}
+		byEvent[eventID] = oscar.HistoryRecord{ID: "source-" + eventID, AlertName: query.AlertName, Fingerprint: "server-" + eventID, Status: alert.Status, CreatedAt: query.Start.Add(time.Millisecond), StartsAt: query.Start.Add(2 * time.Millisecond), Labels: labels}
 	}
 	result := make([]oscar.HistoryRecord, 0, len(byEvent))
 	for _, record := range byEvent {
 		result = append(result, record)
+		if f.priorOccurrence {
+			prior := record
+			prior.ID, prior.Status, prior.StartsAt = record.ID+"-prior", "firing", record.StartsAt.Add(-time.Millisecond)
+			result = append(result, prior)
+		}
 	}
 	return f.withResolved(result), nil
 }

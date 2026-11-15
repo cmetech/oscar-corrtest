@@ -496,16 +496,11 @@ func TestFloodFixturesThroughRealHTTPClient(t *testing.T) {
 				if first.Fingerprint != refire.Fingerprint || first.StartsAt == refire.StartsAt {
 					t.Fatal("refire lost stable labels or changed episode")
 				}
-				for _, clean := range fixture.cleanup {
-					fp := clean.Labels["oscar_fingerprint"]
-					latest := time.Time{}
-					for _, row := range fixture.history {
-						if row.Fingerprint == fp && row.StartsAt.After(latest) {
-							latest = row.StartsAt
-						}
-					}
-					if clean.StartsAt != latest.Format(time.RFC3339Nano) {
-						t.Fatalf("cleanup bound wrong episode: %+v", clean)
+				// Each episode (first and refire) is its own History row, resolved by
+				// its own native fingerprint and startsAt.
+				for key, row := range fixture.history {
+					if !fixture.cleaned[key] {
+						t.Fatalf("episode not resolved by cleanup: %s %s", row.AlertName, row.StartsAt)
 					}
 				}
 			}
