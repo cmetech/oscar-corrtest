@@ -60,6 +60,7 @@ type fake struct {
 	postErr       error
 	incErr        map[string]error
 	incQueries    []string
+	steps         []string // enable/sleep/post order for B5
 }
 
 func good() *fake {
@@ -92,10 +93,13 @@ func good() *fake {
 	return f
 }
 
-func (f *fake) Now() time.Time                             { return t0 }
-func (f *fake) CampaignID() string                         { return "camp-001" }
-func (f *fake) ControllerVersion() string                  { return f.ctlVersion }
-func (f *fake) Sleep(context.Context, time.Duration) error { return nil }
+func (f *fake) Now() time.Time            { return t0 }
+func (f *fake) CampaignID() string        { return "camp-001" }
+func (f *fake) ControllerVersion() string { return f.ctlVersion }
+func (f *fake) Sleep(_ context.Context, d time.Duration) error {
+	f.steps = append(f.steps, "sleep "+d.String())
+	return nil
+}
 func (f *fake) Probe(context.Context) (targetops.ProbeResult, Timing, error) {
 	return f.probe, f.probeT, nil
 }
@@ -124,10 +128,12 @@ func (f *fake) SinkHealth(context.Context) error                { return f.sinkH
 func (f *fake) SinkEnabled(context.Context) (bool, error)       { return f.sinkEnabled, nil }
 func (f *fake) SetSinkEnabled(_ context.Context, on bool) error {
 	f.sinkSets = append(f.sinkSets, on)
+	f.steps = append(f.steps, fmt.Sprintf("sink %v", on))
 	return nil
 }
 func (f *fake) PostAlert(_ context.Context, l map[string]string) error {
 	f.posted = append(f.posted, l)
+	f.steps = append(f.steps, "post")
 	return f.postErr
 }
 func (f *fake) ResolveAlert(_ context.Context, l map[string]string) error {
@@ -303,6 +309,21 @@ func TestB5SmokeRecordsAndRestoresMutation(t *testing.T) {
 	run(f)
 	if len(f.sinkSets) != 2 || len(f.restored) != 1 {
 		t.Fatal("failed smoke must still disable and restore")
+	}
+}
+
+// Live 2026-11-15: the correlator caches enabled notifiers for 30s
+// (ENABLED_NOTIFIER_CACHE_TTL), so a smoke posted right after enabling
+// CAMPAIGN_SINK was never dispatched while other alerts kept the cache warm.
+func TestB5WaitsForNotifierCacheBeforePosting(t *testing.T) {
+	f := good()
+	run(f)
+	want := []string{"sink true", "sleep " + notifierPropagation.String(), "post"}
+	if len(f.steps) < 3 || f.steps[0] != want[0] || f.steps[1] != want[1] || f.steps[2] != want[2] {
+		t.Fatalf("steps %v, want prefix %v", f.steps, want)
+	}
+	if notifierPropagation <= 30*time.Second {
+		t.Fatalf("notifierPropagation %s must exceed the correlator's 30s cache TTL", notifierPropagation)
 	}
 }
 

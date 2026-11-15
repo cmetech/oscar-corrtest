@@ -27,7 +27,10 @@ const (
 	b9Window         = 60 * time.Minute
 	smokeAttempts    = 10
 	smokeWait        = 2 * time.Second
-	gib              = 1 << 30
+	// ponytail: fixed wait past the correlator's default 30s enabled-notifier cache
+	// (ENABLED_NOTIFIER_CACHE_TTL); poll its notifier inventory if the TTL is ever tuned up.
+	notifierPropagation = 35 * time.Second
+	gib                 = 1 << 30
 )
 
 // HomelabJobs are the homelab pack's jobs (B9: each needs a success in the
@@ -290,6 +293,10 @@ func smoke(ctx context.Context, d Deps) (received bool, err error) {
 	}()
 	if err := d.SetSinkEnabled(ctx, true); err != nil {
 		return false, fmt.Errorf("enable CAMPAIGN_SINK: %w", err)
+	}
+	// The correlator dispatches only to notifiers in its cached enabled set.
+	if err := d.Sleep(ctx, notifierPropagation); err != nil {
+		return false, err
 	}
 	since := d.Now().Add(-2 * time.Second) // receipts filter at one-second resolution
 	posted = true                          // resolve even if the post errored: it may have landed
