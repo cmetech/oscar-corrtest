@@ -40,6 +40,8 @@ func TestSnowCloseRequiresReadback(t *testing.T) {
 			w.Write([]byte(`{"result":{"state":"6"}}`)) // 200 but not actually applied
 		case strings.HasSuffix(r.URL.Path, "/incident"):
 			w.Write([]byte(`{"result":[{"number":"INC1","sys_id":"s1","state":"2"}]}`))
+		case strings.HasSuffix(r.URL.Path, "/incident/s1"): // single-record GET returns an object
+			w.Write([]byte(`{"result":{}}`))
 		default:
 			w.Write([]byte(`{"result":[]}`))
 		}
@@ -122,6 +124,35 @@ func TestSnowIncidentJournalQuery(t *testing.T) {
 	inc, err := s.Incident(context.Background(), "INC1")
 	if err != nil || len(inc.Comments) != 1 || inc.Comments[0].Value != "OSCAR resolution comment" {
 		t.Fatal(inc, err)
+	}
+}
+
+// Live PDI 2026-11-15: an itil account sees no sys_journal_field rows, while the
+// incident's comments display value (account time zone, newest first) holds them.
+func TestSnowIncidentCommentsFallBackToDisplayValueInUTC(t *testing.T) {
+	s := newTestSNOW(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/sys_journal_field"):
+			w.Write([]byte(`{"result":[]}`))
+		case strings.HasSuffix(r.URL.Path, "/incident/s1"):
+			if r.URL.Query().Get("sysparm_display_value") != "all" {
+				t.Errorf("display query %v", r.URL.Query())
+			}
+			w.Write([]byte(`{"result":{"sys_created_on":{"value":"2026-11-15 15:28:40","display_value":"2026-11-15 07:28:40"},` +
+				`"comments":{"value":"","display_value":"2026-11-15 07:30:10 - OSCAR oscar-ticketing (Comments)\nOSCAR alert still firing: episode 1, occurrence 3.\n\n` +
+				`2026-11-15 07:29:05 - OSCAR oscar-ticketing (Comments)\n[OSCAR AUTO-UPDATE 2026-11-15 15:29:03 UTC] Alert has been resolved (Last severity: WARNING)\n\n"}}}`))
+		default:
+			w.Write([]byte(`{"result":[{"number":"INC1","sys_id":"s1","state":"1"}]}`))
+		}
+	})
+	inc, err := s.Incident(context.Background(), "INC1")
+	if err != nil || len(inc.Comments) != 2 {
+		t.Fatal(inc, err)
+	}
+	first, second := inc.Comments[0], inc.Comments[1]
+	if first.CreatedOn != "2026-11-15 15:29:05" || !strings.HasPrefix(first.Value, "[OSCAR AUTO-UPDATE") ||
+		second.CreatedOn != "2026-11-15 15:30:10" || second.Value != "OSCAR alert still firing: episode 1, occurrence 3." {
+		t.Fatalf("comments %+v, want oldest first in UTC", inc.Comments)
 	}
 }
 

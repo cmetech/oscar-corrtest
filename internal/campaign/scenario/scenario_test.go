@@ -7,7 +7,7 @@ import (
 	corr "github.com/cmetech/oscar-corrtest/internal/scenario"
 )
 
-const goldenHash = "6fe2fa26020caf0c86fe61991d4bee5c22b8c1a0722ae0f4e10cc54da6f24d93"
+const goldenHash = "70228505d153f2c25080b7127d79bdb0c2db956a2bfe4d0cce5c48bb12750cf4"
 
 func TestAlertingDayV1Values(t *testing.T) {
 	s := AlertingDayV1()
@@ -35,7 +35,7 @@ func TestAlertingDayV1Values(t *testing.T) {
 	if r := s.Phase("resend"); r.Start != 90*time.Minute || r.End != 120*time.Minute {
 		t.Fatalf("resend: %+v", r)
 	}
-	if s.Redelivery != time.Minute || s.ResendUntil != 118*time.Minute {
+	if s.Redelivery != 130*time.Second || s.ResendUntil != 118*time.Minute {
 		t.Fatal("redelivery")
 	}
 	f := s.FrontOffice

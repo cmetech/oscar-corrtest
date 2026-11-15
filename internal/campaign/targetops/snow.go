@@ -148,7 +148,61 @@ func (s *SNOW) Incident(ctx context.Context, number string) (Incident, error) {
 	if json.Unmarshal(jr, &inc.Comments) != nil {
 		return Incident{}, fmt.Errorf("malformed journal response")
 	}
+	if len(inc.Comments) == 0 { // ACLs can hide journal rows (live PDI itil account); the display value still has them
+		if inc.Comments, err = s.displayComments(ctx, inc.SysID); err != nil {
+			return Incident{}, err
+		}
+	}
 	return inc, nil
+}
+
+const snowTime = "2006-01-02 15:04:05"
+
+var commentHeader = regexp.MustCompile(`(?m)^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) - .*\((?:Additional comments|Comments)\)\n`)
+
+// displayComments parses the incident's comments display value (account time zone,
+// newest first) into oldest-first comments stamped in UTC. The zone offset comes
+// from the same record's sys_created_on value/display pair.
+// ponytail: one offset per incident; a DST change between creation and comment shifts it by an hour.
+func (s *SNOW) displayComments(ctx context.Context, sysID string) ([]Comment, error) {
+	res, err := s.call(ctx, http.MethodGet, "/api/now/table/incident/"+sysID, url.Values{
+		"sysparm_display_value": {"all"}, "sysparm_fields": {"comments,sys_created_on"}}, nil)
+	if err != nil {
+		return nil, err
+	}
+	type pair struct {
+		Value   string `json:"value"`
+		Display string `json:"display_value"`
+	}
+	var rec map[string]pair
+	if json.Unmarshal(res, &rec) != nil {
+		return nil, fmt.Errorf("malformed incident display response")
+	}
+	text, created := rec["comments"].Display, rec["sys_created_on"]
+	if strings.TrimSpace(text) == "" {
+		return nil, nil
+	}
+	utc, err1 := time.Parse(snowTime, created.Value)
+	local, err2 := time.Parse(snowTime, created.Display)
+	if err1 != nil || err2 != nil {
+		return nil, fmt.Errorf("incident %s has no comparable sys_created_on", sysID)
+	}
+	offset := local.Sub(utc)
+	heads := commentHeader.FindAllStringSubmatchIndex(text, -1)
+	out := make([]Comment, 0, len(heads))
+	for i, h := range heads {
+		end := len(text)
+		if i+1 < len(heads) {
+			end = heads[i+1][0]
+		}
+		at, err := time.Parse(snowTime, text[h[2]:h[3]])
+		if err != nil {
+			return nil, fmt.Errorf("malformed comment time %q", text[h[2]:h[3]])
+		}
+		out = append(out, Comment{Value: strings.TrimSpace(text[h[1]:end]), CreatedOn: at.Add(-offset).Format(snowTime)})
+	}
+	slices.Reverse(out)
+	return out, nil
 }
 
 // Resolve PATCHes state=6 and reads back; the result is an error unless the state is resolved (6) or closed (7).

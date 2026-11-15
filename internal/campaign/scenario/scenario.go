@@ -110,6 +110,11 @@ type Scenario struct {
 	Seed        int64           `json:"seed"`
 }
 
+// TransportDedupWindow is OSCAR's JetStream duplicate window for ordinary alerts
+// (Nats-Msg-Id fingerprint:status:startsAt): an unchanged repost inside it is
+// absorbed before the correlator, so unchanged cohorts must redeliver slower.
+const TransportDedupWindow = 120 * time.Second
+
 func AlertingDayV1() Scenario {
 	min := time.Minute
 	var setA, setB []CaseRef
@@ -135,7 +140,7 @@ func AlertingDayV1() Scenario {
 			{"R3", "notification", "either", 300 * time.Second, 5, n(2), true, 10, "CAMPAIGN_SINK"},
 			{"R4", "ticket", "time", 590 * time.Second, 0, n(2), false, 10, "ALERTHISTORY"},
 		},
-		Redelivery: 60 * time.Second, ResendUntil: 118 * min,
+		Redelivery: 130 * time.Second, ResendUntil: 118 * min, // clear of TransportDedupWindow
 		FrontOffice: FrontOfficeSpec{Users: 4, Interval: 15 * time.Second, Jitter: 3 * time.Second, SearchEvery: 2 * min},
 		Limits: Limits{HistoryP95: 40 * time.Second, Drain: 15 * min, ContainerSlopeMiBPerHour: 100,
 			FrontOfficeP95: 2 * time.Second, FrontOfficeP99: 5 * time.Second, CorrelationSuccess: 1, TicketSuccess: 1, ResendSuccess: 1,
