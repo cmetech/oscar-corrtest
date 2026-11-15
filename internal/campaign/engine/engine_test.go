@@ -170,8 +170,8 @@ func TestWorkerLossIsInconclusive(t *testing.T) {
 	waitFor(t, "orphan resolve-all", func() bool {
 		h.oscar.mu.Lock()
 		defer h.oscar.mu.Unlock()
-		for name, r := range h.oscar.history {
-			if strings.HasPrefix(name, "Campaign-"+h.id+"-") && !strings.Contains(name, "resend") && r.Status == "firing" {
+		for _, r := range h.oscar.history {
+			if name := r.AlertName; strings.HasPrefix(name, "Campaign-"+h.id+"-") && !strings.Contains(name, "resend") && r.Status == "firing" {
 				return false
 			}
 		}
@@ -557,6 +557,62 @@ func TestCohortResolveFailureIsDirty(t *testing.T) {
 	}
 	if c := h.campaign(); c.Cleanup != domain.CleanupDirty {
 		t.Fatalf("cleanup %s", c.Cleanup)
+	}
+}
+
+// TestCohortStillFiringInHistoryIsDirty: an accepted resolve is not cleanup;
+// occurrences still firing in History make cleanup DIRTY and are named.
+func TestCohortStillFiringInHistoryIsDirty(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.s.Resend = h.s.Resend[:3] // no ticket cohort: an open incident must not be what makes it DIRTY
+	h.oscar.ignoreResolves = true
+	if err := h.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if c := h.campaign(); c.Cleanup != domain.CleanupDirty {
+		t.Fatalf("cleanup %s", c.Cleanup)
+	}
+	evs, _ := h.db.RecentCampaignEvents(context.Background(), h.id, 400)
+	named := false
+	for _, ev := range evs {
+		named = named || (ev.Type == "campaign.cleanup" && strings.Contains(ev.Summary, "still firing in History") && strings.Contains(ev.Summary, "Campaign-"+h.id))
+	}
+	if !named {
+		t.Fatal("cleanup did not name the occurrences still firing")
+	}
+}
+
+// Every resolve is History-built: the native fingerprint and the exact startsAt
+// of a recorded occurrence (fresh cohorts have several per alertname).
+func TestCohortResolvesEchoHistoryOccurrences(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	if err := h.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	h.assertRestored()
+	h.oscar.mu.Lock()
+	defer h.oscar.mu.Unlock()
+	occurrences := map[string]int{}
+	for _, row := range h.oscar.history {
+		occurrences[row.AlertName]++
+	}
+	multi := false
+	for _, n := range occurrences {
+		multi = multi || n > 1
+	}
+	if !multi || len(h.oscar.resolvePosts) == 0 {
+		t.Fatalf("fixture lacks repeated occurrences or History resolves: %v posts=%d", occurrences, len(h.oscar.resolvePosts))
+	}
+	for _, post := range h.oscar.resolvePosts {
+		matched := false
+		for _, row := range h.oscar.history {
+			matched = matched || (row.Labels["am_fingerprint"] == post.Fingerprint && row.StartsAt.Format(time.RFC3339Nano) == post.StartsAt)
+		}
+		if !matched || post.Labels["am_fingerprint"] != "" {
+			t.Fatalf("resolve not built from a History occurrence: %+v", post)
+		}
 	}
 }
 

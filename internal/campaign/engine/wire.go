@@ -175,20 +175,21 @@ func (t oscarTarget) History(ctx context.Context, run string, start, end time.Ti
 	return t.c.HistoryByLabel(ctx, "campaign_run", run, start, end)
 }
 
-// PostAlert sends an Alertmanager webhook delivery to the middleware
-// (POST /api/v1/alerts; see the cohort route note in cohorts.go). Transport
-// errors and timeouts return status 0: the outcome is unknown.
+// PostAlert sends a firing Alertmanager webhook delivery to the middleware
+// (POST /api/v1/alerts; see the cohort route note in cohorts.go).
 func (t oscarTarget) PostAlert(ctx context.Context, a Alert) (int, error) {
-	status := "firing"
-	if !a.EndsAt.IsZero() {
-		status = "resolved"
-	}
-	req, err := oscar.BuildAlertRequest(compiler.AlertPlan{Name: a.Name, Status: status, Labels: a.Labels,
-		Annotations: map[string]string{"summary": a.Name}, StartsAt: a.StartsAt, EndsAt: a.EndsAt})
+	req, err := oscar.BuildAlertRequest(compiler.AlertPlan{Name: a.Name, Status: "firing", Labels: a.Labels,
+		Annotations: map[string]string{"summary": a.Name}, StartsAt: a.StartsAt})
 	if err != nil {
 		return 400, err
 	}
-	err = t.c.DoJSON(ctx, http.MethodPost, "/api/v1/alerts", nil, req, nil)
+	return t.PostAlertGroup(ctx, req)
+}
+
+// PostAlertGroup posts a prebuilt envelope. Transport errors and timeouts
+// return status 0: the outcome is unknown.
+func (t oscarTarget) PostAlertGroup(ctx context.Context, req oscar.AlertGroupRequest) (int, error) {
+	err := t.c.DoJSON(ctx, http.MethodPost, "/api/v1/alerts", nil, req, nil)
 	if err == nil {
 		return 200, nil
 	}

@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -144,7 +146,7 @@ type fakeOSCAR struct {
 	notifiers  map[string]*targetops.Notifier
 	policies   map[string]*fakePolicy
 	revs       map[string]int
-	history    map[string]*oscar.HistoryRecord
+	history    []*oscar.HistoryRecord // one row per occurrence: (am_fingerprint, startsAt)
 	receipts   []targetops.Receipt
 	incidents  map[string]*targetops.Incident // by alertname
 	cohort     map[string][]delivery          // controller cohort deliveries
@@ -156,9 +158,11 @@ type fakeOSCAR struct {
 	corrInc    []*targetops.Incident // set B source-alert incidents
 	lastFO     time.Time             // last front-office request
 	// fault injection
-	withholdComments bool   // resolves never get OSCAR's comment
-	listErr          int    // next N campaign incident listings fail (-1: always)
-	failResolves     bool   // cohort resolve posts get HTTP 500
+	withholdComments bool // resolves never get OSCAR's comment
+	listErr          int  // next N campaign incident listings fail (-1: always)
+	failResolves     bool // cohort resolve posts get HTTP 500
+	ignoreResolves   bool // middleware resolve posts get HTTP 200 but match nothing
+	resolvePosts     []oscar.AlertRequest
 	onSetNotifier    func() // called before each notifier change
 	corrNoTicket     bool   // ticketed set B runs never open their incident
 	sinkErr          bool   // Receipts fails
@@ -172,7 +176,7 @@ type fakeOSCAR struct {
 
 func newFakeOSCAR(t *testing.T, clock *scaledClock, s scenario.Scenario) *fakeOSCAR {
 	f := &fakeOSCAR{t: t, clock: clock, s: s, policies: map[string]*fakePolicy{}, revs: map[string]int{},
-		history: map[string]*oscar.HistoryRecord{}, incidents: map[string]*targetops.Incident{}, cohort: map[string][]delivery{}, posts: map[string]int{},
+		incidents: map[string]*targetops.Incident{}, cohort: map[string][]delivery{}, posts: map[string]int{},
 		notifiers: map[string]*targetops.Notifier{}}
 	for _, n := range []targetops.Notifier{{ID: "n1", Name: "EMAIL", Status: "enabled"}, {ID: "n2", Name: "SLACK", Status: "enabled"},
 		{ID: "n3", Name: "ALERTHISTORY", Status: "enabled"}, {ID: "n4", Name: "LOGGER", Status: "enabled"},
@@ -196,7 +200,7 @@ func (f *fakeOSCAR) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, a := range alerts {
-			f.ingest(a.Labels, a.EndsAt != "", true)
+			f.ingest(a.Labels, time.Time{}, a.EndsAt != "", true)
 		}
 		w.WriteHeader(200)
 		return
@@ -207,15 +211,36 @@ func (f *fakeOSCAR) serve(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`{"records":[],"total_records":0}`)) // front office
 }
 
-// ingest applies one alert to the model.
-func (f *fakeOSCAR) ingest(labels map[string]string, resolved, lane bool) {
+// amFingerprint stands in for the native transport fingerprint OSCAR records
+// as the am_fingerprint History label.
+func amFingerprint(labels map[string]string) string {
+	keys := make([]string, 0, len(labels))
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	h := fnv.New64a()
+	for _, k := range keys {
+		_, _ = fmt.Fprintf(h, "%s\x00%s\x00", k, labels[k])
+	}
+	return fmt.Sprintf("%016x", h.Sum64())
+}
+
+// ingest applies one alert to the model. Native Alertmanager (lane) keeps one
+// active occurrence per fingerprint and resolves it by labels; the middleware
+// route records each startsAt as its own occurrence and resolves only the
+// exact (am_fingerprint, startsAt) occurrence.
+func (f *fakeOSCAR) ingest(labels map[string]string, startsAt time.Time, resolved, lane bool) {
 	now := f.clock.Now().UTC()
 	name := labels["alertname"]
+	fp := amFingerprint(labels)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if resolved {
-		if h := f.history[name]; h != nil {
-			h.Status = "resolved"
+		for _, h := range f.history {
+			if h.Labels["am_fingerprint"] == fp && h.Status == "firing" && (lane || h.StartsAt.Equal(startsAt)) {
+				h.Status = "resolved"
+			}
 		}
 		if inc := f.incidents[name]; inc != nil && !f.withholdComments {
 			inc.Comments = append(inc.Comments, targetops.Comment{Value: "[OSCAR AUTO-UPDATE 1] Alert has been resolved"})
@@ -226,18 +251,34 @@ func (f *fakeOSCAR) ingest(labels map[string]string, resolved, lane bool) {
 	if lane {
 		f.laneFires = append(f.laneFires, now)
 	}
-	if f.history[name] == nil {
-		f.history[name] = &oscar.HistoryRecord{AlertName: name, Status: "firing", CreatedAt: now.Add(50 * time.Millisecond), Labels: labels}
-		if f.notifiers["n5"].Status == "enabled" {
-			f.receipts = append(f.receipts, targetops.Receipt{ReceivedAt: now.Add(100 * time.Millisecond),
-				Alerts: []targetops.SinkAlert{{AlertName: name, Status: "firing", Labels: labels}}})
-		}
-		if labels["create_ticket"] == "snow" && f.incidents[name] == nil {
-			f.incidents[name] = &targetops.Incident{Number: fmt.Sprintf("INC%07d", len(f.incidents)+1), SysID: name, State: "1",
-				ShortDescription: "OSCAR " + name}
+	seen := false
+	for _, h := range f.history {
+		seen = seen || h.AlertName == name
+		if h.Labels["am_fingerprint"] == fp && (lane && h.Status == "firing" || !lane && h.StartsAt.Equal(startsAt)) {
+			h.Status = "firing"
+			return
 		}
 	}
-	f.history[name].Status = "firing"
+	if lane || startsAt.IsZero() {
+		startsAt = now
+	}
+	row := map[string]string{"am_fingerprint": fp, "oscar_fingerprint": fp[:12]}
+	for k, v := range labels {
+		row[k] = v
+	}
+	f.history = append(f.history, &oscar.HistoryRecord{ID: fmt.Sprintf("h%d", len(f.history)+1), AlertName: name, Fingerprint: fp[:12], Status: "firing",
+		StartsAt: startsAt.Truncate(time.Millisecond), CreatedAt: now.Add(50 * time.Millisecond), Labels: row})
+	if seen {
+		return
+	}
+	if f.notifiers["n5"].Status == "enabled" {
+		f.receipts = append(f.receipts, targetops.Receipt{ReceivedAt: now.Add(100 * time.Millisecond),
+			Alerts: []targetops.SinkAlert{{AlertName: name, Status: "firing", Labels: labels}}})
+	}
+	if labels["create_ticket"] == "snow" && f.incidents[name] == nil {
+		f.incidents[name] = &targetops.Incident{Number: fmt.Sprintf("INC%07d", len(f.incidents)+1), SysID: name, State: "1",
+			ShortDescription: "OSCAR " + name}
+	}
 }
 
 // --- Target ---
@@ -367,25 +408,50 @@ func (f *fakeOSCAR) PolicyStatus(_ context.Context, nid, action, policyID string
 	return st, nil
 }
 
+// PostAlert is the middleware route for cohort firings.
 func (f *fakeOSCAR) PostAlert(_ context.Context, a Alert) (int, error) {
 	f.mu.Lock()
-	firing := a.EndsAt.IsZero()
-	if firing {
-		f.posts[a.Name]++
-	}
-	if !firing && f.failResolves {
-		f.mu.Unlock()
-		return 500, errors.New("HTTP 500")
-	}
-	amb := firing && a.Name == f.ambiguous && f.posts[a.Name] == 1
-	if !amb && a.EndsAt.IsZero() {
+	f.posts[a.Name]++
+	amb := a.Name == f.ambiguous && f.posts[a.Name] == 1
+	if !amb {
 		f.cohort[a.Name] = append(f.cohort[a.Name], delivery{at: f.clock.Now().UTC(), labels: a.Labels})
 	}
 	f.mu.Unlock()
 	if amb {
 		return 0, errors.New("context deadline exceeded")
 	}
-	f.ingest(a.Labels, !a.EndsAt.IsZero(), false)
+	f.ingest(a.Labels, a.StartsAt, false, false)
+	return 200, nil
+}
+
+// PostAlertGroup is the middleware route for History-built resolves.
+func (f *fakeOSCAR) PostAlertGroup(_ context.Context, req oscar.AlertGroupRequest) (int, error) {
+	f.mu.Lock()
+	f.resolvePosts = append(f.resolvePosts, req.Alerts...)
+	fail, ignore := f.failResolves, f.ignoreResolves
+	f.mu.Unlock()
+	if fail {
+		return 500, errors.New("HTTP 500")
+	}
+	for _, a := range req.Alerts {
+		starts, err := time.Parse(time.RFC3339Nano, a.StartsAt)
+		if a.Status != "resolved" || err != nil {
+			return 422, fmt.Errorf("resolve needs status resolved and startsAt: %+v", a)
+		}
+		if ignore {
+			continue
+		}
+		f.mu.Lock()
+		for _, h := range f.history {
+			if h.Labels["am_fingerprint"] == a.Fingerprint && h.StartsAt.Equal(starts) && h.Status == "firing" {
+				h.Status = "resolved"
+				if inc := f.incidents[h.AlertName]; inc != nil && !f.withholdComments {
+					inc.Comments = append(inc.Comments, targetops.Comment{Value: "[OSCAR AUTO-UPDATE 1] Alert has been resolved"})
+				}
+			}
+		}
+		f.mu.Unlock()
+	}
 	return 200, nil
 }
 
@@ -777,9 +843,9 @@ func (h *harness) assertRestored() {
 			h.t.Errorf("set B incident %s (%s) not closed", inc.Number, inc.ShortDescription)
 		}
 	}
-	for name, h2 := range f.history {
+	for _, h2 := range f.history {
 		if h2.Status != "resolved" {
-			h.t.Errorf("alert %s still firing", name)
+			h.t.Errorf("alert %s (startsAt %s) still firing", h2.AlertName, h2.StartsAt)
 		}
 	}
 	open, err := h.db.OpenMutations(context.Background(), h.id)

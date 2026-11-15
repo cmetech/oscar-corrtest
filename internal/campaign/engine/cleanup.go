@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -34,14 +33,14 @@ func (r *run) drainAndFinish(ctx context.Context, stopped bool) error {
 	}
 	stopHB()
 	r.resolveLane(ctx)
-	r.resolveCohorts(ctx)
+	_, _ = r.resolveFiring(ctx, false) // cleanup verifies against History
 	return r.finishAfterDrain(ctx, "", "")
 }
 
 // finish is recovery's drain and cleanup: no lane restart, no cohorts.
 func (r *run) finish(ctx context.Context, why string) error {
 	r.resolveLane(ctx)
-	r.recoverCohorts(ctx)
+	_, _ = r.resolveFiring(ctx, false) // cleanup verifies against History
 	return r.finishAfterDrain(ctx, domain.VerdictInconclusive, why)
 }
 
@@ -291,7 +290,7 @@ func (r *run) closeIncidents(ctx context.Context) []targetops.Incident {
 			break
 		}
 		if retry < resolveRetry && len(pending) > 0 {
-			r.reresolveCohorts(ctx)
+			_, _ = r.resolveFiring(ctx, false)
 		}
 		wait := guardEvery
 		if listErr != nil { // retry a failed listing with backoff, up to the 15 s cadence
@@ -317,24 +316,12 @@ func (r *run) resolveIncident(ctx context.Context, number string) error {
 // cleanup walks the open mutations in reverse and restores each one.
 func (r *run) cleanup(ctx context.Context) domain.CleanupStatus {
 	r.restoreKinds(ctx) // all kinds
+	r.verifyHistoryResolved(ctx)
 	open, err := r.store().OpenMutations(ctx, r.id)
 	r.mu.Lock()
 	incidents := append([]string{}, r.openIncidents...)
 	dirty := append([]string{}, r.dirty...)
-	var cohorts []string
-	for n := range r.cohortOpen {
-		cohorts = append(cohorts, n)
-	}
 	r.mu.Unlock()
-	for _, m := range r.members() {
-		if m.recorded && !m.resolved {
-			cohorts = append(cohorts, m.alert.Name)
-		}
-	}
-	if len(cohorts) > 0 {
-		sort.Strings(cohorts)
-		dirty = append(dirty, "cohort alerts not resolved: "+strings.Join(cohorts, ","))
-	}
 	if len(incidents) > 0 {
 		r.event(ctx, "campaign.cleanup", "error", "incidents still open: "+strings.Join(incidents, ","), incidents)
 	}

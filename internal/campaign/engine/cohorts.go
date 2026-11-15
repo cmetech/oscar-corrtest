@@ -2,14 +2,15 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/resend"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
+	"github.com/cmetech/oscar-corrtest/internal/oscar"
 )
 
 // Cohort route (C15): native Alertmanager suppresses unchanged reposts, so
@@ -112,7 +113,7 @@ func (r *run) deliver(ctx context.Context, m *cohortMember, tick time.Time) {
 	if fresh {
 		m.alert.StartsAt = tick
 	}
-	if !m.recorded { // recovery resolves cohorts from these events
+	if !m.recorded { // evidence of the cohort; cleanup resolves from History
 		r.event(context.WithoutCancel(ctx), cohortEvent, "info", "cohort member "+m.alert.Name, cohortPrior{m.alert.Name, m.alert.Labels, m.alert.StartsAt})
 		m.recorded = true
 	}
@@ -131,68 +132,66 @@ func (r *run) deliver(ctx context.Context, m *cohortMember, tick time.Time) {
 	}
 }
 
-// reresolveCohorts re-posts every cohort resolve (in-process members, or the
-// recorded ones during recovery).
-func (r *run) reresolveCohorts(ctx context.Context) {
-	ms := r.members()
-	if len(ms) == 0 {
-		r.recoverCohorts(ctx)
-		return
+// resolveFiring reads the campaign's History and resolves every occurrence
+// still firing, each by its own native fingerprint and startsAt (fresh cohorts
+// leave one occurrence per delivery). The worker resolves its lane through
+// native Alertmanager, so lane occurrences are included only when
+// includeLane is set (cleanup's last resort). It returns the occurrences that
+// were firing when read; an unreadable History is an error, never "none".
+func (r *run) resolveFiring(ctx context.Context, includeLane bool) ([]oscar.HistoryRecord, error) {
+	if r.t0.IsZero() { // no traffic was sent
+		return nil, nil
 	}
-	for _, m := range ms {
-		m.resolved = false
-	}
-	r.resolveCohorts(ctx)
-}
-
-// resolveCohorts resolves every delivered cohort member now.
-func (r *run) resolveCohorts(ctx context.Context) {
-	for _, m := range r.members() {
-		if !m.recorded || m.resolved {
-			continue
-		}
-		if err := r.resolveAlert(ctx, m.alert); err != nil {
-			r.event(ctx, "campaign.cohort", "warn", err.Error(), nil)
-			continue
-		}
-		m.resolved = true
-	}
-}
-
-func (r *run) resolveAlert(ctx context.Context, a Alert) error {
-	a.EndsAt = r.now()
-	status, err := r.e.d.Target.PostAlert(ctx, a)
-	if err == nil && status/100 != 2 {
-		err = fmt.Errorf("resolve %s: HTTP %d", a.Name, status)
-	}
-	return err
-}
-
-// recoverCohorts resolves every cohort member recorded in the event log.
-func (r *run) recoverCohorts(ctx context.Context) {
-	evs, err := r.store().RecentCampaignEvents(ctx, r.id, maxEvents)
+	rows, err := r.e.d.Target.History(ctx, r.id, r.t0.Add(-time.Minute), r.now().Add(time.Minute))
 	if err != nil {
-		r.event(ctx, "campaign.cohort", "error", "read cohort events: "+err.Error(), nil)
-		return
+		return nil, err
 	}
-	for _, ev := range evs {
-		var p cohortPrior
-		if ev.Type != cohortEvent || json.Unmarshal(ev.Detail, &p) != nil {
+	var firing []oscar.HistoryRecord
+	for _, row := range rows {
+		if row.Labels["campaign_run"] != r.id || strings.EqualFold(row.Status, "resolved") || (!includeLane && row.Labels["campaign_lane"] == r.laneID) {
 			continue
 		}
-		err := r.resolveAlert(ctx, Alert{Name: p.Name, Labels: p.Labels, StartsAt: p.StartsAt})
-		r.mu.Lock()
-		if r.cohortOpen == nil {
-			r.cohortOpen = map[string]bool{}
+		firing = append(firing, row)
+		req, err := oscar.BuildHistoryResolve(row, r.id)
+		if err == nil {
+			var status int
+			if status, err = r.e.d.Target.PostAlertGroup(ctx, req); err == nil && status/100 != 2 {
+				err = fmt.Errorf("HTTP %d", status)
+			}
 		}
-		if err != nil { // cleanup is DIRTY while any stays unresolved (ruling C36)
-			r.cohortOpen[p.Name] = true
-		} else {
-			delete(r.cohortOpen, p.Name)
-		}
-		r.mu.Unlock()
 		if err != nil {
-			r.event(ctx, "campaign.cohort", "warn", err.Error(), nil)
+			r.event(ctx, cohortEvent, "warn", fmt.Sprintf("resolve %s (history %s): %v", row.AlertName, row.ID, err), nil)
+		}
+	}
+	return firing, nil
+}
+
+// historyResolveBudget bounds cleanup's History read-back (polled every
+// heartbeatEvery), after the drain and the incident wait already gave
+// resolves time to land.
+const historyResolveBudget = 2 * time.Minute
+
+// verifyHistoryResolved is cleanup's verdict input: CLEAN needs every campaign
+// occurrence to read back resolved. Firing ones are resolved each round; any
+// still firing at the budget are named as a cleanup failure.
+func (r *run) verifyHistoryResolved(ctx context.Context) {
+	deadline := r.now().Add(historyResolveBudget)
+	for {
+		firing, err := r.resolveFiring(ctx, true)
+		if err == nil && len(firing) == 0 {
+			return
+		}
+		if !r.now().Before(deadline) || !r.e.clock.SleepUntil(ctx, r.now().Add(heartbeatEvery)) {
+			if err != nil {
+				r.addDirty("History read-back failed (alerts not verified resolved): " + err.Error())
+				return
+			}
+			names := make([]string, 0, len(firing))
+			for _, row := range firing {
+				names = append(names, fmt.Sprintf("%s (history %s, startsAt %s)", row.AlertName, row.ID, row.StartsAt.UTC().Format(time.RFC3339Nano)))
+			}
+			r.addDirty(fmt.Sprintf("%d alerts still firing in History after resolve: %s", len(firing), strings.Join(names, ", ")))
+			return
 		}
 	}
 }

@@ -106,12 +106,23 @@ func BuildAlertRequest(alert compiler.AlertPlan) (AlertGroupRequest, error) {
 // resolve would make its label set differ from the original occurrence.
 var oscarAddedHistoryLabels = []string{"am_fingerprint", "oscar_handler_type", "oscar_correlation_suppressed_notifiers"}
 
-// BuildResolutionRequest converts an authoritative OSCAR history record into
-// the cleanup-only resolved alert body used by live execution. OSCAR matches a
-// resolve to its occurrence by the native transport fingerprint (History label
-// am_fingerprint) plus the original startsAt, so both are echoed exactly.
+// BuildResolutionRequest converts an authoritative OSCAR history record owned
+// by a correlation run (label oscar_test_run_id) into the cleanup-only resolved
+// alert body used by live execution.
 func BuildResolutionRequest(record HistoryRecord) (AlertGroupRequest, error) {
 	runID := strings.TrimSpace(record.Labels["oscar_test_run_id"])
+	if runID == "" {
+		return AlertGroupRequest{}, fmt.Errorf("history record lacks exact corrtest ownership or server fingerprint")
+	}
+	return BuildHistoryResolve(record, runID)
+}
+
+// BuildHistoryResolve is the one resolve builder for a History occurrence the
+// caller has verified that owner owns. OSCAR matches a resolve to its
+// occurrence by the native transport fingerprint (History label
+// am_fingerprint) plus the original startsAt, so both are echoed exactly.
+func BuildHistoryResolve(record HistoryRecord, owner string) (AlertGroupRequest, error) {
+	runID := strings.TrimSpace(owner)
 	if record.AlertName == "" || runID == "" || strings.TrimSpace(record.Fingerprint) == "" {
 		return AlertGroupRequest{}, fmt.Errorf("history record lacks exact corrtest ownership or server fingerprint")
 	}

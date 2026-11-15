@@ -67,12 +67,12 @@ type Worker interface {
 	Ledger(ctx context.Context, id string, w io.Writer) error
 }
 
-// Alert is one controller-sent alert (cohort member).
+// Alert is one controller-sent firing alert (cohort member). Resolves are
+// never built from it: they are built from History (oscar.BuildHistoryResolve).
 type Alert struct {
 	Name     string
 	Labels   map[string]string
 	StartsAt time.Time
-	EndsAt   time.Time // zero = firing
 }
 
 // Target is the OSCAR-side surface: notifiers, resend policies, the cohort
@@ -89,6 +89,9 @@ type Target interface {
 	// PostAlert sends one alert on the cohort route. status is the HTTP
 	// status, 0 when the outcome is unknown (timeout, transport error).
 	PostAlert(ctx context.Context, a Alert) (status int, err error)
+	// PostAlertGroup sends a prebuilt envelope (a History-built resolve) on
+	// the same route, with PostAlert's status semantics.
+	PostAlertGroup(ctx context.Context, req oscar.AlertGroupRequest) (status int, err error)
 	History(ctx context.Context, campaignRun string, start, end time.Time) ([]oscar.HistoryRecord, error)
 }
 
@@ -186,7 +189,6 @@ type run struct {
 	policies      []*policyState
 	resendIncon   string
 	cohorts       map[string]*cohortMember // alertname -> member
-	cohortOpen    map[string]bool          // recovered cohort alerts whose resolve failed
 	corrRuns      []score.CorrRun
 	notRun        []string
 	plannedCorr   int
@@ -210,7 +212,6 @@ type cohortMember struct {
 	deliveries []resend.Delivery
 	ambiguous  bool
 	recorded   bool
-	resolved   bool
 }
 
 func (r *run) store() Store   { return r.e.d.Store }
@@ -339,6 +340,9 @@ func (e *Engine) Cleanup(ctx context.Context, id string) (domain.CleanupStatus, 
 	r := &run{e: e, id: id, laneID: id + "-baseline", cohorts: map[string]*cohortMember{}, fo: map[string][]score.FOSample{}}
 	if s, ok := r.recordedScenario(ctx); ok {
 		r.s = s
+	}
+	if t0, ok := r.recordedT0(ctx); ok { // bounds the History read-back
+		r.t0 = t0
 	}
 	r.closeIncidents(ctx)
 	st := r.cleanup(ctx)
