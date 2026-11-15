@@ -85,7 +85,7 @@ type PrecheckQueries struct {
 var DefaultPrecheckQueries = PrecheckQueries{
 	// HostsDown and ScrapeDown return every series; zero-valued ones are down.
 	// An empty result is an error (fail closed).
-	HostsDown:    `up{job="node"}`,
+	HostsDown:    `up{job="node-exporter"}`, // OSCAR vmagent job name
 	ScrapeDown:   `up`,
 	DiskFreePct:  `min(100 * node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"})`,
 	MemAvailPct:  `min(100 * node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)`,
@@ -115,6 +115,8 @@ type PrecheckAdapter struct {
 	IngestURL        string // native Alertmanager ingest (host root + /ext/alertmanager/api/v2/alerts)
 	IngestHTTP       *http.Client
 	Queries          PrecheckQueries
+
+	smokeStart time.Time // startsAt PostAlert sent; the resolve must echo it exactly
 }
 
 // PrecheckStore is the persistence the pre-checks read and write.
@@ -406,17 +408,25 @@ func (a *PrecheckAdapter) SetSinkEnabled(ctx context.Context, on bool) error {
 	return err
 }
 
-// PostAlert and ResolveAlert use the native Alertmanager ingest.
+// PostAlert and ResolveAlert use the native Alertmanager ingest. The resolve
+// echoes the posted startsAt: OSCAR matches a resolve on the exact original
+// startsAt, and Alertmanager rejects a startsAt after endsAt.
+// ponytail: one remembered startsAt, B5 posts a single smoke alert.
 func (a *PrecheckAdapter) PostAlert(ctx context.Context, labels map[string]string) error {
-	return a.ingest(ctx, labels, time.Time{})
+	a.smokeStart = a.Clock.Now()
+	return a.ingest(ctx, labels, a.smokeStart, time.Time{})
 }
 
 func (a *PrecheckAdapter) ResolveAlert(ctx context.Context, labels map[string]string) error {
-	return a.ingest(ctx, labels, a.Clock.Now())
+	start, end := a.smokeStart, a.Clock.Now()
+	if start.IsZero() || start.After(end) {
+		start = end
+	}
+	return a.ingest(ctx, labels, start, end)
 }
 
-func (a *PrecheckAdapter) ingest(ctx context.Context, labels map[string]string, endsAt time.Time) error {
-	alert := map[string]any{"labels": labels, "annotations": map[string]string{"summary": labels["alertname"]}, "startsAt": a.Clock.Now().UTC().Format(time.RFC3339Nano)}
+func (a *PrecheckAdapter) ingest(ctx context.Context, labels map[string]string, startsAt, endsAt time.Time) error {
+	alert := map[string]any{"labels": labels, "annotations": map[string]string{"summary": labels["alertname"]}, "startsAt": startsAt.UTC().Format(time.RFC3339Nano)}
 	if !endsAt.IsZero() {
 		alert["endsAt"] = endsAt.UTC().Format(time.RFC3339Nano)
 	}
@@ -500,7 +510,7 @@ func (a *PrecheckAdapter) FrontOfficeUsers() ([]precheck.FOUser, error) {
 }
 
 func (a *PrecheckAdapter) FOHistory(ctx context.Context, key string) (int, error) {
-	return a.get(ctx, a.HTTP, a.FrontOfficeURL+"/api/v1/alerts/history?perPage=1", map[string]string{"X-API-Key": key})
+	return a.get(ctx, a.HTTP, a.FrontOfficeURL+"/ext/mw/api/v1/alerts/history?perPage=1", map[string]string{"X-API-Key": key})
 }
 
 func (a *PrecheckAdapter) get(ctx context.Context, hc *http.Client, url string, hdr map[string]string) (int, error) {

@@ -20,3 +20,16 @@ func TestTaskRunsFiltersAndPages(t *testing.T) {
 		t.Fatal(runs, err)
 	}
 }
+
+// Live OSCAR rows carry the job in "alias" (name is the Celery task) and often
+// only "timestamp" for time.
+func TestTaskRunsMatchesAliasAndFallsBackToTimestamp(t *testing.T) {
+	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"total_pages":1,"records":[{"name":"tm.tasks.common","alias":"monitor:check_connection:homelab","state":"SUCCESS","started":null,"received":null,"timestamp":"2026-11-15T05:00:15+00:00"},{"name":"tm.tasks.common","alias":"dg:generate_alerts","state":"SUCCESS","timestamp":"2026-11-15T05:00:00+00:00"}]}`))
+	}))
+	runs, err := TaskRuns(context.Background(), c, []string{"monitor:check_connection:homelab"}, time.Now().Add(-time.Hour), time.Now())
+	want := time.Date(2026, 11, 15, 5, 0, 15, 0, time.UTC)
+	if err != nil || len(runs) != 1 || runs[0].Job != "monitor:check_connection:homelab" || !runs[0].StartedAt.Equal(want) {
+		t.Fatal(runs, err)
+	}
+}

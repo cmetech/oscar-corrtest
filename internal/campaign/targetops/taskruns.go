@@ -19,6 +19,8 @@ type TaskRun struct {
 }
 
 // TaskRuns reads GET /api/v1/tasks/history for the window and keeps runs of the named jobs.
+// A row names its job in "alias" ("name" is the Celery task, e.g. tm.tasks.common);
+// "name" is matched only when alias is empty. Time falls back started → received → timestamp.
 // Results are sorted by the record "timestamp" column, and start/end filter on that same timestamp.
 func TaskRuns(ctx context.Context, c *oscar.Client, jobNames []string, start, end time.Time) ([]TaskRun, error) {
 	want := map[string]bool{}
@@ -30,11 +32,13 @@ func TaskRuns(ctx context.Context, c *oscar.Client, jobNames []string, start, en
 		var resp struct {
 			TotalPages int `json:"total_pages"`
 			Records    []struct {
-				Name     string     `json:"name"`
-				State    string     `json:"state"`
-				Started  *time.Time `json:"started"`
-				Received *time.Time `json:"received"`
-				Duration *float64   `json:"duration"`
+				Name      string     `json:"name"`
+				Alias     string     `json:"alias"`
+				State     string     `json:"state"`
+				Started   *time.Time `json:"started"`
+				Received  *time.Time `json:"received"`
+				Timestamp *time.Time `json:"timestamp"`
+				Duration  *float64   `json:"duration"`
 			} `json:"records"`
 		}
 		q := url.Values{"page": {strconv.Itoa(page)}, "perPage": {"100"}, "order": {"asc"}, "column": {"timestamp"},
@@ -43,14 +47,21 @@ func TaskRuns(ctx context.Context, c *oscar.Client, jobNames []string, start, en
 			return nil, err
 		}
 		for _, r := range resp.Records {
-			if !want[r.Name] {
+			job := r.Alias
+			if job == "" {
+				job = r.Name
+			}
+			if !want[job] {
 				continue
 			}
-			run := TaskRun{Job: r.Name, Status: r.State}
-			if r.Started != nil {
+			run := TaskRun{Job: job, Status: r.State}
+			switch {
+			case r.Started != nil:
 				run.StartedAt = *r.Started
-			} else if r.Received != nil {
+			case r.Received != nil:
 				run.StartedAt = *r.Received
+			case r.Timestamp != nil:
+				run.StartedAt = *r.Timestamp
 			}
 			if r.Duration != nil {
 				run.Duration = time.Duration(*r.Duration * float64(time.Second))

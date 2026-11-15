@@ -354,3 +354,44 @@ func TestWaitQueuesPerQueueRule(t *testing.T) {
 		t.Fatalf("waitQueues polled %d times; every queue was already idle", m.calls)
 	}
 }
+
+// tickClock advances 1ms on every read, like a real clock between two calls.
+type tickClock struct{ t time.Time }
+
+func (c *tickClock) Now() time.Time                             { c.t = c.t.Add(time.Millisecond); return c.t }
+func (c *tickClock) SleepUntil(context.Context, time.Time) bool { return true }
+
+func TestPrecheckSmokeResolveReusesPostedStartsAt(t *testing.T) {
+	var bodies []map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var alerts []map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&alerts)
+		a := map[string]string{"startsAt": fmt.Sprint(alerts[0]["startsAt"]), "endsAt": fmt.Sprint(alerts[0]["endsAt"])}
+		bodies = append(bodies, a)
+		if alerts[0]["endsAt"] != nil && a["startsAt"] > a["endsAt"] {
+			http.Error(w, `"start time must be before end time"`, http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+	a := &PrecheckAdapter{Clock: &tickClock{t: time.Date(2026, 11, 15, 4, 57, 28, 0, time.UTC)}, IngestURL: srv.URL, IngestHTTP: srv.Client()}
+	labels := map[string]string{"alertname": "CampaignPrecheckSmoke"}
+	if err := a.PostAlert(context.Background(), labels); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ResolveAlert(context.Background(), labels); err != nil {
+		t.Fatalf("resolve: %v bodies=%v", err, bodies)
+	}
+	if len(bodies) != 2 || bodies[1]["startsAt"] != bodies[0]["startsAt"] || bodies[1]["endsAt"] <= bodies[1]["startsAt"] {
+		t.Fatalf("bodies=%v", bodies)
+	}
+}
+
+func TestPrecheckFOHistoryUsesMiddlewarePath(t *testing.T) {
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { path = r.URL.Path }))
+	defer srv.Close()
+	a := &PrecheckAdapter{FrontOfficeURL: srv.URL, HTTP: srv.Client()}
+	if st, err := a.FOHistory(context.Background(), "k"); err != nil || st != 200 || path != "/ext/mw/api/v1/alerts/history" {
+		t.Fatalf("status=%d err=%v path=%q", st, err, path)
+	}
+}
