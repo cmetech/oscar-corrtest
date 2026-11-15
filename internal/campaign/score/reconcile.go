@@ -1,6 +1,7 @@
 package score
 
 import (
+	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -207,10 +208,14 @@ const resendTolerance = 60 * time.Second
 
 // resendOK: the observed resend count equals the modelled one, exhaustion
 // agrees, and each resend is within 60 s of its modelled time (either way).
+// A case that models no resend is no evidence (Unknown), never a pass.
 func resendOK(c ResendCase) (ok bool, err error) {
 	exp, err := resend.Expect(c.Policy, c.Deliveries)
 	if err != nil {
 		return false, err
+	}
+	if len(exp.Resends) == 0 {
+		return false, fmt.Errorf("resend %s: %d deliveries model no resend", c.Policy.Key, len(c.Deliveries))
 	}
 	if len(c.Observed) != len(exp.Resends) || c.Exhausted != exp.Exhausted {
 		return false, nil

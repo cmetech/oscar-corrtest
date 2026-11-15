@@ -134,12 +134,16 @@ func TestAlertingDaySmokeV1(t *testing.T) {
 	if s.ID != "alerting-day-smoke" || s.Version != "v1" || !s.Custom {
 		t.Fatalf("identity %s@%s custom=%v (the smoke must be custom: never comparable)", s.ID, s.Version, s.Custom)
 	}
-	if len(s.Phases) != 6 || s.Phase("preflight").Start != -2*time.Minute || s.Phase("drain").End != 10*time.Minute {
+	if len(s.Phases) != 6 || s.Phase("preflight").Start != -2*time.Minute || s.Phase("drain").End != 12*time.Minute {
 		t.Fatalf("phases %+v", s.Phases)
 	}
 	for _, p := range s.Phases {
-		if p.End-p.Start != 2*time.Minute {
-			t.Errorf("phase %s is %s, want 2m", p.Name, p.End-p.Start)
+		want := 2 * time.Minute
+		if p.Name == "resend" { // activation waits ~90s for OSCAR cutover, unscaled
+			want = 4 * time.Minute
+		}
+		if p.End-p.Start != want {
+			t.Errorf("phase %s is %s, want %s", p.Name, p.End-p.Start, want)
 		}
 	}
 	if s.Baseline.Rate != 1 || len(s.Resend) != 1 || len(s.Correlation.SetA) != 1 || len(s.Correlation.SetB) != 0 {

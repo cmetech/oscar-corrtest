@@ -292,6 +292,16 @@ func TestResendExactMatch(t *testing.T) {
 	}
 }
 
+// Live smoke 2026-11-15: one delivery per cohort modelled zero resends, and
+// zero observed scored 2/2. A case that models no resend is no evidence.
+func TestResendNothingModelledIsUnknown(t *testing.T) {
+	p := scenario.PolicySpec{Mode: "time", Interval: 50 * time.Second}
+	r := reconcileResend([]ResendCase{{Policy: p, Deliveries: []resend.Delivery{{At: 0}}}})
+	if r.Succeeded != 0 || r.Unknown != 1 {
+		t.Fatalf("single-delivery cohort scored %+v, want unknown", r)
+	}
+}
+
 // TestBaselineUnderDelivered: offered (sent planned seqs in the run window)
 // below 98% of planned FAILs (ruling C34b); missed rows and resolve-all rows
 // beyond the plan never count as offered.
