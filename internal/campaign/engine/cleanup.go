@@ -170,8 +170,8 @@ type corrRun struct{ pattern, token string }
 
 // corrTicket is one ticketed set B run's expected incident for the ticket
 // score: the incidents found for its token (none = a miss), or unknown when
-// its listing never succeeded. Set B refs are single-case (P01), so each
-// run expects exactly one incident (ticketFirstTrigger).
+// its listing never succeeded. Only the positive case carries the ticket
+// label, so each run expects exactly one incident (ticketFirstTrigger).
 type corrTicket struct {
 	id        string
 	incidents []targetops.Incident
@@ -246,6 +246,10 @@ func (r *run) closeIncidents(ctx context.Context) []targetops.Incident {
 			visit(inc)
 		}
 		for _, c := range corr {
+			if !r.now().Before(deadline) { // unvisited runs stay unknown; the wait is bounded
+				corrErr[c.token] = true
+				continue
+			}
 			incs, err := r.e.d.SNOW.OpenCorrTestIncidents(ctx, c.pattern, c.token)
 			corrErr[c.token] = err != nil
 			if err != nil {

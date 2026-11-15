@@ -371,7 +371,8 @@ func (r *run) correlate(ctx context.Context, ref scenario.CaseRef, kind string, 
 		}
 		var res domain.Run
 		res, err = r.e.d.Correlate(ctx, r.e.d.TargetID, doc, correlationRun)
-		if started = res.ID != ""; started {
+		started = err == nil && res.ID != "" // a run that failed validation still has an ID
+		if res.ID != "" {
 			_ = r.store().LinkCampaignRun(stable, r.id, res.ID, kind)
 			cr.Verdict, cr.Cleanup = res.Verdict, res.CleanupStatus
 			if res.StartedAt != nil && res.EndedAt != nil {

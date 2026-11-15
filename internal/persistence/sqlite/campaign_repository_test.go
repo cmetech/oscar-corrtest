@@ -300,3 +300,33 @@ func TestMigration0007AcceptsNotifierEnable(t *testing.T) {
 		t.Fatal("open-mutations index missing after 0007")
 	}
 }
+
+// A run the runtime created but never started (set B validation failures in
+// camp_681887ad6d96c6ff left ~3.9M QUEUED) is not a campaign run to score or
+// close incidents for.
+func TestCampaignRunsSkipsRunsThatNeverStarted(t *testing.T) {
+	ctx := context.Background()
+	d := openCampaignDB(t)
+	newCampaign(t, d, "c1")
+	for _, q := range []string{
+		`INSERT INTO targets(id, display_name, base_url, created_at, updated_at) VALUES('t','T','http://x','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')`,
+		`INSERT INTO runs(id, short_token, target_id, status, cleanup_status, harness_version, created_at, updated_at) VALUES('queued','tok1','t','QUEUED','NOT_REQUIRED','v','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')`,
+		`INSERT INTO runs(id, short_token, target_id, status, verdict, cleanup_status, harness_version, started_at, created_at, updated_at) VALUES('ran','tok2','t','COMPLETED','PASS','CLEAN','v','2026-01-01T00:00:01Z','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')`,
+	} {
+		if _, err := d.db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, id := range []string{"queued", "ran"} {
+		if err := d.LinkCampaignRun(ctx, "c1", id, "setB_ticket:flood"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	links, err := d.CampaignRuns(ctx, "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(links) != 1 || links[0].RunID != "ran" {
+		t.Fatalf("links %+v", links)
+	}
+}

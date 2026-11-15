@@ -111,7 +111,10 @@ func (d *Database) LinkCampaignRun(ctx context.Context, campaignID, runID, kind 
 
 // CampaignRuns lists the correlation runs linked to a campaign, in link order.
 func (d *Database) CampaignRuns(ctx context.Context, campaignID string) ([]domain.CampaignRunLink, error) {
-	rows, err := d.db.QueryContext(ctx, `SELECT run_id, kind FROM campaign_runs WHERE campaign_id=? ORDER BY rowid`, campaignID)
+	// Only runs that started: a run created but never started has no traffic,
+	// incidents or verdict to score.
+	rows, err := d.db.QueryContext(ctx, `SELECT c.run_id, c.kind FROM campaign_runs c JOIN runs r ON r.id=c.run_id
+		WHERE c.campaign_id=? AND r.started_at IS NOT NULL ORDER BY c.rowid`, campaignID)
 	if err != nil {
 		return nil, fmt.Errorf("list campaign runs: %w", err)
 	}

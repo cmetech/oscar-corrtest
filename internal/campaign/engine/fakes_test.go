@@ -621,7 +621,7 @@ func (f *fakeOSCAR) correlate(ctx context.Context, _ string, doc corr.Scenario, 
 	id := fmt.Sprintf("crt_%08dABCDEFGHJKMNPQRS", n)
 	short := id[4:12]
 	if err := f.db.CreateRun(context.WithoutCancel(ctx), domain.Run{ID: id, ShortToken: short, Status: domain.RunQueued,
-		CleanupStatus: domain.CleanupNotRequired, HarnessVersion: "test", CreatedAt: start, UpdatedAt: start}); err != nil {
+		CleanupStatus: domain.CleanupNotRequired, HarnessVersion: "test", StartedAt: &start, CreatedAt: start, UpdatedAt: start}); err != nil {
 		f.t.Errorf("create run: %v", err)
 	}
 	var mine []*targetops.Incident
