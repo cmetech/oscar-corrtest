@@ -37,10 +37,8 @@ type Result struct {
 	Detail   string
 }
 
-// Timing brackets one request on the controller clock; the server clock is compared with the midpoint.
+// Timing brackets one request on the controller clock; skew is the server stamp's distance outside it.
 type Timing struct{ Sent, Recv time.Time }
-
-func (t Timing) Mid() time.Time { return t.Sent.Add(t.Recv.Sub(t.Sent) / 2) }
 
 type Queue struct {
 	Name      string

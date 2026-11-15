@@ -236,6 +236,18 @@ func TestBlockingBoundaries(t *testing.T) {
 			f.probe.UTC = t0.Add(400 * time.Millisecond).Format(time.RFC3339Nano)
 			f.probeT = Timing{Sent: t0.Add(300 * time.Millisecond), Recv: t0.Add(500 * time.Millisecond)}
 		}, "pass"},
+		{"B4 slow probe stamped early in its window", "B4", func(f *fake) { // live 2026-11-15: ~1s probe, utc stamped before docker inspect
+			f.probe.UTC = t0.Add(100 * time.Millisecond).Format(time.RFC3339Nano) // 400ms from the midpoint
+			f.probeT = Timing{Sent: t0, Recv: t0.Add(1000 * time.Millisecond)}
+		}, "pass"},
+		{"B4 251ms after the window", "B4", func(f *fake) {
+			f.probe.UTC = t0.Add(1251 * time.Millisecond).Format(time.RFC3339Nano)
+			f.probeT = Timing{Sent: t0, Recv: t0.Add(1000 * time.Millisecond)}
+		}, "fail"},
+		{"B4 251ms before the window", "B4", func(f *fake) {
+			f.probe.UTC = t0.Add(-251 * time.Millisecond).Format(time.RFC3339Nano)
+			f.probeT = Timing{Sent: t0, Recv: t0.Add(1000 * time.Millisecond)}
+		}, "fail"},
 		{"B4 worker skew", "B4", func(f *fake) { f.winfo.Now = t0.Add(-300 * time.Millisecond) }, "fail"},
 		{"B4 worker version", "B4", func(f *fake) { f.winfo.Version = "v2" }, "fail"},
 		{"B5 not received", "B5", func(f *fake) { f.receipts = nil }, "fail"},

@@ -189,12 +189,17 @@ func b3(ctx context.Context, d Deps, s scenario.Scenario) Result {
 	return res("B3", Blocking, true, fmt.Sprintf("%d queues", len(qs)), probs)
 }
 
+// skew is the provable clock difference: how far the server's stamp falls outside [Sent, Recv].
+// A stamp taken anywhere inside the bracket is consistent with agreeing clocks, so slow requests
+// (the ~1s SSH probe stamps utc before its docker/mysql work) cannot fake skew.
 func skew(server time.Time, t Timing) time.Duration {
-	s := server.Sub(t.Mid())
-	if s < 0 {
-		s = -s
+	switch {
+	case server.Before(t.Sent):
+		return t.Sent.Sub(server)
+	case server.After(t.Recv):
+		return server.Sub(t.Recv)
 	}
-	return s
+	return 0
 }
 
 func b4(ctx context.Context, d Deps, p *probeData, s scenario.Scenario) Result {
