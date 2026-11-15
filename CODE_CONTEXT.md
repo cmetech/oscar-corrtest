@@ -72,9 +72,13 @@ target add ──► doctor ──► plan (compile, offline) ──► run ─�
    (`runner.go:531`).
 
 6. **Cleanup** — `Runner.cleanup` (`runner.go:289`) deletes only rule IDs OSCAR
-   returned, then resolves every observed alert using the **server** fingerprint
-   read back from history (`ResolveHistory`, `client.go:198`;
-   `BuildResolutionRequest`, `request.go:96`). Cleanup status is tracked
+   returned, then resolves every observed alert by echoing the History row's
+   native transport fingerprint (`am_fingerprint` label → `fingerPrint`) and
+   its exact original `startsAt` (`ResolveHistory`, `client.go:198`;
+   `BuildResolutionRequest`, `request.go:96`; no startsAt → no resolve, OSCAR
+   would 422). Cleanup is `CLEAN` only after History read-back shows every
+   resolved occurrence `resolved` (`awaitResolvedHistory`, bounded polls);
+   an accepted POST alone leaves it `DIRTY`. Cleanup status is tracked
    independently of verdict (`CLEAN|DIRTY|NOT_REQUIRED|UNKNOWN`,
    `run.go:40`). A dirty run exits 4 and is retryable via
    `cleanup retry` → `Runtime.RetryCleanup` (`runtime.go:493`), which re-reads
@@ -200,7 +204,8 @@ integrity states (`artifact.go`); `Resource` lifecycle
   `created_by=oscar-corrtest/<ver>`), `AlertGroupRequest` (`:37`),
   `BuildResolutionRequest` (`:96`), `BuildLabelProbeAlert` (`:120`).
   `alertmanagerTransportFingerprint` (`:148`) is a transport-only hash and
-  explicitly refuses pre-stamped `oscar_fingerprint`/`am_fingerprint` labels.
+  explicitly refuses pre-stamped `oscar_fingerprint`/`am_fingerprint` labels;
+  resolves use it only as a fallback when History lacks `am_fingerprint`.
 - `preview.go` — renders the exact request sequence (stages
   `preflight.validate_rule`, `preflight.inject_label_probe`,
   `preflight.read_history`, `setup.validate_rule`, …) for the UI/authoring

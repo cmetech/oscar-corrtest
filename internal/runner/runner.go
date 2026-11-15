@@ -445,6 +445,7 @@ func (r *Runner) cleanup(ctx context.Context, runID string, resources []domain.R
 			failures = append(failures, "alert history recovery: "+err.Error())
 		}
 	}
+	var sent []oscar.HistoryRecord
 	for _, record := range histories {
 		if record.Labels["oscar_test_run_id"] != runID || record.Fingerprint == "" {
 			failures = append(failures, record.AlertName+": unsafe alert cleanup identity")
@@ -478,12 +479,70 @@ func (r *Runner) cleanup(ctx context.Context, runID string, resources []domain.R
 		resolutions = append(resolutions, fact)
 		if err != nil || !r.inputAccepted(result.Class) {
 			failures = append(failures, record.AlertName+": alert resolution was not accepted")
+			continue
 		}
+		sent = append(sent, record)
+	}
+	// An accepted resolve POST proves nothing about matching: only History
+	// showing each occurrence resolved makes cleanup CLEAN.
+	if firing := r.awaitResolvedHistory(ctx, sent); len(firing) != 0 {
+		failures = append(failures, "history still firing after resolve: "+strings.Join(firing, ", "))
 	}
 	if len(failures) != 0 {
 		return domain.CleanupDirty, resolutions, fmt.Errorf("cleanup failed for %s", strings.Join(failures, ", "))
 	}
 	return domain.CleanupClean, resolutions, nil
+}
+
+// resolveReadBackPolls bounds History read-back after resolves: at the default
+// 1s PollInterval this is ~15s, inside the 30s default CleanupTimeout that
+// also bounds ctx.
+const resolveReadBackPolls = 15
+
+// awaitResolvedHistory polls History until every record reads back resolved
+// and returns evidence for the occurrences that did not.
+func (r *Runner) awaitResolvedHistory(ctx context.Context, records []oscar.HistoryRecord) []string {
+	pending := records
+	for poll := 1; len(pending) != 0; poll++ {
+		var still []oscar.HistoryRecord
+		for _, record := range pending {
+			if !r.historyResolved(ctx, record) {
+				still = append(still, record)
+			}
+		}
+		pending = still
+		if len(pending) == 0 || poll >= resolveReadBackPolls || r.opts.Sleep(ctx, r.opts.PollInterval) != nil {
+			break
+		}
+	}
+	evidence := make([]string, 0, len(pending))
+	for _, record := range pending {
+		evidence = append(evidence, fmt.Sprintf("%s (history %s, fingerprint %s, startsAt %s)", record.AlertName, record.ID, record.Fingerprint, record.StartsAt.UTC().Format(time.RFC3339Nano)))
+	}
+	return evidence
+}
+
+// historyResolved reports whether the same History occurrence (by ID, else by
+// fingerprint and original startsAt) now has status resolved.
+func (r *Runner) historyResolved(ctx context.Context, record oscar.HistoryRecord) bool {
+	start := record.StartsAt
+	if start.IsZero() || (!record.CreatedAt.IsZero() && record.CreatedAt.Before(start)) {
+		start = record.CreatedAt
+	}
+	rows, err := r.api.FindHistory(ctx, oscar.HistoryQuery{AlertName: record.AlertName, Start: start.Add(-time.Second), End: r.opts.Now().UTC().Add(time.Minute)})
+	if err != nil {
+		return false
+	}
+	for _, row := range rows {
+		same := row.ID == record.ID
+		if record.ID == "" {
+			same = row.Fingerprint == record.Fingerprint && row.StartsAt.Equal(record.StartsAt)
+		}
+		if same && strings.EqualFold(row.Status, "resolved") {
+			return true
+		}
+	}
+	return false
 }
 
 // Refires share a fingerprint; API row order must not select an obsolete cleanup episode.

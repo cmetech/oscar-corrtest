@@ -19,6 +19,8 @@ const (
 	notificationAuditPath  = "/api/v1/notification-audit/"
 	runtimeRuleID          = "returned-rule-id"
 	runtimeFingerprint     = "server-fingerprint"
+	runtimeAMFingerprint   = "server-am-fingerprint"
+	runtimeStartsAt        = "server-starts-at"
 	runtimeObservationFrom = "observation-start"
 	runtimeObservationTo   = "observation-end"
 )
@@ -237,22 +239,35 @@ func canonicalPreviewCases(input []compiler.CasePlan) ([]compiler.CasePlan, erro
 }
 
 func appendResolution(operations *[]OperationPreview, caseCode, alertName, status string, labels, annotations map[string]string) error {
-	request, err := BuildResolutionRequest(HistoryRecord{
-		AlertName: alertName, Fingerprint: "{server-fingerprint}", Status: status,
-		Labels: labels, Annotations: annotations,
-	})
+	request, err := BuildResolutionRequest(PreviewResolutionRecord(alertName, status, labels, annotations))
 	if err != nil {
 		return fmt.Errorf("build %s resolution template: %w", caseCode, err)
 	}
+	request.Alerts[0].StartsAt = "{" + runtimeStartsAt + "}"
 	body, err := CanonicalJSON(request)
 	if err != nil {
 		return err
 	}
 	*operations = append(*operations, OperationPreview{
 		Stage: "cleanup.resolve_alert", CaseCode: caseCode, Method: http.MethodPost, Path: alertsPath,
-		Summary: "Resolve an owned alert using its authoritative OSCAR history fingerprint.", Body: string(body), RuntimeFields: []string{runtimeFingerprint},
+		Summary: "Resolve an owned alert echoing its History native fingerprint and original startsAt.", Body: string(body), RuntimeFields: []string{runtimeFingerprint, runtimeAMFingerprint, runtimeStartsAt},
 	})
 	return nil
+}
+
+// PreviewResolutionRecord is the History-shaped template the preview resolves:
+// server-assigned identity fields are placeholders, and startsAt is a sentinel
+// the preview replaces with its placeholder after building.
+func PreviewResolutionRecord(alertName, status string, labels, annotations map[string]string) HistoryRecord {
+	history := cloneStringMap(labels)
+	if history == nil {
+		history = map[string]string{}
+	}
+	history["am_fingerprint"] = "{" + runtimeAMFingerprint + "}"
+	return HistoryRecord{
+		AlertName: alertName, Fingerprint: "{" + runtimeFingerprint + "}", Status: status, StartsAt: time.Unix(0, 0).UTC(),
+		Labels: history, Annotations: annotations,
+	}
 }
 
 func resolutionKey(name string, labels map[string]string) (string, error) {

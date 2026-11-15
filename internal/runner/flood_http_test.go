@@ -41,11 +41,12 @@ type correlationWireFixture struct {
 	auditIDs         map[string]int
 	stimuli          []oscar.AlertRequest
 	cleanup          []oscar.AlertRequest
+	cleaned          map[string]bool // History keys resolved by a matching cleanup POST
 	deleted          map[int]bool
 }
 
 func newCorrelationWireFixture(mode string) *correlationWireFixture {
-	return &correlationWireFixture{model: testoscar.NewModel(time.Date(2026, 10, 13, 12, 0, 0, 123456789, time.UTC)), mode: mode, rules: map[int]compiler.RulePlan{}, history: map[string]oscar.HistoryRecord{}, auditToHistory: map[string]string{}, auditToName: map[string]string{}, auditIDs: map[string]int{}, deleted: map[int]bool{}}
+	return &correlationWireFixture{model: testoscar.NewModel(time.Date(2026, 10, 13, 12, 0, 0, 123456789, time.UTC)), mode: mode, rules: map[int]compiler.RulePlan{}, history: map[string]oscar.HistoryRecord{}, auditToHistory: map[string]string{}, auditToName: map[string]string{}, auditIDs: map[string]int{}, cleaned: map[string]bool{}, deleted: map[int]bool{}}
 }
 func wireJSON(value any) testoscar.Response {
 	raw, err := json.Marshal(value)
@@ -115,6 +116,15 @@ func (f *correlationWireFixture) respond(request testoscar.Request) testoscar.Re
 		alert := body.Alerts[0]
 		if alert.Annotations["oscar_test_cleanup"] != "" {
 			f.cleanup = append(f.cleanup, alert)
+			// OSCAR resolves the occurrence with this native fingerprint and original
+			// startsAt; anything else is accepted but matches nothing.
+			if starts, err := time.Parse(time.RFC3339Nano, alert.StartsAt); err == nil {
+				for key, row := range f.history {
+					if row.Labels["am_fingerprint"] == alert.Fingerprint && row.StartsAt.Equal(starts) {
+						f.cleaned[key] = true
+					}
+				}
+			}
 			return wireJSON(map[string]string{"status": "accepted"})
 		}
 		// This responder cannot grant Threshold positive qualification using an
@@ -210,6 +220,9 @@ func (f *correlationWireFixture) respond(request testoscar.Request) testoscar.Re
 			record := map[string]any{"id": row.ID, "alertname": row.AlertName, "fingerprint": row.Fingerprint, "status": row.Status, "startsAt": row.StartsAt.Format(time.RFC3339Nano), "createdAt": row.CreatedAt.Format(time.RFC3339Nano), "labels": labels, "annotations": []any{}}
 			if f.mode == "sequence ignored recovery" || f.mode == "coocc ignored recovery" || f.mode == "crosssource ignored recovery" || f.mode == "threshold ignored recovery" {
 				record["status"] = "firing"
+			}
+			if f.cleaned[row.Fingerprint+"/"+row.StartsAt.Format(time.RFC3339Nano)] {
+				record["status"] = "resolved"
 			}
 			if f.mode == "missing startsAt" {
 				delete(record, "startsAt")
@@ -435,7 +448,8 @@ func TestFloodFixturesThroughRealHTTPClient(t *testing.T) {
 			fixture.mu.Lock()
 			defer fixture.mu.Unlock()
 			wantCleanup := domain.CleanupClean
-			if test.mode == "ambiguous first identity" || test.mode == "wrong first labels" || test.mode == "missing first history" || (test.mode == "old refire history" || test.mode == "old refire indeterminate") {
+			// History without startsAt cannot be resolved: OSCAR rejects such a resolve (422).
+			if test.mode == "ambiguous first identity" || test.mode == "wrong first labels" || test.mode == "missing first history" || (test.mode == "old refire history" || test.mode == "old refire indeterminate") || test.mode == "missing startsAt" {
 				wantCleanup = domain.CleanupDirty
 			}
 			if len(fixture.deleted) != 2 || (len(fixture.cleanup) == 0 && wantCleanup == domain.CleanupClean) || stored.CleanupStatus != wantCleanup {

@@ -186,8 +186,13 @@ func TestStagedCoOccurrenceThroughRealHTTPClient(t *testing.T) {
 			if test.mode == "valid" && (report.Checkpoints[0].Assertions[1].Observed != 0 || report.Checkpoints[1].Assertions[1].Observed != 1) {
 				t.Fatal("staged co-occurrence audit lost")
 			}
-			if saved.CleanupStatus != domain.CleanupClean || len(fixture.deleted) != 2 || len(fixture.cleanup) == 0 {
-				t.Fatal("owned cleanup did not run")
+			// History without startsAt cannot be resolved (OSCAR 422), so it stays DIRTY.
+			if test.mode == "missing startsAt" {
+				if saved.CleanupStatus != domain.CleanupDirty || len(fixture.deleted) != 2 || len(fixture.cleanup) != 0 {
+					t.Fatalf("unresolvable cleanup reported: %s %s", saved.CleanupStatus, saved.TerminalError)
+				}
+			} else if saved.CleanupStatus != domain.CleanupClean || len(fixture.deleted) != 2 || len(fixture.cleanup) == 0 {
+				t.Fatalf("owned cleanup did not run: %s %s", saved.CleanupStatus, saved.TerminalError)
 			}
 			if report.Coverage["receiverAdmission"] != "NOT_TESTED" || report.Coverage["physicalClear"] != "NOT_PROVEN" {
 				t.Fatal("local wire proof overclaims scope")

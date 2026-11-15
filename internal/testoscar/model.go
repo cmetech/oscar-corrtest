@@ -24,6 +24,8 @@ type Model struct {
 	rules   map[int]compiler.RulePlan
 	alerts  []modelAlert
 	deleted map[int]bool
+	// resolved holds History IDs whose cleanup resolve was accepted.
+	resolved map[string]bool
 }
 
 type modelAlert struct {
@@ -33,7 +35,7 @@ type modelAlert struct {
 }
 
 func NewModel(now time.Time) *Model {
-	return &Model{now: now, nextID: 70, rules: map[int]compiler.RulePlan{}, deleted: map[int]bool{}}
+	return &Model{now: now, nextID: 70, rules: map[int]compiler.RulePlan{}, deleted: map[int]bool{}, resolved: map[string]bool{}}
 }
 
 func (m *Model) Now() time.Time {
@@ -124,6 +126,7 @@ func (m *Model) ResolveHistory(_ context.Context, record oscar.HistoryRecord) (o
 	if record.Fingerprint == "" || record.Labels["oscar_test_run_id"] == "" {
 		return oscar.InjectionResult{}, fmt.Errorf("unsafe cleanup identity")
 	}
+	m.resolved[record.ID] = true
 	return oscar.InjectionResult{Class: oscar.InjectionAccepted, StatusCode: 200}, nil
 }
 
@@ -138,7 +141,7 @@ func (m *Model) FindHistory(_ context.Context, query oscar.HistoryQuery) ([]osca
 		}
 	}
 	if len(result) != 0 {
-		return result, nil
+		return m.withResolved(result), nil
 	}
 	for id, rule := range m.rules {
 		if rule.EmitAlertName != query.AlertName || rule.EmitAlertName == "" {
@@ -153,7 +156,16 @@ func (m *Model) FindHistory(_ context.Context, query oscar.HistoryQuery) ([]osca
 		result = append(result, oscar.HistoryRecord{ID: fmt.Sprintf("parent-%d", id), AlertName: rule.EmitAlertName,
 			Fingerprint: labelFingerprint(labels), Status: "firing", CreatedAt: m.now, Labels: labels, Annotations: map[string]string{"summary": "semantic model parent"}})
 	}
-	return result, nil
+	return m.withResolved(result), nil
+}
+
+func (m *Model) withResolved(records []oscar.HistoryRecord) []oscar.HistoryRecord {
+	for index := range records {
+		if m.resolved[records[index].ID] {
+			records[index].Status = "resolved"
+		}
+	}
+	return records
 }
 
 func (m *Model) CorrelationAudit(_ context.Context, fingerprint string) ([]oscar.AuditRecord, error) {
