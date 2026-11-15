@@ -109,6 +109,27 @@ func TestSnowOpenCampaignIncidentsExcludesCollidingRunAndBadRun(t *testing.T) {
 	}
 }
 
+// Live smoke camp_c08f8e9e1b5368ab: cleanup and ticket scoring gate on OSCAR's
+// resolution comment, but the listing never carried comments, so neither could
+// pass. The listing reads them as display values (sysparm_display_value=all).
+func TestSnowOpenCampaignIncidentsCarryComments(t *testing.T) {
+	s := newTestSNOW(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("sysparm_display_value") != "all" || !strings.Contains(q.Get("sysparm_fields"), "comments") {
+			t.Errorf("listing query %v", q)
+		}
+		w.Write([]byte(`{"result":[{"number":{"value":"INC4","display_value":"INC4"},"sys_id":{"value":"s4","display_value":"s4"},` +
+			`"state":{"value":"1","display_value":"New"},"short_description":{"value":"Campaign-run001-300","display_value":"Campaign-run001-300"},` +
+			`"sys_created_on":{"value":"2026-11-15 16:58:00","display_value":"2026-11-15 08:58:00"},` +
+			`"comments":{"value":"","display_value":"2026-11-15 08:59:05 - OSCAR oscar-ticketing (Comments)\n[OSCAR AUTO-UPDATE 2026-11-15 16:59:03 UTC] Alert has been resolved\n\n"}}]}`))
+	})
+	got, err := s.OpenCampaignIncidents(context.Background(), "run001")
+	if err != nil || len(got) != 1 || got[0].Number != "INC4" || got[0].State != "1" || len(got[0].Comments) != 1 ||
+		got[0].Comments[0].CreatedOn != "2026-11-15 16:59:05" || !strings.Contains(got[0].Comments[0].Value, "Alert has been resolved") {
+		t.Fatalf("%+v %v", got, err)
+	}
+}
+
 func TestSnowIncidentJournalQuery(t *testing.T) {
 	s := newTestSNOW(t, func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/sys_journal_field") {

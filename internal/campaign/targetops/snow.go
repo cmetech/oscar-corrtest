@@ -160,32 +160,51 @@ const snowTime = "2006-01-02 15:04:05"
 
 var commentHeader = regexp.MustCompile(`(?m)^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) - .*\((?:Additional comments|Comments)\)\n`)
 
-// displayComments parses the incident's comments display value (account time zone,
-// newest first) into oldest-first comments stamped in UTC. The zone offset comes
-// from the same record's sys_created_on value/display pair.
-// ponytail: one offset per incident; a DST change between creation and comment shifts it by an hour.
+// snowField is a Table API field: a plain string, or {value, display_value}
+// when the query sets sysparm_display_value=all.
+type snowField struct{ Value, Display string }
+
+func (f *snowField) UnmarshalJSON(b []byte) error {
+	if len(b) > 0 && b[0] == '"' {
+		err := json.Unmarshal(b, &f.Value)
+		f.Display = f.Value
+		return err
+	}
+	var p struct {
+		Value   string `json:"value"`
+		Display string `json:"display_value"`
+	}
+	err := json.Unmarshal(b, &p)
+	f.Value, f.Display = p.Value, p.Display
+	return err
+}
+
+// displayComments reads one incident's comments display value.
 func (s *SNOW) displayComments(ctx context.Context, sysID string) ([]Comment, error) {
 	res, err := s.call(ctx, http.MethodGet, "/api/now/table/incident/"+sysID, url.Values{
 		"sysparm_display_value": {"all"}, "sysparm_fields": {"comments,sys_created_on"}}, nil)
 	if err != nil {
 		return nil, err
 	}
-	type pair struct {
-		Value   string `json:"value"`
-		Display string `json:"display_value"`
-	}
-	var rec map[string]pair
+	var rec map[string]snowField
 	if json.Unmarshal(res, &rec) != nil {
 		return nil, fmt.Errorf("malformed incident display response")
 	}
-	text, created := rec["comments"].Display, rec["sys_created_on"]
+	return parseComments(rec["comments"].Display, rec["sys_created_on"])
+}
+
+// parseComments turns a comments display value (account time zone, newest
+// first) into oldest-first comments stamped in UTC. The zone offset comes from
+// the same record's sys_created_on value/display pair.
+// ponytail: one offset per incident; a DST change between creation and comment shifts it by an hour.
+func parseComments(text string, created snowField) ([]Comment, error) {
 	if strings.TrimSpace(text) == "" {
 		return nil, nil
 	}
 	utc, err1 := time.Parse(snowTime, created.Value)
 	local, err2 := time.Parse(snowTime, created.Display)
 	if err1 != nil || err2 != nil {
-		return nil, fmt.Errorf("incident %s has no comparable sys_created_on", sysID)
+		return nil, fmt.Errorf("incident comments have no comparable sys_created_on")
 	}
 	offset := local.Sub(utc)
 	heads := commentHeader.FindAllStringSubmatchIndex(text, -1)
@@ -269,21 +288,35 @@ func (s *SNOW) openIncidentsWithPrefix(ctx context.Context, prefix string) ([]In
 	out := []Incident{}
 	for page := 0; page < maxPages; page++ {
 		res, err := s.call(ctx, http.MethodGet, "/api/now/table/incident", url.Values{
-			"sysparm_query":  {"short_descriptionSTARTSWITH" + prefix + "^stateNOT IN6,7,8^ORDERBYsys_id"},
-			"sysparm_limit":  {strconv.Itoa(pageSize)},
-			"sysparm_offset": {strconv.Itoa(page * pageSize)},
-			"sysparm_fields": {incidentFields}}, nil)
+			"sysparm_query":         {"short_descriptionSTARTSWITH" + prefix + "^stateNOT IN6,7,8^ORDERBYsys_id"},
+			"sysparm_limit":         {strconv.Itoa(pageSize)},
+			"sysparm_offset":        {strconv.Itoa(page * pageSize)},
+			"sysparm_display_value": {"all"}, // journal fields (comments) are only readable as display values
+			"sysparm_fields":        {incidentFields + ",comments,sys_created_on"}}, nil)
 		if err != nil {
 			return nil, err
 		}
-		var rows []incidentWire
+		var rows []struct {
+			Number           snowField `json:"number"`
+			SysID            snowField `json:"sys_id"`
+			State            snowField `json:"state"`
+			ShortDescription snowField `json:"short_description"`
+			Comments         snowField `json:"comments"`
+			Created          snowField `json:"sys_created_on"`
+		}
 		if json.Unmarshal(res, &rows) != nil {
 			return nil, fmt.Errorf("malformed incident list")
 		}
 		for _, r := range rows {
-			if strings.HasPrefix(r.ShortDescription, prefix) {
-				out = append(out, r.inc())
+			if !strings.HasPrefix(r.ShortDescription.Value, prefix) {
+				continue
 			}
+			comments, err := parseComments(r.Comments.Display, r.Created)
+			if err != nil {
+				return nil, fmt.Errorf("incident %s: %w", r.Number.Value, err)
+			}
+			out = append(out, Incident{Number: r.Number.Value, SysID: r.SysID.Value, State: r.State.Value,
+				ShortDescription: r.ShortDescription.Value, Comments: comments})
 		}
 		if len(rows) < pageSize {
 			return out, nil
