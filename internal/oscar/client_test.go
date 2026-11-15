@@ -472,3 +472,28 @@ func TestHistoryByLabelFiltersAndPages(t *testing.T) {
 		t.Fatalf("got %v err %v", got, err)
 	}
 }
+
+func TestLabelProbeResolvesItsHistoryOccurrence(t *testing.T) {
+	server := testoscar.New(t)
+	server.Enqueue(testoscar.Response{Status: 200, Body: `{"status":"accepted","task_id":"probe-1"}`})
+	server.Enqueue(testoscar.Response{Status: 200, Body: `{"total_records":1,"total_pages":1,"page":1,"per_page":100,"records":[{"id":"h1","alertname":"CORRTEST_PROBE_P00_SOURCE_7Q9K2M4A","fingerprint":"server-probe-fp","status":"firing","startsAt":"2026-08-20T00:00:01.529000+00:00","createdAt":"2026-08-20T00:00:01Z","labels":[{"Label":"alertname","Value":"CORRTEST_PROBE_P00_SOURCE_7Q9K2M4A"},{"Label":"oscar_test_run_id","Value":"crt_abc"},{"Label":"am_fingerprint","Value":"native-fp"}],"annotations":[]}]}`})
+	server.Enqueue(testoscar.Response{Status: 200, Body: `{"status":"accepted","task_id":"probe-clear"}`})
+	result, err := newClient(t, server.URL()).ProbeLabelSurvival(context.Background(), "crt_abc", "7Q9K2M4A")
+	if err != nil || !result.HistoryFound || !result.CleanupForwarded || result.CleanupRequired {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	requests := server.Requests()
+	if len(requests) != 3 || requests[2].Method != "POST" || !strings.Contains(string(requests[2].Body), `"resolved"`) || !strings.Contains(string(requests[2].Body), "native-fp") {
+		t.Fatalf("requests=%+v", requests)
+	}
+}
+
+func TestLabelProbeFlagsUnconfirmedCleanup(t *testing.T) {
+	server := testoscar.New(t)
+	server.Enqueue(testoscar.Response{Status: 200, Body: `{"status":"accepted","task_id":"probe-1"}`})
+	server.Enqueue(testoscar.Response{Status: 200, Body: `{"total_records":1,"total_pages":1,"page":1,"per_page":100,"records":[{"id":"h1","alertname":"CORRTEST_PROBE_P00_SOURCE_7Q9K2M4A","fingerprint":"server-probe-fp","status":"firing","createdAt":"2026-08-20T00:00:01Z","labels":[{"Label":"oscar_test_run_id","Value":"crt_abc"}],"annotations":[]}]}`})
+	result, err := newClient(t, server.URL()).ProbeLabelSurvival(context.Background(), "crt_abc", "7Q9K2M4A")
+	if err != nil || !result.HistoryFound || result.CleanupForwarded || !result.CleanupRequired {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}

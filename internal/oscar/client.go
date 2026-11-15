@@ -440,6 +440,13 @@ func (c *Client) ProbeLabelSurvival(ctx context.Context, runID, shortToken strin
 				}
 			}
 			sort.Strings(probe.MissingLabels)
+			// Resolve the diagnostic occurrence so every run leaves nothing firing.
+			// A failed cleanup is flagged, not fatal: compatibility is about labels.
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer cancel()
+			clear, clearErr := c.ResolveHistory(cleanupCtx, records[0])
+			probe.CleanupForwarded = clearErr == nil && clear.Class == InjectionAccepted
+			probe.CleanupRequired = !probe.CleanupForwarded
 			return probe, nil
 		}
 		if len(records) > 1 {

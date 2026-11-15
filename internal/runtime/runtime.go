@@ -465,6 +465,8 @@ func (r *Runtime) diagnose(ctx context.Context, client *oscar.Client, target dom
 	result.Compatible = probe.Accepted && probe.HistoryFound && probe.Fingerprint != "" && len(probe.MissingLabels) == 0
 	if !result.Compatible {
 		result.Detail = client.InputPath() + " injection/history did not preserve the reserved identity contract"
+	} else if probe.CleanupRequired {
+		result.Detail = "label probe resolve unconfirmed; " + probe.Fingerprint + " may still be firing"
 	}
 	return result
 }
