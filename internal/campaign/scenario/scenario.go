@@ -31,11 +31,11 @@ type BaselineSpec struct {
 }
 
 // CaseRef points at a built-in or example scenario by pattern and level
-// ("builtin", "basic", "advanced"); Case optionally names a case code.
+// ("builtin", "basic", "advanced"). The runtime contract requires both cases
+// (P01 and its N01 control), so a reference always runs the whole document.
 type CaseRef struct {
 	Pattern string `json:"pattern"`
 	Level   string `json:"level"`
-	Case    string `json:"case,omitempty"`
 }
 
 type CorrelationSpec struct {
@@ -120,7 +120,7 @@ func AlertingDayV1() Scenario {
 	var setA, setB []CaseRef
 	for _, b := range corr.AllBuiltins() {
 		setA = append(setA, CaseRef{Pattern: b.Pattern, Level: "builtin"})
-		setB = append(setB, CaseRef{Pattern: b.Pattern, Level: "builtin", Case: "P01"})
+		setB = append(setB, CaseRef{Pattern: b.Pattern, Level: "builtin"})
 	}
 	for _, e := range corr.AllExamples() {
 		setA = append(setA, CaseRef{Pattern: e.Pattern, Level: e.Level})

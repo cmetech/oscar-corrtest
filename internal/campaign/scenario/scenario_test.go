@@ -7,7 +7,7 @@ import (
 	corr "github.com/cmetech/oscar-corrtest/internal/scenario"
 )
 
-const goldenHash = "70228505d153f2c25080b7127d79bdb0c2db956a2bfe4d0cce5c48bb12750cf4"
+const goldenHash = "5cf7f1a0ff4d6dd43567fa440c7dc80183368ba9b6662dc79b8ab4004f8ff54e"
 
 func TestAlertingDayV1Values(t *testing.T) {
 	s := AlertingDayV1()
@@ -119,7 +119,7 @@ func TestSetAContainsAllBuiltinsAndExamples(t *testing.T) {
 		t.Fatalf("SetB %d", len(s.Correlation.SetB))
 	}
 	for i, b := range corr.AllBuiltins() {
-		if c := s.Correlation.SetB[i]; c.Pattern != b.Pattern || c.Level != "builtin" || c.Case != "P01" {
+		if c := s.Correlation.SetB[i]; c.Pattern != b.Pattern || c.Level != "builtin" {
 			t.Errorf("setB %d: %+v", i, c)
 		}
 	}

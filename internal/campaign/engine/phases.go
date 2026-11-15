@@ -290,28 +290,10 @@ func caseDoc(ref scenario.CaseRef) (corr.Scenario, error) {
 		}
 		doc = ex.Scenario
 	}
-	if ref.Case != "" {
-		var keep []corr.Case
-		for _, c := range doc.Cases {
-			if strings.EqualFold(c.Code, ref.Case) {
-				keep = append(keep, c)
-			}
-		}
-		if len(keep) == 0 {
-			return doc, fmt.Errorf("case %s not found in %s", ref.Case, ref.Pattern)
-		}
-		doc.Cases = keep
-	}
 	return doc, nil
 }
 
-func refName(ref scenario.CaseRef) string {
-	n := ref.Pattern + ":" + ref.Level
-	if ref.Case != "" {
-		n += ":" + ref.Case
-	}
-	return n
-}
+func refName(ref scenario.CaseRef) string { return ref.Pattern + ":" + ref.Level }
 
 // correlation runs set A from T+30 (anything not started by T+60 is
 // not_run), then loops set B from T+60 until the drain phase.
@@ -346,14 +328,21 @@ func (r *run) correlation(ctx context.Context) {
 	}
 	stopAt := r.at("drain", false)
 	for ctx.Err() == nil {
+		ran := false
 		for _, ref := range setB {
 			if ctx.Err() != nil || !r.now().Before(stopAt) {
 				return
 			}
-			r.correlate(ctx, ref, "setB", containsFold(r.s.Correlation.TicketedPatterns, ref.Pattern))
+			ran = r.correlate(ctx, ref, "setB", containsFold(r.s.Correlation.TicketedPatterns, ref.Pattern)) || ran
+		}
+		if !ran && !r.e.clock.SleepUntil(ctx, r.now().Add(setBBackoff)) { // a pass that started no run must not spin
+			return
 		}
 	}
 }
+
+// setBBackoff spaces set B passes in which every run failed to start.
+const setBBackoff = 30 * time.Second
 
 // correlate executes one case document through the runtime and links it.
 //
@@ -364,7 +353,8 @@ func (r *run) correlation(ctx context.Context) {
 // its first firing event. That bounds PDI volume. Ticketed runs are linked
 // as "setB_ticket:<pattern>" so drain and recovery can find their incidents
 // by the run's short token.
-func (r *run) correlate(ctx context.Context, ref scenario.CaseRef, kind string, ticket bool) {
+// It reports whether the runtime started a run.
+func (r *run) correlate(ctx context.Context, ref scenario.CaseRef, kind string, ticket bool) bool {
 	stable := context.WithoutCancel(ctx)
 	r.mu.Lock()
 	if kind == "setB" {
@@ -373,6 +363,7 @@ func (r *run) correlate(ctx context.Context, ref scenario.CaseRef, kind string, 
 	r.mu.Unlock()
 	doc, err := caseDoc(ref)
 	cr := score.CorrRun{Verdict: domain.VerdictError, Cleanup: domain.CleanupDirty}
+	started := false
 	if err == nil {
 		if ticket {
 			ticketFirstTrigger(&doc)
@@ -380,7 +371,7 @@ func (r *run) correlate(ctx context.Context, ref scenario.CaseRef, kind string, 
 		}
 		var res domain.Run
 		res, err = r.e.d.Correlate(ctx, r.e.d.TargetID, doc, correlationRun)
-		if res.ID != "" {
+		if started = res.ID != ""; started {
 			_ = r.store().LinkCampaignRun(stable, r.id, res.ID, kind)
 			cr.Verdict, cr.Cleanup = res.Verdict, res.CleanupStatus
 			if res.StartedAt != nil && res.EndedAt != nil {
@@ -395,6 +386,7 @@ func (r *run) correlate(ctx context.Context, ref scenario.CaseRef, kind string, 
 	r.mu.Lock()
 	r.corrRuns = append(r.corrRuns, cr)
 	r.mu.Unlock()
+	return started
 }
 
 // ticketFirstTrigger labels the first firing event of each trigger

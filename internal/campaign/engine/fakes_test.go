@@ -105,7 +105,7 @@ func testScenario() scenario.Scenario {
 			ResolveAfter: 5 * s, TicketEveryNth: 5, TicketFrom: 60 * s, TicketTo: 120 * s},
 		Correlation: scenario.CorrelationSpec{
 			SetA:             []scenario.CaseRef{{Pattern: "flood", Level: "builtin"}, {Pattern: "threshold", Level: "builtin"}},
-			SetB:             []scenario.CaseRef{{Pattern: "flood", Level: "builtin", Case: "P01"}},
+			SetB:             []scenario.CaseRef{{Pattern: "flood", Level: "builtin"}},
 			TicketedPatterns: []string{"flood", "threshold"}},
 		Resend: []scenario.PolicySpec{
 			{Key: "R1", Action: "notification", Mode: "time", Interval: 4 * s, MaxResends: n(2), Cohort: 1, Notifier: "CAMPAIGN_SINK"},
