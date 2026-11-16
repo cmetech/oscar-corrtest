@@ -183,6 +183,11 @@ type fakeOSCAR struct {
 	queryValues    map[string]float64 // instant query results by query substring (default 0)
 	deadCreated    []string           // "name url" of each dead target created
 	queueSeries    map[string]float64 // queue range series by queue_name (constant value); nil: one idle "alerts" series
+	// mergePairs models live OSCAR for fresh re-posts: a new startsAt of an open
+	// alert merges into its History row (which keeps the first startsAt) as the
+	// row's open pair; only a resolve with that pair's startsAt closes the row.
+	mergePairs bool
+	openPair   map[*oscar.HistoryRecord]time.Time
 }
 
 func newFakeOSCAR(t *testing.T, clock *scaledClock, s scenario.Scenario) *fakeOSCAR {
@@ -261,6 +266,17 @@ func (f *fakeOSCAR) ingest(labels map[string]string, startsAt time.Time, resolve
 	f.allFirings++
 	if lane {
 		f.laneFires = append(f.laneFires, now)
+	}
+	if f.mergePairs && !lane {
+		for _, h := range f.history {
+			if h.Labels["am_fingerprint"] == fp && h.Status == "firing" && !h.StartsAt.Equal(startsAt.Truncate(time.Millisecond)) {
+				if f.openPair == nil {
+					f.openPair = map[*oscar.HistoryRecord]time.Time{}
+				}
+				f.openPair[h] = startsAt.Truncate(time.Millisecond)
+				return
+			}
+		}
 	}
 	seen := false
 	for _, h := range f.history {
@@ -505,7 +521,11 @@ func (f *fakeOSCAR) PostAlertGroup(_ context.Context, req oscar.AlertGroupReques
 		}
 		f.mu.Lock()
 		for _, h := range f.history {
-			if h.Labels["am_fingerprint"] == a.Fingerprint && h.StartsAt.Equal(starts) && h.Status == "firing" {
+			want := h.StartsAt
+			if p, ok := f.openPair[h]; ok {
+				want = p
+			}
+			if h.Labels["am_fingerprint"] == a.Fingerprint && want.Equal(starts) && h.Status == "firing" {
 				h.Status = "resolved"
 				if inc := f.incidents[h.AlertName]; inc != nil && !f.withholdComments {
 					inc.Comments = append(inc.Comments, targetops.Comment{Value: "[OSCAR AUTO-UPDATE 1] Alert has been resolved"})

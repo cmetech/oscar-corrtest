@@ -154,9 +154,16 @@ func (r *run) resolveFiring(ctx context.Context, includeLane bool) ([]oscar.Hist
 		firing = append(firing, row)
 		req, err := oscar.BuildHistoryResolve(row, r.id)
 		if err == nil {
-			var status int
-			if status, err = r.e.d.Target.PostAlertGroup(ctx, req); err == nil && status/100 != 2 {
-				err = fmt.Errorf("HTTP %d", status)
+			// The latest re-post first: it is the pair that keeps the row open.
+			for _, at := range append(r.freshStarts(row), row.StartsAt) {
+				req.Alerts[0].StartsAt = at.UTC().Format(time.RFC3339Nano)
+				var status int
+				if status, err = r.e.d.Target.PostAlertGroup(ctx, req); err == nil && status/100 != 2 {
+					err = fmt.Errorf("HTTP %d", status)
+				}
+				if err != nil {
+					break
+				}
 			}
 		}
 		if err != nil {
@@ -164,6 +171,28 @@ func (r *run) resolveFiring(ctx context.Context, includeLane bool) ([]oscar.Hist
 		}
 	}
 	return firing, nil
+}
+
+// freshStarts are the later startsAt values of a fresh cohort member, newest
+// first: every Redelivery after the row's startsAt, before ResendUntil. OSCAR
+// merges a fresh re-post into the open History row (which keeps the first
+// startsAt) as its open pair, so only a resolve of the latest one closes the
+// row. Derived from the plan, so a cleanup re-run after a restart still has it;
+// a resolve of a pair that is closed or was never posted changes nothing.
+func (r *run) freshStarts(row oscar.HistoryRecord) []time.Time {
+	fresh := false
+	for _, p := range r.s.Resend {
+		fresh = fresh || p.Fresh && laneFor(p) == row.Labels["campaign_lane"]
+	}
+	every, until := r.s.Redelivery, r.t0.Add(r.s.ResendUntil)
+	if !fresh || every <= 0 || r.t0.IsZero() {
+		return nil
+	}
+	var out []time.Time
+	for at := row.StartsAt.Add(every); at.Before(until); at = at.Add(every) {
+		out = append([]time.Time{at}, out...)
+	}
+	return out
 }
 
 // historyResolveBudget bounds cleanup's History read-back (polled every
