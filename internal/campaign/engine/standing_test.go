@@ -67,7 +67,7 @@ func TestV2ReproducesTheATTBreakerAndRepeats(t *testing.T) {
 			h := newHarnessV2(t)
 			h.oscar.breakerTrip, h.oscar.breakerShut, h.oscar.rejectResolves = 5, 30, rejectResolves
 			h.oscar.queryValues = map[string]float64{"send_individual_notification": 100, `"tm.notifier.common"`: 300,
-				"ordinary_history_handoff": 400, `outcome="sent"`: 100, "notifications_failed_total": 40, "alertmanager_notifications_total": 200}
+				"ordinary_history_handoff": 400, `outcome="redispatched"`: 300, "notifications_failed_total": 40, "alertmanager_notifications_total": 200}
 			if err := h.run(context.Background()); err != nil {
 				t.Fatal(err)
 			}

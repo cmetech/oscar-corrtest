@@ -6,7 +6,7 @@ import (
 )
 
 func TestATTDeriveStatesTheReproducedFailureModes(t *testing.T) {
-	a := ATT{Budgets: map[string]float64{"alerts": 100, "notifier_jobs": 300, "handoff_publishes": 1070, "handoffs_sent": 100,
+	a := ATT{Budgets: map[string]float64{"alerts": 100, "notifier_jobs": 300, "handoff_publishes": 1070, "redispatched": 970,
 		"am_webhook_failed": 900, "am_webhook_sent": 1000, "history_updates": 50, "history_creates": 150},
 		Breaker: BreakerStats{Applied: true, Tripped: true, ResolveProbes: 50, ResolveAdmitted: 0, ReopenAfterSeconds: -1}}
 	a.Derive()
@@ -19,7 +19,7 @@ func TestATTDeriveStatesTheReproducedFailureModes(t *testing.T) {
 	if a.Budgets["repeat_share"] != 0.25 || a.Budgets["handoff_copies"] != 10.7 {
 		t.Fatalf("ratios %v", a.Budgets)
 	}
-	healthy := ATT{Budgets: map[string]float64{"handoff_publishes": 101, "handoffs_sent": 100},
+	healthy := ATT{Budgets: map[string]float64{"handoff_publishes": 101, "redispatched": 1},
 		Breaker: BreakerStats{Applied: true, Tripped: true, ResolveProbes: 50, ResolveAdmitted: 50, ReopenAfterSeconds: 12, Restored: true}}
 	healthy.Derive()
 	if len(healthy.Findings) != 0 {
