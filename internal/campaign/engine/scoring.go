@@ -60,8 +60,8 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 			r.noteMissing("sink receipts: " + err.Error())
 		}
 	}
-	in.QueueDepth = r.series(ctx, queueDepthQuery, "queue", end)
-	in.QueueAge = r.series(ctx, queueAgeQuery, "queue", end)
+	in.QueueDepth = r.series(ctx, queueDepthQuery, score.QueueLabel, end)
+	in.QueueAge = r.series(ctx, queueAgeQuery, score.QueueLabel, end)
 	if m, err := r.e.d.Metrics.QueryRange(ctx, score.Queries["container_workingset"], r.t0, end, metricStep); err == nil {
 		in.Containers = score.ContainerSeries(m)
 	}

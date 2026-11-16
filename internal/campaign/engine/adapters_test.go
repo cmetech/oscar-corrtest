@@ -56,8 +56,8 @@ func adapter(vec map[string]targetops.Vector) *PrecheckAdapter {
 
 func TestAdapterQueues(t *testing.T) {
 	a := adapter(map[string]targetops.Vector{
-		queueDepthQuery: {sample(map[string]string{"queue": "alerts"}, 7, 0), sample(map[string]string{"queue": "notify"}, 0, 0)},
-		queueAgeQuery:   {sample(map[string]string{"queue": "alerts"}, 2.5, 0)},
+		queueDepthQuery: {sample(map[string]string{"queue_name": "alerts"}, 7, 0), sample(map[string]string{"queue_name": "notify"}, 0, 0)},
+		queueAgeQuery:   {sample(map[string]string{"queue_name": "alerts"}, 2.5, 0)},
 	})
 	qs, err := a.Queues(context.Background())
 	if err != nil {
@@ -199,8 +199,8 @@ func TestAdapterOpenCampaignAlerts(t *testing.T) {
 
 func TestSampleGuard(t *testing.T) {
 	m := promFake{vec: map[string]targetops.Vector{
-		queueDepthQuery: {sample(map[string]string{"queue": "alerts"}, 3, 5*time.Second)},
-		queueAgeQuery:   {sample(map[string]string{"queue": "alerts"}, 1, 0)},
+		queueDepthQuery: {sample(map[string]string{"queue_name": "alerts"}, 3, 5*time.Second)},
+		queueAgeQuery:   {sample(map[string]string{"queue_name": "alerts"}, 1, 0)},
 	}}
 	probe := func(context.Context) (targetops.ProbeResult, error) {
 		return targetops.ProbeResult{Containers: []targetops.ProbeContainer{{RestartCount: 2}, {RestartCount: 1, OOMKilled: true}}}, nil
@@ -343,7 +343,7 @@ func (q *queueMetrics) Query(context.Context, string, time.Time) (targetops.Vect
 	q.calls++
 	var v targetops.Vector
 	for i, d := range q.depths {
-		v = append(v, targetops.Sample{Metric: map[string]string{"queue": fmt.Sprint("q", i)}, Value: d})
+		v = append(v, targetops.Sample{Metric: map[string]string{"queue_name": fmt.Sprint("q", i)}, Value: d})
 	}
 	return v, nil
 }

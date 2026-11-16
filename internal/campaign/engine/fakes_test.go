@@ -182,6 +182,7 @@ type fakeOSCAR struct {
 	forcedPosts    int
 	queryValues    map[string]float64 // instant query results by query substring (default 0)
 	deadCreated    []string           // "name url" of each dead target created
+	queueSeries    map[string]float64 // queue range series by queue_name (constant value); nil: one idle "alerts" series
 }
 
 func newFakeOSCAR(t *testing.T, clock *scaledClock, s scenario.Scenario) *fakeOSCAR {
@@ -635,7 +636,7 @@ var containerNames = []string{"oscar-alertmanager_worker-1", "oscar-notifier-1",
 
 func (f *fakeOSCAR) Query(_ context.Context, q string, at time.Time) (targetops.Vector, error) {
 	ts := float64(at.UnixMilli()) / 1000
-	m := map[string]string{"queue": "alerts"}
+	m := map[string]string{"queue_name": "alerts"}
 	value := 0.0
 	f.mu.Lock()
 	for sub, v := range f.queryValues {
@@ -664,7 +665,21 @@ func (f *fakeOSCAR) QueryRange(_ context.Context, q string, start, end time.Time
 		}
 		return m, nil
 	}
-	return targetops.Matrix{{Metric: map[string]string{"queue": "alerts"}, Values: pts}}, nil
+	f.mu.Lock()
+	queues := f.queueSeries
+	f.mu.Unlock()
+	if len(queues) > 0 && strings.Contains(q, "oscar_celery_queue") {
+		var m targetops.Matrix
+		for name, v := range queues {
+			var vals []targetops.Point
+			for _, p := range pts {
+				vals = append(vals, targetops.Point{Time: p.Time, Value: v})
+			}
+			m = append(m, targetops.Series{Metric: map[string]string{"queue_name": name}, Values: vals})
+		}
+		return m, nil
+	}
+	return targetops.Matrix{{Metric: map[string]string{"queue_name": "alerts"}, Values: pts}}, nil
 }
 
 func (f *fakeOSCAR) Snapshot(context.Context, map[string]string, time.Time, time.Time, time.Duration) (json.RawMessage, error) {
