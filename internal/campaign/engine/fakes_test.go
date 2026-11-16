@@ -362,6 +362,9 @@ func (f *fakeOSCAR) Deactivate(_ context.Context, id, nid, action string, rev in
 func (f *fakeOSCAR) Delete(_ context.Context, id, nid, action string, rev int) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if p := f.policies[id]; p == nil || p.deleted { // what OSCAR's middleware answers for a missing policy
+		return 0, &targetops.ConflictError{Code: "RESEND_POLICY_REQUEST_FAILED"}
+	}
 	nr, err := f.bump(nid, action, rev)
 	if err == nil {
 		f.policies[id].deleted = true

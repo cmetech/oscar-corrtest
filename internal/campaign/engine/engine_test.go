@@ -423,6 +423,34 @@ func TestRestoreIntentWithoutIDByName(t *testing.T) {
 	}
 }
 
+// TestRestoreCreateByIDWhenAlreadyGone: a policy deleted outside CorrTest must
+// count as restored, while a live one is still deactivated and deleted.
+func TestRestoreCreateByIDWhenAlreadyGone(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	r := &run{e: New(h.deps, h.clock), id: h.id, laneID: h.id + "-baseline", cohorts: map[string]*cohortMember{}}
+	create := func(name string) domain.CampaignMutation {
+		p, err := h.oscar.CreateDraft(ctx, targetops.PolicyDefinition{NotifierID: "n5", Name: name, Action: "notification"}, h.oscar.revs["n5/notification"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.oscar.policies[p.ID].enabled = true
+		return domain.CampaignMutation{Kind: kindPolicyCreate, ObjectID: p.ID, Prior: mustJSON(policyPrior{p.ID, name, "n5", "notification"})}
+	}
+	live := create("Campaign-y-R1")
+	if err := r.restore(ctx, live); err != nil {
+		t.Fatalf("live policy: %v", err)
+	}
+	if p := h.oscar.policies[live.ObjectID]; !p.deleted || p.enabled {
+		t.Fatal("live policy not deactivated and deleted")
+	}
+	gone := create("Campaign-y-R2")
+	h.oscar.policies[gone.ObjectID].deleted = true // removed by hand
+	if err := r.restore(ctx, gone); err != nil {
+		t.Fatalf("already-deleted policy must count as restored: %v", err)
+	}
+}
+
 func TestUnknownOutcome(t *testing.T) {
 	sent := time.Now()
 	for _, tc := range []struct {

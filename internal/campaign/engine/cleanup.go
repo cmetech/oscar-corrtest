@@ -400,15 +400,13 @@ func (r *run) restore(ctx context.Context, m domain.CampaignMutation) (err error
 		if err := json.Unmarshal(m.Prior, &p); err != nil {
 			return err
 		}
-		if p.ID == "" {
-			return r.removeByName(ctx, p)
-		}
-		if m.Kind == kindPolicyActivate {
+		if m.Kind == kindPolicyActivate && p.ID != "" {
 			return r.deactivatePolicy(ctx, p)
 		}
-		return r.withRevision(ctx, p.NotifierID, p.Action, func(rev int) (int, error) {
-			return r.e.d.Target.Delete(ctx, p.ID, p.NotifierID, p.Action, rev)
-		})
+		// A create is restored by lookup, so a policy already removed (by hand or an
+		// earlier partial cleanup) counts as restored: OSCAR answers a DELETE of a
+		// missing policy with an ambiguous 409, not a 404.
+		return r.removeByName(ctx, p)
 	case kindSink, kindNotifier, kindNotifierEnable:
 		var p notifierPrior
 		if err := json.Unmarshal(m.Prior, &p); err != nil {
@@ -464,8 +462,8 @@ func isResolution(comment string) bool {
 	return strings.Contains(comment, "[OSCAR AUTO-UPDATE") && strings.Contains(comment, "Alert has been resolved")
 }
 
-// removeByName resolves a create intent that never got an id: an exact-name
-// match is deactivated and deleted; no match means the create never landed.
+// removeByName restores a create: the exact-name match (with the recorded id, if
+// any) is deactivated and deleted; no match means it never landed or is gone.
 func (r *run) removeByName(ctx context.Context, p policyPrior) error {
 	items, err := r.e.d.Target.ListPolicies(ctx, p.NotifierID, p.Action, p.Name)
 	if err != nil {
@@ -473,7 +471,7 @@ func (r *run) removeByName(ctx context.Context, p policyPrior) error {
 	}
 	var match []targetops.PolicyItem
 	for _, it := range items {
-		if it.Name == p.Name {
+		if it.Name == p.Name && (p.ID == "" || it.ID == p.ID) {
 			match = append(match, it)
 		}
 	}
