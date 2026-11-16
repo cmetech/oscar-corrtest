@@ -60,6 +60,7 @@ var BudgetQueries = map[string]string{
 	"notifier_jobs":      `sum(increase(celery_task_sent_total{name="tm.notifier.common"}[%s]))`,
 	"handoff_publishes":  `sum(increase(celery_task_sent_total{name="tm.notifier.ordinary_history_handoff"}[%s]))`,
 	"handoffs_sent":      `sum(increase(oscar_history_gateway_handoffs_total{outcome="sent"}[%s]))`, // per target, not per hand-off
+	"recovered":          `sum(increase(oscar_history_gateway_handoffs_total{outcome="recovered"}[%s]))`,
 	"redispatched":       `sum(increase(oscar_history_gateway_handoffs_total{outcome="redispatched"}[%s]))`,
 	"recover_deferred":   `sum(increase(oscar_history_gateway_handoffs_total{outcome="recover_deferred"}[%s]))`,
 	"history_creates":    `sum(increase(oscar_alert_history_commits_total{operation="create"}[%s]))`,
@@ -96,10 +97,10 @@ func (a *ATT) Derive() {
 	if v, ok := ratio("notifier_jobs_per_alert", "notifier_jobs", "alerts"); ok {
 		f = append(f, fmt.Sprintf("notifier jobs per alert: %.2f (one per enabled target, AT&T 3)", v))
 	}
-	// Copies per hand-off: every publish beyond the first is a recovery re-publish
-	// (OSCAR's redispatched counter, 2026-11-16 builds on). Older builds lack it.
-	if r, ok := b["redispatched"]; ok && b["handoff_publishes"] > r {
-		v := b["handoff_publishes"] / (b["handoff_publishes"] - r)
+	// Copies per recovered hand-off: OSCAR counts an operation's first recovery publish
+	// (recovered, inline did not finish in 30 s) apart from copies of a leased one (redispatched).
+	if first := b["recovered"]; first > 0 {
+		v := (first + b["redispatched"]) / first
 		b["handoff_copies"] = v
 		if v > 1.2 {
 			f = append(f, fmt.Sprintf("hand-off re-queue: %.2f publishes per hand-off (AT&T 10.7)", v))
