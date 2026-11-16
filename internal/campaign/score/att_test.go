@@ -29,3 +29,25 @@ func TestATTDeriveStatesTheReproducedFailureModes(t *testing.T) {
 		t.Fatal("outcome buckets")
 	}
 }
+
+// AT&T loop on the delivery queue (2026-11-16 v2 run): notification-delivery recovery
+// republished each retryable delivery every 2 s while the notifier queue was backlogged.
+func TestATTDeriveCountsDeliveryCopies(t *testing.T) {
+	looping := ATT{Budgets: map[string]float64{"delivery_requests": 1000, "delivery_republished": 3000},
+		Breaker: BreakerStats{Applied: true, Tripped: true, ResolveProbes: 1, ResolveAdmitted: 1, ReopenAfterSeconds: 1, Restored: true}}
+	looping.Derive()
+	if looping.Budgets["delivery_copies"] != 4 || !strings.Contains(strings.Join(looping.Findings, "\n"), "delivery re-queue: 4.00 publishes per delivery") {
+		t.Fatalf("copies %v findings %v", looping.Budgets, looping.Findings)
+	}
+	fixed := ATT{Budgets: map[string]float64{"delivery_requests": 1000, "delivery_republished": 5},
+		Breaker: BreakerStats{Applied: true, Tripped: true, ResolveProbes: 1, ResolveAdmitted: 1, ReopenAfterSeconds: 1, Restored: true}}
+	fixed.Derive()
+	if fixed.Budgets["delivery_copies"] != 1.005 || len(fixed.Findings) != 0 {
+		t.Fatalf("copies %v findings %v", fixed.Budgets, fixed.Findings)
+	}
+	for _, k := range []string{"delivery_requests", "delivery_republished"} {
+		if !strings.Contains(BudgetQueries[k], "%s") {
+			t.Fatalf("budget query %s missing", k)
+		}
+	}
+}
