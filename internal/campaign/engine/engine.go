@@ -46,6 +46,7 @@ type Store interface {
 	GetCampaign(ctx context.Context, id string) (domain.Campaign, error)
 	AppendCampaignEvent(ctx context.Context, id, typ, level, summary string, detail json.RawMessage, at time.Time) error
 	RecentCampaignEvents(ctx context.Context, id string, limit int) ([]domain.CampaignEvent, error)
+	FirstCampaignEvent(ctx context.Context, id, typ string) (domain.CampaignEvent, bool, error)
 	TransitionCampaign(ctx context.Context, id string, next domain.CampaignStatus, at time.Time, summary string) error
 	RecordPrecheck(ctx context.Context, id string, r domain.PrecheckResult) error
 	LinkCampaignRun(ctx context.Context, campaignID, runID, kind string) error
@@ -282,7 +283,7 @@ func (e *Engine) Run(ctx context.Context, id string, o runtime.CampaignOptions) 
 const (
 	scenarioEvent = "campaign.scenario"
 	precheckEvent = "campaign.precheck"
-	maxEvents     = 1 << 20 // read the whole event log
+	maxEvents     = 1 << 20 // bundle event cap; ponytail: newest 1M only, page the export if a campaign can log more
 )
 
 // Recover drains and cleans up an interrupted campaign with verdict
@@ -353,35 +354,17 @@ func (e *Engine) Cleanup(ctx context.Context, id string) (domain.CleanupStatus, 
 }
 
 func (r *run) recordedScenario(ctx context.Context) (scenario.Scenario, bool) {
-	evs, err := r.store().RecentCampaignEvents(ctx, r.id, maxEvents)
-	if err != nil {
-		return scenario.Scenario{}, false
-	}
-	for _, ev := range evs {
-		if ev.Type == scenarioEvent {
-			var s scenario.Scenario
-			if json.Unmarshal(ev.Detail, &s) == nil {
-				return s, true
-			}
-		}
-	}
-	return scenario.Scenario{}, false
+	var s scenario.Scenario
+	ev, ok, err := r.store().FirstCampaignEvent(ctx, r.id, scenarioEvent)
+	return s, err == nil && ok && json.Unmarshal(ev.Detail, &s) == nil
 }
 
+// recordedT0 reads the campaign.t0 event by type: a recent-events window
+// misses it once later events outnumber the window.
 func (r *run) recordedT0(ctx context.Context) (time.Time, bool) {
-	evs, err := r.store().RecentCampaignEvents(ctx, r.id, maxEvents)
-	if err != nil {
-		return time.Time{}, false
-	}
-	for _, ev := range evs {
-		if ev.Type == "campaign.t0" {
-			var d struct{ T0 time.Time }
-			if json.Unmarshal(ev.Detail, &d) == nil {
-				return d.T0, true
-			}
-		}
-	}
-	return time.Time{}, false
+	var d struct{ T0 time.Time }
+	ev, ok, err := r.store().FirstCampaignEvent(ctx, r.id, "campaign.t0")
+	return d.T0, err == nil && ok && json.Unmarshal(ev.Detail, &d) == nil
 }
 
 // execute runs steps 2-9 once the campaign is RUNNING.

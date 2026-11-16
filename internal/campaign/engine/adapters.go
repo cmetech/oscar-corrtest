@@ -28,6 +28,9 @@ import (
 
 // sampleGuard builds one guard sample: queues and refusal counters from
 // PromQL, restarts and OOMs from the probe. Newest is the newest sample time.
+// historyCreateRateQuery is OSCAR's History create-commit rate (/s).
+const historyCreateRateQuery = `sum(rate(oscar_alert_history_commits_total{operation="create"}[2m]))`
+
 func sampleGuard(ctx context.Context, m Metrics, probe func(context.Context) (targetops.ProbeResult, error), now time.Time) (guard.Sample, error) {
 	s := guard.Sample{At: now, QueueDepth: map[string]float64{}, QueueAge: map[string]float64{}}
 	newest := 0.0
@@ -55,6 +58,11 @@ func sampleGuard(ctx context.Context, m Metrics, probe func(context.Context) (ta
 		for _, x := range v {
 			*into += x.Value
 		}
+	}
+	// Optional: an absent or failed series leaves HistoryCreatesOK false, so
+	// the stall guard never reads "no data" as "no History writes".
+	if v, err := m.Query(ctx, historyCreateRateQuery, now); err == nil && len(v) > 0 {
+		s.HistoryCreates, s.HistoryCreatesOK = v[0].Value, true
 	}
 	if newest == 0 {
 		return s, errors.New("no metric samples")

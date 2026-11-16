@@ -17,10 +17,14 @@ const (
 	GuardUnknownRate   = "unknown_rate"
 	GuardTicketUnknown = "ticket_unknown"
 	GuardLaneStopped   = "lane_stopped"
+	// GuardHistoryStalled: History create commits fell to zero while the
+	// baseline lane keeps firing (camp_681887ad6d96c6ff ran 29 min that way).
+	GuardHistoryStalled = "history_stalled"
 )
 
 const (
 	growthWindow      = 20 // samples: 5 min at 15 s
+	stallWindow       = 3 * time.Minute
 	unknownMinOffered = 500
 )
 
@@ -30,6 +34,10 @@ type Sample struct {
 	Restarts, OOMs             int
 	MySQLRefusals, RedisDenied float64
 	Newest                     time.Time
+	// HistoryCreates is OSCAR's History create-commit rate (/s); OK when the
+	// series was present in the sample.
+	HistoryCreates   float64
+	HistoryCreatesOK bool
 }
 
 type Counters struct {
@@ -73,6 +81,9 @@ func Evaluate(now time.Time, window []Sample, c Counters, baseline Sample) []Tri
 	if len(window) == 0 {
 		return trips
 	}
+	if c.LaneState == "running" && now.Before(c.BaselineEnd) && historyStalled(window) {
+		add(GuardHistoryStalled, "no History creates for %s while the lane fires", stallWindow)
+	}
 	last := window[len(window)-1]
 	if last.Restarts > baseline.Restarts {
 		add(GuardRestart, "restarts %d > baseline %d", last.Restarts, baseline.Restarts)
@@ -102,6 +113,27 @@ func Evaluate(now time.Time, window []Sample, c Counters, baseline Sample) []Tri
 	}
 	return trips
 }
+
+// historyStalled: the window ends in a run of present, zero-create samples
+// spanning stallWindow (12 ticks), and creates flowed before that run.
+func historyStalled(w []Sample) bool {
+	i := len(w)
+	for i > 0 && w[i-1].HistoryCreatesOK && w[i-1].HistoryCreates == 0 {
+		i--
+	}
+	if i == len(w) || w[len(w)-1].At.Sub(w[i].At) < stallWindow-guardTick {
+		return false
+	}
+	for _, s := range w[:i] {
+		if s.HistoryCreatesOK && s.HistoryCreates > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// guardTick is the controller's sampling cadence.
+const guardTick = 15 * time.Second
 
 // rising: every sample above baseline and least-squares slope > 0.
 func rising(w []Sample, base Sample, get func(Sample) map[string]float64, q string) bool {

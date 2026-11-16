@@ -212,6 +212,13 @@ func TestSampleGuard(t *testing.T) {
 	if s.QueueDepth["alerts"] != 3 || s.Restarts != 3 || s.OOMs != 1 || !s.Newest.Equal(adapterNow) {
 		t.Fatalf("sample %+v", s)
 	}
+	if s.HistoryCreatesOK { // series absent in this fake: the stall guard must not read it as zero
+		t.Fatalf("absent History create series read as present: %+v", s)
+	}
+	m.vec[historyCreateRateQuery] = targetops.Vector{sample(nil, 3.1, 0)}
+	if s, err = sampleGuard(context.Background(), m, probe, adapterNow); err != nil || !s.HistoryCreatesOK || s.HistoryCreates != 3.1 {
+		t.Fatalf("History create rate not sampled: %+v %v", s, err)
+	}
 	if _, err := sampleGuard(context.Background(), promFake{}, probe, adapterNow); err == nil {
 		t.Fatal("no samples must not produce a guard sample")
 	}

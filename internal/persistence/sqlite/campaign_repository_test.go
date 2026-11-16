@@ -330,3 +330,30 @@ func TestCampaignRunsSkipsRunsThatNeverStarted(t *testing.T) {
 		t.Fatalf("links %+v", links)
 	}
 }
+
+// Recovery reads the t0 and scenario events; camp_681887ad6d96c6ff buried them
+// under ~3.9M later events, beyond any recent-events window.
+func TestFirstCampaignEventFindsOldEventByType(t *testing.T) {
+	ctx := context.Background()
+	d := openCampaignDB(t)
+	newCampaign(t, d, "c1")
+	at := time.Now()
+	if err := d.AppendCampaignEvent(ctx, "c1", "campaign.t0", "info", "t0", json.RawMessage(`{"T0":"2026-11-15T20:00:40Z"}`), at); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 50; i++ {
+		if err := d.AppendCampaignEvent(ctx, "c1", "campaign.correlation", "warn", "noise", nil, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if recent, _ := d.RecentCampaignEvents(ctx, "c1", 10); len(recent) != 10 || recent[0].Type == "campaign.t0" {
+		t.Fatalf("setup: t0 should be outside the recent window: %+v", recent)
+	}
+	ev, ok, err := d.FirstCampaignEvent(ctx, "c1", "campaign.t0")
+	if err != nil || !ok || ev.Type != "campaign.t0" || string(ev.Detail) != `{"T0":"2026-11-15T20:00:40Z"}` {
+		t.Fatalf("first t0 event: %+v %v %v", ev, ok, err)
+	}
+	if _, ok, err := d.FirstCampaignEvent(ctx, "c1", "campaign.missing"); ok || err != nil {
+		t.Fatalf("missing type: ok=%v err=%v", ok, err)
+	}
+}

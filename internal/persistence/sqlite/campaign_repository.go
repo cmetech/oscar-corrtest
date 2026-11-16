@@ -392,3 +392,25 @@ func (d *Database) RecentCampaignEvents(ctx context.Context, id string, limit in
 	}
 	return out, rows.Err()
 }
+
+// FirstCampaignEvent returns the campaign's earliest event of type typ, however
+// many events follow it; ok is false when there is none.
+func (d *Database) FirstCampaignEvent(ctx context.Context, id, typ string) (domain.CampaignEvent, bool, error) {
+	var e domain.CampaignEvent
+	var at string
+	var detail sql.NullString
+	err := d.db.QueryRowContext(ctx, `SELECT campaign_id, sequence, type, level, occurred_at, summary, detail_json
+		FROM campaign_events WHERE campaign_id=? AND type=? ORDER BY sequence LIMIT 1`, id, typ).
+		Scan(&e.CampaignID, &e.Sequence, &e.Type, &e.Level, &at, &e.Summary, &detail)
+	if errors.Is(err, sql.ErrNoRows) {
+		return e, false, nil
+	}
+	if err != nil {
+		return e, false, fmt.Errorf("first campaign event: %w", err)
+	}
+	if e.OccurredAt, err = time.Parse(time.RFC3339Nano, at); err != nil {
+		return e, false, err
+	}
+	e.Detail = rawJSON(detail)
+	return e, true, nil
+}

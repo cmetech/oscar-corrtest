@@ -142,3 +142,43 @@ func TestLaneStoppedBeforeBaselineEnd(t *testing.T) {
 		t.Fatal("no heartbeat yet (unknown state) must not trip")
 	}
 }
+
+// creates builds a 15 s window whose History create rate is f(i); ok marks the
+// metric as present.
+func creates(n int, f func(i int) float64, ok bool) []Sample {
+	w := series(n, func(int) float64 { return 0 })
+	for i := range w {
+		w[i].HistoryCreates, w[i].HistoryCreatesOK = f(i), ok
+	}
+	return w
+}
+
+// camp_681887ad6d96c6ff: History create commits fell from ~3/s to 0 at 21:34
+// while the lane kept firing; nothing stopped the run for 29 minutes.
+func TestHistoryStalledTripsAfterThreeMinutesOfZeroCreates(t *testing.T) {
+	running := func(at time.Time) Counters {
+		return Counters{WorkerHeartbeat: at, LaneState: "running", BaselineEnd: at.Add(time.Hour)}
+	}
+	stall := creates(20, func(i int) float64 { return map[bool]float64{true: 3, false: 0}[i < 8] }, true) // 12 zero samples
+	if at := stall[19].At; !has(Evaluate(at, stall, running(at), Sample{}), GuardHistoryStalled) {
+		t.Fatal("3 min of zero creates after flow must trip")
+	}
+	short := stall[:19] // only 11 zero samples (2m45s)
+	if at := short[18].At; has(Evaluate(at, short, running(at), Sample{}), GuardHistoryStalled) {
+		t.Fatal("under 3 min of zeros must not trip")
+	}
+	warmup := creates(20, func(int) float64 { return 0 }, true) // never flowed: startup, not a stall
+	if at := warmup[19].At; has(Evaluate(at, warmup, running(at), Sample{}), GuardHistoryStalled) {
+		t.Fatal("zero creates before any flow must not trip")
+	}
+	missing := creates(20, func(i int) float64 { return map[bool]float64{true: 3, false: 0}[i < 8] }, false)
+	for i := 8; i < 20; i++ {
+		missing[i].HistoryCreatesOK = false // series absent: the stale-metrics guard owns that
+	}
+	if at := missing[19].At; has(Evaluate(at, missing, running(at), Sample{}), GuardHistoryStalled) {
+		t.Fatal("an absent metric must not trip the stall guard")
+	}
+	if at := stall[19].At; has(Evaluate(at, stall, Counters{WorkerHeartbeat: at, LaneState: "running", BaselineEnd: at}, Sample{}), GuardHistoryStalled) {
+		t.Fatal("after the baseline end firings stop, so zero creates is expected")
+	}
+}
