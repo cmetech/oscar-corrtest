@@ -95,6 +95,10 @@ type Target interface {
 	// the same route, with PostAlert's status semantics.
 	PostAlertGroup(ctx context.Context, req oscar.AlertGroupRequest) (status int, err error)
 	History(ctx context.Context, campaignRun string, start, end time.Time) ([]oscar.HistoryRecord, error)
+	// AlertLimits and SetAlertLimits read and replace the alert ingest rate-limit
+	// overrides (the breaker window's queue thresholds).
+	AlertLimits(ctx context.Context) (targetops.AlertLimits, error)
+	SetAlertLimits(ctx context.Context, rev int, overrides json.RawMessage) (targetops.AlertLimits, error)
 }
 
 // SNOW is the PDI surface (*targetops.SNOW).
@@ -196,7 +200,9 @@ type run struct {
 	notRun        []string
 	plannedCorr   int
 	fo            map[string][]score.FOSample
-	foDone        chan struct{} // closed when the front office has stopped
+	foDone        chan struct{}       // closed when the front office has stopped
+	standing      score.StandingStats // v2 standing pool
+	breaker       score.BreakerStats  // v2 forced breaker window
 }
 
 type policyState struct {
@@ -414,9 +420,10 @@ func (r *run) execute(ctx context.Context) error {
 	go func() { defer bg.Done(); r.guards(phaseCtx, func() { stopPhases(); stopFO() }) }()
 
 	var work sync.WaitGroup
-	work.Add(2)
+	work.Add(3)
 	go func() { defer work.Done(); r.correlation(phaseCtx) }()
 	go func() { defer work.Done(); r.resendPhase(phaseCtx) }()
+	go func() { defer work.Done(); r.standingPhase(phaseCtx) }() // v2 only
 	work.Wait()
 	// Firings end at the drain phase start (or earlier on a trip/stop).
 	if r.e.clock.SleepUntil(phaseCtx, r.at("drain", false)) {

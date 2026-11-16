@@ -172,6 +172,15 @@ type fakeOSCAR struct {
 	correlates       atomic.Int32
 	slow             time.Duration
 	onCorr           func()
+	// alert rate limits and the scripted intake breaker (v2)
+	limitsRev      int
+	overrides      json.RawMessage
+	limitsRefused  bool // PUT refused (no manage:rate_limits)
+	breakerTrip    int  // with forced thresholds, firing posts after this many are refused...
+	breakerShut    int  // ...for this many posts, then the breaker reopens
+	rejectResolves bool // resolves are refused while tripped (26.4.4)
+	forcedPosts    int
+	queryValues    map[string]float64 // instant query results by query substring (default 0)
 }
 
 func newFakeOSCAR(t *testing.T, clock *scaledClock, s scenario.Scenario) *fakeOSCAR {
@@ -412,11 +421,55 @@ func (f *fakeOSCAR) PolicyStatus(_ context.Context, nid, action, policyID string
 }
 
 // PostAlert is the middleware route for cohort firings.
+// forced reports whether the breaker window's thresholds are in place (f.mu held).
+func (f *fakeOSCAR) forced() bool {
+	var o struct{ Queue *struct{ High int } }
+	return f.s.Breaker != nil && json.Unmarshal(f.overrides, &o) == nil && o.Queue != nil && o.Queue.High == f.s.Breaker.QueueHigh
+}
+
+// tripped: the scripted breaker refuses posts (f.mu held).
+func (f *fakeOSCAR) tripped() bool {
+	return f.forced() && f.breakerTrip > 0 && f.forcedPosts > f.breakerTrip && f.forcedPosts <= f.breakerTrip+f.breakerShut
+}
+
+func (f *fakeOSCAR) AlertLimits(context.Context) (targetops.AlertLimits, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.overrides == nil {
+		f.overrides = json.RawMessage(`{"per_source":null,"total":null,"webhook":null,"insert":null,"flood":null,"queue":null}`)
+	}
+	return targetops.AlertLimits{Revision: f.limitsRev, Overrides: f.overrides}, nil
+}
+
+func (f *fakeOSCAR) SetAlertLimits(ctx context.Context, rev int, overrides json.RawMessage) (targetops.AlertLimits, error) {
+	f.mu.Lock()
+	if f.limitsRefused {
+		f.mu.Unlock()
+		return targetops.AlertLimits{}, &oscar.MachineError{StatusCode: 403, Detail: "manage:rate_limits required"}
+	}
+	if rev != f.limitsRev {
+		f.mu.Unlock()
+		return targetops.AlertLimits{}, &oscar.MachineError{StatusCode: 409, Detail: "stale revision"}
+	}
+	f.limitsRev++
+	f.overrides = overrides
+	f.forcedPosts = 0
+	f.mu.Unlock()
+	return f.AlertLimits(ctx)
+}
+
 func (f *fakeOSCAR) PostAlert(_ context.Context, a Alert) (int, error) {
 	f.mu.Lock()
+	if f.forced() {
+		f.forcedPosts++
+		if f.tripped() {
+			f.mu.Unlock()
+			return 503, &oscar.MachineError{StatusCode: 503, Detail: "overloaded"}
+		}
+	}
 	f.posts[a.Name]++
 	amb := a.Name == f.ambiguous && f.posts[a.Name] == 1
-	if !amb {
+	if !amb && a.Labels["campaign_lane"] != standingLane { // standing posts are not resend cohorts
 		f.cohort[a.Name] = append(f.cohort[a.Name], delivery{at: f.clock.Now().UTC(), labels: a.Labels})
 	}
 	f.mu.Unlock()
@@ -430,6 +483,10 @@ func (f *fakeOSCAR) PostAlert(_ context.Context, a Alert) (int, error) {
 // PostAlertGroup is the middleware route for History-built resolves.
 func (f *fakeOSCAR) PostAlertGroup(_ context.Context, req oscar.AlertGroupRequest) (int, error) {
 	f.mu.Lock()
+	if f.tripped() && f.rejectResolves {
+		f.mu.Unlock()
+		return 503, &oscar.MachineError{StatusCode: 503, Detail: "overloaded"}
+	}
 	f.resolvePosts = append(f.resolvePosts, req.Alerts...)
 	fail, ignore := f.failResolves, f.ignoreResolves
 	f.mu.Unlock()
@@ -578,7 +635,15 @@ var containerNames = []string{"oscar-alertmanager_worker-1", "oscar-notifier-1",
 func (f *fakeOSCAR) Query(_ context.Context, q string, at time.Time) (targetops.Vector, error) {
 	ts := float64(at.UnixMilli()) / 1000
 	m := map[string]string{"queue": "alerts"}
-	return targetops.Vector{{Metric: m, Time: ts, Value: 0}}, nil
+	value := 0.0
+	f.mu.Lock()
+	for sub, v := range f.queryValues {
+		if strings.Contains(q, sub) {
+			value = v
+		}
+	}
+	f.mu.Unlock()
+	return targetops.Vector{{Metric: m, Time: ts, Value: value}}, nil
 }
 
 func (f *fakeOSCAR) QueryRange(_ context.Context, q string, start, end time.Time, step time.Duration) (targetops.Matrix, error) {

@@ -63,7 +63,7 @@ func TestMigration0006AppliesOnTopOf0005(t *testing.T) {
 		t.Fatal(err)
 	}
 	var n, runs int
-	if err := db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 7 {
+	if err := db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 8 {
 		t.Fatalf("n=%d err=%v", n, err)
 	}
 	if err := db.QueryRow(`SELECT count(*) FROM runs`).Scan(&runs); err != nil || runs != 1 {
@@ -396,5 +396,44 @@ func TestCampaignEventsAfterPagesBySequence(t *testing.T) {
 		if s != i+1 {
 			t.Fatalf("sequence %d at %d, want ascending from 1: %v", s, i, got)
 		}
+	}
+}
+
+// Migration 0008: campaign_mutations accepts v2's queue_override and keeps every row.
+func TestMigration0008AcceptsQueueOverride(t *testing.T) {
+	ctx := context.Background()
+	db := openTestSQL(t)
+	old := fstest.MapFS{}
+	entries, _ := fs.ReadDir(embeddedMigrations, "migrations")
+	for _, e := range entries {
+		if e.Name() < "0008" {
+			data, _ := embeddedMigrations.ReadFile("migrations/" + e.Name())
+			old["migrations/"+e.Name()] = &fstest.MapFile{Data: data}
+		}
+	}
+	if err := migrate(ctx, db, old); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO campaigns(id, scenario_id, scenario_hash, custom, trigger, run_by, trigger_identity, status, started_at) VALUES('c1','s','h',0,'cli','agent','me','COMPLETED','2026-01-01T00:00:00Z')`,
+		`INSERT INTO campaign_mutations(campaign_id, kind, object_id, recorded_at) VALUES('c1','notifier_enable','CAMPAIGN_SINK','2026-01-01T00:00:00Z')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insert := `INSERT INTO campaign_mutations(campaign_id, kind, object_id, prior_json, recorded_at) VALUES('c1','queue_override','alerts/ratelimits','{"queue":null}','2026-01-01T00:00:00Z')`
+	if _, err := db.Exec(insert); err == nil {
+		t.Fatal("0007 should refuse queue_override")
+	}
+	if err := migrate(ctx, db, embeddedMigrations); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(insert); err != nil {
+		t.Fatalf("queue_override after 0008: %v", err)
+	}
+	var ids string
+	if err := db.QueryRow(`SELECT group_concat(id || ':' || kind) FROM campaign_mutations ORDER BY id`).Scan(&ids); err != nil || ids != "1:notifier_enable,2:queue_override" {
+		t.Fatalf("rows %q err %v", ids, err)
 	}
 }

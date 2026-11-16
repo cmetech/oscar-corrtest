@@ -182,3 +182,19 @@ func TestHistoryStalledTripsAfterThreeMinutesOfZeroCreates(t *testing.T) {
 		t.Fatal("after the baseline end firings stop, so zero creates is expected")
 	}
 }
+
+// The v2 forced breaker stalls History on purpose: inside the quiet window the
+// stall guard stays quiet, and it trips again once the window has passed.
+func TestQuietWindowSilencesTheStallGuardOnlyInsideIt(t *testing.T) {
+	stall := creates(20, func(i int) float64 { return map[bool]float64{true: 3, false: 0}[i < 8] }, true)
+	at := stall[19].At
+	c := Counters{WorkerHeartbeat: at, LaneState: "running", BaselineEnd: at.Add(time.Hour)}
+	c.QuietFrom, c.QuietUntil = at.Add(-time.Minute), at.Add(time.Minute)
+	if has(Evaluate(at, stall, c, Sample{}), GuardHistoryStalled) {
+		t.Fatal("a stall inside the quiet window must not trip")
+	}
+	c.QuietFrom, c.QuietUntil = at.Add(-10*time.Minute), at.Add(-time.Second)
+	if !has(Evaluate(at, stall, c, Sample{}), GuardHistoryStalled) {
+		t.Fatal("after the quiet window the stall guard is live again")
+	}
+}

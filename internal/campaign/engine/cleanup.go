@@ -393,6 +393,8 @@ func (r *run) notifierID(ctx context.Context, name string) (string, error) {
 
 func (r *run) restore(ctx context.Context, m domain.CampaignMutation) (err error) {
 	switch m.Kind {
+	case kindQueueOverride:
+		return r.restoreAlertLimits(ctx, m.Prior)
 	case kindIncident:
 		return r.resolveIncident(ctx, m.ObjectID)
 	case kindPolicyCreate, kindPolicyActivate:

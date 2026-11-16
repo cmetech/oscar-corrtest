@@ -94,6 +94,32 @@ func (p PrecheckLimits) QueueIdle(depth float64) bool {
 	return depth <= float64(p.IdleQueueDepth)
 }
 
+// StandingSpec is the AT&T-shaped standing pool (v2): Size alerts on hosts that
+// are not in inventory, first posted across one Interval from T0 and then
+// re-delivered unchanged every Interval until Until, as native Alertmanager
+// does on repeat_interval. Posts go through the Alertmanager webhook route
+// (native Alertmanager suppresses unchanged reposts), Concurrency at a time.
+type StandingSpec struct {
+	Size        int           `json:"size"`
+	Instances   int           `json:"instances"`
+	Interval    time.Duration `json:"interval"`
+	Until       time.Duration `json:"until"`
+	Concurrency int           `json:"concurrency"`
+}
+
+// BreakerSpec is the forced intake circuit-breaker window (v2, phase
+// "breaker"): queue thresholds are overridden to QueueHigh/QueueLow, the
+// standing pool is posted at once with BurstConcurrency to trip the breaker,
+// and ResolveProbes resolve-only posts check whether resolves are admitted
+// while it is tripped. The override is a recorded mutation, restored at the
+// phase end and by cleanup.
+type BreakerSpec struct {
+	QueueHigh        int `json:"queueHigh"`
+	QueueLow         int `json:"queueLow"`
+	BurstConcurrency int `json:"burstConcurrency"`
+	ResolveProbes    int `json:"resolveProbes"`
+}
+
 type Scenario struct {
 	ID          string          `json:"id"`
 	Version     string          `json:"version"`
@@ -105,9 +131,12 @@ type Scenario struct {
 	Redelivery  time.Duration   `json:"redelivery"`
 	ResendUntil time.Duration   `json:"resendUntil"`
 	FrontOffice FrontOfficeSpec `json:"frontOffice"`
-	Limits      Limits          `json:"limits"`
-	Precheck    PrecheckLimits  `json:"precheck"`
-	Seed        int64           `json:"seed"`
+	// v2 facets; nil (and absent from the hash) in v1.
+	Standing *StandingSpec  `json:"standing,omitempty"`
+	Breaker  *BreakerSpec   `json:"breaker,omitempty"`
+	Limits   Limits         `json:"limits"`
+	Precheck PrecheckLimits `json:"precheck"`
+	Seed     int64          `json:"seed"`
 }
 
 // TransportDedupWindow is OSCAR's JetStream duplicate window for ordinary alerts
@@ -151,6 +180,24 @@ func AlertingDayV1() Scenario {
 	}
 }
 
+// AlertingDayV2 is v1 plus the AT&T 26.4.4 shape (2026-11-16 capacity findings):
+// a standing pool of 2,000 alerts on hosts not in inventory, repeated unchanged
+// every 10 minutes (~3.3/s on top of the 3.5/s baseline, ~6.8/s against AT&T's
+// 7.8/s), and a forced breaker window at T+120-130 before a 20-minute drain.
+// The baseline lane runs to the drain start (T+130), so Alertmanager traffic
+// meets the tripped breaker. Query set q2 adds the per-alert cost budgets.
+func AlertingDayV2() Scenario {
+	min := time.Minute
+	s := AlertingDayV1()
+	s.Version = "v2"
+	s.Phases = []Phase{{"preflight", -10 * min, 0}, {"baseline", 0, 30 * min}, {"correlation", 30 * min, 60 * min},
+		{"ticketing", 60 * min, 90 * min}, {"resend", 90 * min, 120 * min}, {"breaker", 120 * min, 130 * min}, {"drain", 130 * min, 150 * min}}
+	s.Standing = &StandingSpec{Size: 2000, Instances: 500, Interval: 10 * min, Until: 120 * min, Concurrency: 8}
+	s.Breaker = &BreakerSpec{QueueHigh: 100, QueueLow: 10, BurstConcurrency: 32, ResolveProbes: 50}
+	s.Limits.QuerySetVersion = "q2"
+	return s
+}
+
 // AlertingDaySmokeV1 is the bounded live smoke (spec 13.11, plan C19 step 6):
 // about 12 minutes (phases of 2 minutes; resend 4, since policy activation
 // waits ~90s for OSCAR cutover and does not scale), baseline 1/s with 2 planned
@@ -174,7 +221,7 @@ func AlertingDaySmokeV1() Scenario {
 }
 
 // Builtins are the built-in campaign scenarios.
-func Builtins() []Scenario { return []Scenario{AlertingDayV1(), AlertingDaySmokeV1()} }
+func Builtins() []Scenario { return []Scenario{AlertingDayV1(), AlertingDayV2(), AlertingDaySmokeV1()} }
 
 // Lookup returns the built-in scenario named "id@version".
 func Lookup(ref string) (Scenario, bool) {
@@ -228,8 +275,11 @@ func canon(v reflect.Value) any {
 	case v.Kind() == reflect.Struct:
 		m := map[string]any{}
 		for i := 0; i < v.NumField(); i++ {
-			name := strings.Split(v.Type().Field(i).Tag.Get("json"), ",")[0]
-			m[name] = canon(v.Field(i))
+			tag := strings.Split(v.Type().Field(i).Tag.Get("json"), ",")
+			if len(tag) > 1 && tag[1] == "omitempty" && v.Field(i).IsZero() {
+				continue // a facet a scenario does not use leaves its hash unchanged
+			}
+			m[tag[0]] = canon(v.Field(i))
 		}
 		return m
 	case v.Kind() == reflect.Slice:

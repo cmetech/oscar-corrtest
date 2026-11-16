@@ -47,6 +47,13 @@ type Counters struct {
 	// that is not running before BaselineEnd stopped on its own.
 	LaneState, LaneError string
 	BaselineEnd          time.Time
+	// QuietFrom..QuietUntil is a deliberate overload window (v2 forced
+	// breaker): History stalls and queue growth there are the test, not a fault.
+	QuietFrom, QuietUntil time.Time
+}
+
+func (c Counters) quiet(now time.Time) bool {
+	return !c.QuietFrom.IsZero() && !now.Before(c.QuietFrom) && now.Before(c.QuietUntil)
 }
 
 type Trip struct {
@@ -81,7 +88,7 @@ func Evaluate(now time.Time, window []Sample, c Counters, baseline Sample) []Tri
 	if len(window) == 0 {
 		return trips
 	}
-	if c.LaneState == "running" && now.Before(c.BaselineEnd) && historyStalled(window) {
+	if c.LaneState == "running" && now.Before(c.BaselineEnd) && !c.quiet(now) && historyStalled(window) {
 		add(GuardHistoryStalled, "no History creates for %s while the lane fires", stallWindow)
 	}
 	last := window[len(window)-1]
@@ -97,7 +104,7 @@ func Evaluate(now time.Time, window []Sample, c Counters, baseline Sample) []Tri
 	if last.RedisDenied > baseline.RedisDenied {
 		add(GuardRedisDenied, "redis write denials increased")
 	}
-	if len(window) >= growthWindow {
+	if len(window) >= growthWindow && !c.quiet(now) {
 		w := window[len(window)-growthWindow:]
 		for _, kind := range []struct {
 			name string
