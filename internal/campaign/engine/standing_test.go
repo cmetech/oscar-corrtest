@@ -65,7 +65,14 @@ func TestV2ReproducesTheATTBreakerAndRepeats(t *testing.T) {
 	for _, rejectResolves := range []bool{true, false} {
 		t.Run(map[bool]string{true: "26.4.4", false: "fixed"}[rejectResolves], func(t *testing.T) {
 			h := newHarnessV2(t)
-			h.oscar.breakerTrip, h.oscar.breakerShut, h.oscar.rejectResolves = 5, 30, rejectResolves
+			// The scripted breaker refuses the rest of the burst and the first three
+			// reopen probes, then admits the fourth. Reopen probes are paced by real
+			// timers on the scaled clock; the old shut of 30 needed 16 sequential
+			// probes (4 of the window's 8.75 s), which a slow runner could not fit.
+			// The 3 spare refusals still keep the breaker tripped through the
+			// resolve probes if a late cohort post lands in the window.
+			trip := 5
+			h.oscar.breakerTrip, h.oscar.breakerShut, h.oscar.rejectResolves = trip, h.s.Standing.Size-trip+3, rejectResolves
 			h.oscar.queryValues = map[string]float64{"send_individual_notification": 100, `"tm.notifier.common"`: 300,
 				`outcome="recovered"`: 100, `outcome="redispatched"`: 300, "notifications_failed_total": 40, "alertmanager_notifications_total": 200}
 			if err := h.run(context.Background()); err != nil {

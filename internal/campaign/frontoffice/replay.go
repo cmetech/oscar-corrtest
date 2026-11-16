@@ -65,19 +65,23 @@ var (
 func Run(ctx context.Context, base string, client *http.Client, users []User, instances int, seed int64, spec scenario.FrontOfficeSpec, clock lane.Clock, out func(ActionResult)) {
 	var mu sync.Mutex
 	emit := func(r ActionResult) { mu.Lock(); defer mu.Unlock(); out(r) }
+	// One start for every user: each schedule is a function of (seed, start,
+	// spec) alone, not of when its goroutine first ran (a shared virtual clock
+	// may already have been advanced by another user by then).
+	start := clock.Now()
 	var wg sync.WaitGroup
 	for i, u := range users {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			runUser(ctx, base, client, u, rand.New(rand.NewSource(seed+int64(i)*7919)) /* #nosec G404 -- deterministic seeded replay; not security-sensitive */, instances, spec, clock, emit)
+			runUser(ctx, base, client, u, start, rand.New(rand.NewSource(seed+int64(i)*7919)) /* #nosec G404 -- deterministic seeded replay; not security-sensitive */, instances, spec, clock, emit)
 		}()
 	}
 	wg.Wait()
 }
 
-func runUser(ctx context.Context, base string, client *http.Client, u User, rng *rand.Rand, instances int, spec scenario.FrontOfficeSpec, clock lane.Clock, emit func(ActionResult)) {
-	due := clock.Now()
+func runUser(ctx context.Context, base string, client *http.Client, u User, start time.Time, rng *rand.Rand, instances int, spec scenario.FrontOfficeSpec, clock lane.Clock, emit func(ActionResult)) {
+	due := start
 	nextSearch := due
 	for ctx.Err() == nil && clock.SleepUntil(ctx, due) {
 		var action string

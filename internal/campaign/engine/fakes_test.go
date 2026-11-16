@@ -139,6 +139,7 @@ type delivery struct {
 type fakeOSCAR struct {
 	t     *testing.T
 	clock *scaledClock
+	lane  *laneClock // the worker lane's clock; stamps History and sink rows for lane posts
 	s     scenario.Scenario
 	srv   *httptest.Server
 
@@ -248,6 +249,15 @@ func amFingerprint(labels map[string]string) string {
 // exact (am_fingerprint, startsAt) occurrence.
 func (f *fakeOSCAR) ingest(labels map[string]string, startsAt time.Time, resolved, lane bool) {
 	now := f.clock.Now().UTC()
+	// stamp is when the target records the alert. A lane post is stamped on the
+	// lane's clock, the clock its ledger SentAt comes from: on the scaled clock
+	// the lane's sqlite write and HTTP round trip would count speed x their
+	// wall time as History latency (100 ms of a loaded runner = 5 s), which
+	// measures the test machine, not the engine.
+	stamp := now
+	if lane && f.lane != nil {
+		stamp = f.lane.Now().UTC()
+	}
 	name := labels["alertname"]
 	fp := amFingerprint(labels)
 	f.mu.Lock()
@@ -294,12 +304,12 @@ func (f *fakeOSCAR) ingest(labels map[string]string, startsAt time.Time, resolve
 		row[k] = v
 	}
 	f.history = append(f.history, &oscar.HistoryRecord{ID: fmt.Sprintf("h%d", len(f.history)+1), AlertName: name, Fingerprint: fp[:12], Status: "firing",
-		StartsAt: startsAt.Truncate(time.Millisecond), CreatedAt: now.Add(50 * time.Millisecond), Labels: row})
+		StartsAt: startsAt.Truncate(time.Millisecond), CreatedAt: stamp.Add(50 * time.Millisecond), Labels: row})
 	if seen {
 		return
 	}
 	if f.notifiers["n5"].Status == "enabled" {
-		f.receipts = append(f.receipts, targetops.Receipt{ReceivedAt: now.Add(100 * time.Millisecond),
+		f.receipts = append(f.receipts, targetops.Receipt{ReceivedAt: stamp.Add(100 * time.Millisecond),
 			Alerts: []targetops.SinkAlert{{AlertName: name, Status: "firing", Labels: labels}}})
 	}
 	if labels["create_ticket"] == "snow" && f.incidents[name] == nil {
@@ -848,8 +858,9 @@ func newHarness(t *testing.T) *harness {
 	s := testScenario()
 	f := newFakeOSCAR(t, clock, s)
 	f.db = db
+	f.lane = &laneClock{scaledClock: clock}
 	target := domain.Target{ID: "t1", BaseURL: f.srv.URL}
-	m := worker.NewManager(laneStore{storage.NewLaneLedger(db), db}, target, &laneClock{scaledClock: clock}, 30*time.Second)
+	m := worker.NewManager(laneStore{storage.NewLaneLedger(db), db}, target, f.lane, 30*time.Second)
 	t.Cleanup(m.Shutdown)
 	w := &fakeWorker{m: m}
 	h := &harness{t: t, clock: clock, db: db, oscar: f, worker: w, s: s, id: "camp_" + strings.ReplaceAll(t.Name(), "/", "_")}
