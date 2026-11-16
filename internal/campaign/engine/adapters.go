@@ -47,7 +47,7 @@ func sampleGuard(ctx context.Context, m Metrics, probe func(context.Context) (ta
 			return s, err
 		}
 		for _, x := range v {
-			into[x.Metric["queue"]] = x.Value
+			into[x.Metric[score.QueueLabel]] = x.Value
 		}
 	}
 	for q, into := range map[string]*float64{score.Queries["mysql_max_conn_errors"]: &s.MySQLRefusals, redisWriteDeniedQuery: &s.RedisDenied} {
@@ -214,10 +214,10 @@ func (a *PrecheckAdapter) Queues(ctx context.Context) ([]precheck.Queue, error) 
 		return byName[n]
 	}
 	for _, s := range depth {
-		get(s.Metric["queue"]).Depth = int(s.Value)
+		get(s.Metric[score.QueueLabel]).Depth = int(s.Value)
 	}
 	for _, s := range age {
-		get(s.Metric["queue"]).OldestAge = time.Duration(s.Value * float64(time.Second))
+		get(s.Metric[score.QueueLabel]).OldestAge = time.Duration(s.Value * float64(time.Second))
 	}
 	out := make([]precheck.Queue, 0, len(byName))
 	for _, q := range byName {

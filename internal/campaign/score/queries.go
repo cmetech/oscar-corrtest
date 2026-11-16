@@ -8,6 +8,10 @@ const QuerySetVersion = "q1"
 
 // Queries is the frozen q1 PromQL set. Metric names were confirmed against the
 // live VictoriaMetrics (/ext/vmdb) on 2026-11-14.
+// QueueLabel is the label naming the Celery queue on the queue_depth and
+// queue_oldest_age series (OSCAR exports queue_name, not queue).
+const QueueLabel = "queue_name"
+
 var Queries = map[string]string{
 	"parent_anon_bytes":    `process_resident_memory_anon_bytes`,
 	"container_workingset": `container_memory_working_set_bytes{name=~"oscar.*"}`,
