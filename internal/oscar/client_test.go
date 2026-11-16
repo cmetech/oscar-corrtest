@@ -167,8 +167,8 @@ func TestResolveHistoryUsesExactOwnedServerFingerprint(t *testing.T) {
 	server := testoscar.New(t)
 	server.Enqueue(testoscar.Response{Status: 200, Body: `{"status":"accepted","task_id":"cleanup-1"}`})
 	client := newClient(t, server.URL())
-	record := oscar.HistoryRecord{AlertName: "CORRTEST_FLOOD_P01_SOURCE_7Q9K2M4A", Fingerprint: "server-fingerprint", Status: "firing",
-		Labels: map[string]string{"alertname": "CORRTEST_FLOOD_P01_SOURCE_7Q9K2M4A", "oscar_test_run_id": "crt_abc"}, Annotations: map[string]string{"summary": "source"}}
+	record := oscar.HistoryRecord{AlertName: "CORRTEST_FLOOD_P01_SOURCE_7Q9K2M4A", Fingerprint: "server-fingerprint", Status: "firing", StartsAt: time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC),
+		Labels: map[string]string{"alertname": "CORRTEST_FLOOD_P01_SOURCE_7Q9K2M4A", "oscar_test_run_id": "crt_abc", "am_fingerprint": "4d7ed70e44f07f78"}, Annotations: map[string]string{"summary": "source"}}
 	result, err := client.ResolveHistory(context.Background(), record)
 	if err != nil || result.Class != oscar.InjectionAccepted {
 		t.Fatalf("result=%+v err=%v", result, err)
@@ -184,7 +184,7 @@ func TestResolveHistoryUsesExactOwnedServerFingerprint(t *testing.T) {
 	if err := json.Unmarshal([]byte(server.Requests()[0].Body), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Status != "resolved" || len(body.Alerts) != 1 || body.Alerts[0].Status != "resolved" || body.Alerts[0].Labels["oscar_fingerprint"] != record.Fingerprint || body.Alerts[0].Fingerprint == record.Fingerprint {
+	if body.Status != "resolved" || len(body.Alerts) != 1 || body.Alerts[0].Status != "resolved" || body.Alerts[0].Labels["oscar_fingerprint"] != record.Fingerprint || body.Alerts[0].Fingerprint != "4d7ed70e44f07f78" {
 		t.Fatalf("cleanup payload=%+v", body)
 	}
 }
@@ -450,5 +450,50 @@ func TestNoMatchAuditRequiresExplicitNullRuleIdentity(t *testing.T) {
 				t.Fatalf("identity=%s rows=%+v", identity, rows)
 			}
 		})
+	}
+}
+
+func TestHistoryByLabelFiltersAndPages(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("perPage") != "100" || !strings.Contains(q.Get("filter"), `"field":"label:campaign_run"`) || !strings.Contains(q.Get("filter"), `"value":"r1"`) || q.Get("start_datetime") == "" {
+			http.Error(w, "bad query", http.StatusBadRequest)
+			return
+		}
+		rows := `{"id":"a","alertName":"Campaign-r1-1"}`
+		if q.Get("page") == "2" {
+			rows = `{"id":"b","alertName":"Campaign-r1-2"}`
+		}
+		_, _ = w.Write([]byte(`{"total_records":101,"total_pages":2,"page":` + q.Get("page") + `,"per_page":100,"records":[` + rows + `]}`))
+	}))
+	defer server.Close()
+	got, err := newClient(t, server.URL).HistoryByLabel(context.Background(), "campaign_run", "r1", time.Now().Add(-time.Hour), time.Now())
+	if err != nil || len(got) != 2 {
+		t.Fatalf("got %v err %v", got, err)
+	}
+}
+
+func TestLabelProbeResolvesItsHistoryOccurrence(t *testing.T) {
+	server := testoscar.New(t)
+	server.Enqueue(testoscar.Response{Status: 200, Body: `{"status":"accepted","task_id":"probe-1"}`})
+	server.Enqueue(testoscar.Response{Status: 200, Body: `{"total_records":1,"total_pages":1,"page":1,"per_page":100,"records":[{"id":"h1","alertname":"CORRTEST_PROBE_P00_SOURCE_7Q9K2M4A","fingerprint":"server-probe-fp","status":"firing","startsAt":"2026-08-20T00:00:01.529000+00:00","createdAt":"2026-08-20T00:00:01Z","labels":[{"Label":"alertname","Value":"CORRTEST_PROBE_P00_SOURCE_7Q9K2M4A"},{"Label":"oscar_test_run_id","Value":"crt_abc"},{"Label":"am_fingerprint","Value":"native-fp"}],"annotations":[]}]}`})
+	server.Enqueue(testoscar.Response{Status: 200, Body: `{"status":"accepted","task_id":"probe-clear"}`})
+	result, err := newClient(t, server.URL()).ProbeLabelSurvival(context.Background(), "crt_abc", "7Q9K2M4A")
+	if err != nil || !result.HistoryFound || !result.CleanupForwarded || result.CleanupRequired {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	requests := server.Requests()
+	if len(requests) != 3 || requests[2].Method != "POST" || !strings.Contains(string(requests[2].Body), `"resolved"`) || !strings.Contains(string(requests[2].Body), "native-fp") {
+		t.Fatalf("requests=%+v", requests)
+	}
+}
+
+func TestLabelProbeFlagsUnconfirmedCleanup(t *testing.T) {
+	server := testoscar.New(t)
+	server.Enqueue(testoscar.Response{Status: 200, Body: `{"status":"accepted","task_id":"probe-1"}`})
+	server.Enqueue(testoscar.Response{Status: 200, Body: `{"total_records":1,"total_pages":1,"page":1,"per_page":100,"records":[{"id":"h1","alertname":"CORRTEST_PROBE_P00_SOURCE_7Q9K2M4A","fingerprint":"server-probe-fp","status":"firing","createdAt":"2026-08-20T00:00:01Z","labels":[{"Label":"oscar_test_run_id","Value":"crt_abc"}],"annotations":[]}]}`})
+	result, err := newClient(t, server.URL()).ProbeLabelSurvival(context.Background(), "crt_abc", "7Q9K2M4A")
+	if err != nil || !result.HistoryFound || result.CleanupForwarded || !result.CleanupRequired {
+		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }

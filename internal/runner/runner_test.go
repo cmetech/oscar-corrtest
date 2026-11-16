@@ -75,6 +75,67 @@ func TestRunnerExecutesFloodCasesAndCleansOwnedRules(t *testing.T) {
 	}
 }
 
+// An accepted resolve POST is not cleanup: CLEAN requires History read-back.
+func TestRunnerCleanupIsDirtyWhenHistoryStillFiringAfterResolve(t *testing.T) {
+	database := openDatabase(t)
+	run := newRun()
+	if err := database.CreateRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := compiler.Compile(run, scenario.Builtin("flood"), compiler.Capabilities{PipelineMode: "phase_b_dispatch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := &fakeAPI{ignoreResolve: true}
+	engine := runner.New(database, api, runner.Options{PollInterval: time.Millisecond, ObservationWindow: 3 * time.Millisecond, Stabilization: time.Millisecond})
+	if err := engine.Execute(context.Background(), run, plan, runner.CapabilitySnapshot{PipelineMode: "phase_b_dispatch", Ready: true, LabelsSurvived: true}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := database.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(api.resolved) == 0 || stored.CleanupStatus != domain.CleanupDirty || !strings.Contains(stored.TerminalError, "still firing") || !strings.Contains(stored.TerminalError, api.resolved[0].AlertName) {
+		t.Fatalf("cleanup=%s terminal=%q resolved=%d", stored.CleanupStatus, stored.TerminalError, len(api.resolved))
+	}
+}
+
+// Repeated occurrences share an OSCAR fingerprint but differ by startsAt;
+// cleanup must resolve and verify each one, not only the latest.
+func TestRunnerCleanupResolvesEveryOccurrenceOfARunAlert(t *testing.T) {
+	database := openDatabase(t)
+	run := newRun()
+	if err := database.CreateRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := compiler.Compile(run, scenario.Builtin("flood"), compiler.Capabilities{PipelineMode: "phase_b_dispatch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := &fakeAPI{priorOccurrence: true}
+	engine := runner.New(database, api, runner.Options{PollInterval: time.Millisecond, ObservationWindow: 3 * time.Millisecond, Stabilization: time.Millisecond})
+	if err := engine.Execute(context.Background(), run, plan, runner.CapabilitySnapshot{PipelineMode: "phase_b_dispatch", Ready: true, LabelsSurvived: true}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := database.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved := map[string]bool{}
+	for _, record := range api.resolved {
+		resolved[record.ID] = true
+	}
+	for _, alert := range api.injected {
+		id := "source-" + alert.Labels["oscar_test_event_id"]
+		if !resolved[id] || !resolved[id+"-prior"] {
+			t.Fatalf("occurrence of %s not resolved: resolved=%v", id, resolved)
+		}
+	}
+	if stored.CleanupStatus != domain.CleanupClean {
+		t.Fatalf("cleanup=%s terminal=%q", stored.CleanupStatus, stored.TerminalError)
+	}
+}
+
 func TestRunnerPhaseAScoresAuditAndSkipsSyntheticAssertions(t *testing.T) {
 	database := openDatabase(t)
 	run := newRun()
@@ -402,6 +463,24 @@ type fakeAPI struct {
 	auditError               error
 	hideHistoryOnAuditError  bool
 	resolved                 []oscar.HistoryRecord
+	ignoreResolve            bool
+	priorOccurrence          bool // History also holds an older still-firing occurrence per source event
+}
+
+// withResolved reports History rows the harness resolved, as OSCAR would
+// after accepting a matching resolve.
+func (f *fakeAPI) withResolved(records []oscar.HistoryRecord) []oscar.HistoryRecord {
+	if f.ignoreResolve {
+		return records
+	}
+	for index := range records {
+		for _, done := range f.resolved {
+			if done.ID == records[index].ID {
+				records[index].Status = "resolved"
+			}
+		}
+	}
+	return records
 }
 
 func (f *fakeAPI) ValidateRule(context.Context, compiler.RulePlan) error { return nil }
@@ -465,7 +544,7 @@ func (f *fakeAPI) FindHistory(_ context.Context, query oscar.HistoryQuery) ([]os
 	}
 	if strings.Contains(query.AlertName, "SYNTHETIC") {
 		if strings.Contains(query.AlertName, "_P01_") {
-			return []oscar.HistoryRecord{{ID: "parent", AlertName: query.AlertName, Fingerprint: "parent-" + query.AlertName, CreatedAt: query.Start.Add(time.Millisecond), Labels: map[string]string{"oscar_test_run_id": f.effectiveRunID(), "oscar_test_alert_class": "synthetic"}}}, nil
+			return f.withResolved([]oscar.HistoryRecord{{ID: "parent", AlertName: query.AlertName, Fingerprint: "parent-" + query.AlertName, CreatedAt: query.Start.Add(time.Millisecond), Labels: map[string]string{"oscar_test_run_id": f.effectiveRunID(), "oscar_test_alert_class": "synthetic"}}}), nil
 		}
 		return nil, nil
 	}
@@ -482,13 +561,18 @@ func (f *fakeAPI) FindHistory(_ context.Context, query oscar.HistoryQuery) ([]os
 		for key, value := range alert.Labels {
 			labels[key] = value
 		}
-		byEvent[eventID] = oscar.HistoryRecord{ID: "source-" + eventID, AlertName: query.AlertName, Fingerprint: "server-" + eventID, Status: alert.Status, CreatedAt: query.Start.Add(time.Millisecond), Labels: labels}
+		byEvent[eventID] = oscar.HistoryRecord{ID: "source-" + eventID, AlertName: query.AlertName, Fingerprint: "server-" + eventID, Status: alert.Status, CreatedAt: query.Start.Add(time.Millisecond), StartsAt: query.Start.Add(2 * time.Millisecond), Labels: labels}
 	}
 	result := make([]oscar.HistoryRecord, 0, len(byEvent))
 	for _, record := range byEvent {
 		result = append(result, record)
+		if f.priorOccurrence {
+			prior := record
+			prior.ID, prior.Status, prior.StartsAt = record.ID+"-prior", "firing", record.StartsAt.Add(-time.Millisecond)
+			result = append(result, prior)
+		}
 	}
-	return result, nil
+	return f.withResolved(result), nil
 }
 func (f *fakeAPI) CorrelationAudit(_ context.Context, fingerprint string) ([]oscar.AuditRecord, error) {
 	f.mu.Lock()

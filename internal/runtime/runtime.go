@@ -19,10 +19,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/applog"
 	"github.com/cmetech/oscar-corrtest/internal/artifact"
+	"github.com/cmetech/oscar-corrtest/internal/campaign/worker"
 	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/config"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
@@ -78,6 +80,12 @@ type Runtime struct {
 	active     map[string]context.CancelFunc
 	runWG      sync.WaitGroup
 	rootCtx    context.Context
+
+	campaignEngine CampaignEngine
+	worker         *worker.Manager // non-nil only in campaign worker mode
+	campaignActive atomic.Bool
+	campaignID     string // guarded by activeMu
+	campaignCancel context.CancelFunc
 }
 
 // Options supplies process-scoped application dependencies.
@@ -86,6 +94,8 @@ type Options struct {
 	Logger      *slog.Logger
 	Logs        *applog.System
 	Operations  *operations.Controller
+	// CampaignEngine is optional; without it StartCampaign errors and recovery is skipped.
+	CampaignEngine CampaignEngine
 }
 
 // Open initializes local state, migrations, artifact storage, and interrupted-run recovery.
@@ -136,7 +146,7 @@ func OpenWithOptions(ctx context.Context, settings config.Settings, info version
 	}
 	result := &Runtime{
 		settings: settings, stateLock: stateLock, database: database, history: service, artifacts: artifacts,
-		readiness: Readiness{Ready: database.Ready() == nil, DatabasePath: databasePath}, version: info.Version, getenv: getenv, logger: logger, logs: options.Logs, operations: options.Operations, rootCtx: ctx,
+		readiness: Readiness{Ready: database.Ready() == nil, DatabasePath: databasePath}, version: info.Version, getenv: getenv, logger: logger, logs: options.Logs, operations: options.Operations, rootCtx: ctx, campaignEngine: options.CampaignEngine,
 		active: make(map[string]context.CancelFunc),
 	}
 	if readyErr := database.Ready(); readyErr != nil {
@@ -147,6 +157,10 @@ func OpenWithOptions(ctx context.Context, settings config.Settings, info version
 	if _, err := service.RecoverInterruptedRuns(ctx); err != nil {
 		_ = database.Close()
 		return nil, fmt.Errorf("recover interrupted runs: %w", err)
+	}
+	if err := result.recoverCampaigns(ctx); err != nil {
+		_ = database.Close()
+		return nil, fmt.Errorf("recover campaigns: %w", err)
 	}
 	owned = true
 	result.logger.InfoContext(ctx, "runtime opened", "ready", result.readiness.Ready, "database_path", databasePath)
@@ -205,6 +219,9 @@ func (r *Runtime) PreviewScenario(ctx context.Context, targetID string, document
 func (r *Runtime) ExecuteBuiltin(ctx context.Context, targetID, pattern, pipelineMode string) (domain.Run, error) {
 	r.runMu.Lock()
 	defer r.runMu.Unlock()
+	if r.campaignActive.Load() {
+		return domain.Run{}, ErrCampaignActive
+	}
 	target, err := r.GetTarget(ctx, targetID)
 	if err != nil {
 		return domain.Run{}, err
@@ -235,6 +252,14 @@ func (r *Runtime) ExecuteBuiltin(ctx context.Context, targetID, pattern, pipelin
 func (r *Runtime) ExecuteScenario(ctx context.Context, targetID string, document scenario.Scenario, pipelineMode string) (domain.Run, error) {
 	r.runMu.Lock()
 	defer r.runMu.Unlock()
+	if r.campaignActive.Load() {
+		return domain.Run{}, ErrCampaignActive
+	}
+	return r.executeScenarioLocked(ctx, targetID, document, pipelineMode)
+}
+
+// executeScenarioLocked is ExecuteScenario's body; callers hold runMu and have passed the gate.
+func (r *Runtime) executeScenarioLocked(ctx context.Context, targetID string, document scenario.Scenario, pipelineMode string) (domain.Run, error) {
 	target, err := r.GetTarget(ctx, targetID)
 	if err != nil {
 		return domain.Run{}, err
@@ -263,6 +288,9 @@ func (r *Runtime) ExecuteScenario(ctx context.Context, targetID string, document
 // StartBuiltin validates and persists a queued run, then executes independently
 // from the initiating browser request. The process root context still controls shutdown.
 func (r *Runtime) StartBuiltin(ctx context.Context, targetID, pattern, pipelineMode string) (domain.Run, error) {
+	if r.campaignActive.Load() {
+		return domain.Run{}, ErrCampaignActive
+	}
 	target, err := r.GetTarget(ctx, targetID)
 	if err != nil {
 		return domain.Run{}, err
@@ -274,27 +302,17 @@ func (r *Runtime) StartBuiltin(ctx context.Context, targetID, pattern, pipelineM
 	if err != nil {
 		return domain.Run{}, err
 	}
-	run, err := r.history.CreateRun(ctx, targetID, "", r.version)
+	run, executionCtx, release, err := r.createRegisteredRun(ctx, targetID, "")
 	if err != nil {
 		return domain.Run{}, err
 	}
 	plan, err := compiler.Compile(run, scenario.Builtin(pattern), compiler.Capabilities{PipelineMode: pipelineMode})
 	if err != nil {
+		release()
 		return domain.Run{}, err
 	}
-	executionCtx, cancel := context.WithCancel(r.rootCtx)
-	r.activeMu.Lock()
-	r.active[run.ID] = cancel
-	r.activeMu.Unlock()
-	r.runWG.Add(1)
 	go func() {
-		defer r.runWG.Done()
-		defer func() {
-			r.activeMu.Lock()
-			delete(r.active, run.ID)
-			r.activeMu.Unlock()
-			cancel()
-		}()
+		defer release()
 		r.runMu.Lock()
 		defer r.runMu.Unlock()
 		diagnostic := r.diagnose(executionCtx, client, target, run, plan, pipelineMode)
@@ -319,6 +337,9 @@ func (r *Runtime) StartSavedScenario(ctx context.Context, targetID, scenarioID, 
 }
 
 func (r *Runtime) startScenario(ctx context.Context, targetID, scenarioID string, document scenario.Scenario, pipelineMode string) (domain.Run, error) {
+	if r.campaignActive.Load() {
+		return domain.Run{}, ErrCampaignActive
+	}
 	target, err := r.GetTarget(ctx, targetID)
 	if err != nil {
 		return domain.Run{}, err
@@ -331,27 +352,17 @@ func (r *Runtime) startScenario(ctx context.Context, targetID, scenarioID string
 	if err != nil {
 		return domain.Run{}, err
 	}
-	run, err := r.history.CreateRun(ctx, targetID, scenarioID, r.version)
+	run, executionCtx, release, err := r.createRegisteredRun(ctx, targetID, scenarioID)
 	if err != nil {
 		return domain.Run{}, err
 	}
 	plan, err := compiler.Compile(run, document, compiler.Capabilities{PipelineMode: pipelineMode})
 	if err != nil {
+		release()
 		return domain.Run{}, err
 	}
-	executionCtx, cancel := context.WithCancel(r.rootCtx)
-	r.activeMu.Lock()
-	r.active[run.ID] = cancel
-	r.activeMu.Unlock()
-	r.runWG.Add(1)
 	go func() {
-		defer r.runWG.Done()
-		defer func() {
-			r.activeMu.Lock()
-			delete(r.active, run.ID)
-			r.activeMu.Unlock()
-			cancel()
-		}()
+		defer release()
 		r.runMu.Lock()
 		defer r.runMu.Unlock()
 		diagnostic := r.diagnose(executionCtx, client, target, run, plan, pipelineMode)
@@ -454,6 +465,8 @@ func (r *Runtime) diagnose(ctx context.Context, client *oscar.Client, target dom
 	result.Compatible = probe.Accepted && probe.HistoryFound && probe.Fingerprint != "" && len(probe.MissingLabels) == 0
 	if !result.Compatible {
 		result.Detail = client.InputPath() + " injection/history did not preserve the reserved identity contract"
+	} else if probe.CleanupRequired {
+		result.Detail = "label probe resolve unconfirmed; " + probe.Fingerprint + " may still be firing"
 	}
 	return result
 }
@@ -484,7 +497,13 @@ func (r *Runtime) Close() error {
 		for _, cancel := range r.active {
 			cancel()
 		}
+		if r.campaignCancel != nil {
+			r.campaignCancel()
+		}
 		r.activeMu.Unlock()
+		if r.worker != nil {
+			r.worker.Shutdown()
+		}
 		r.runWG.Wait()
 		r.closeErr = r.database.Close()
 		if err := r.stateLock.Close(); r.closeErr == nil {
@@ -849,4 +868,33 @@ func (r *Runtime) DeleteRun(ctx context.Context, runID string) error {
 
 func ownedRule(rule oscar.Rule, resource domain.Resource, runID string) bool {
 	return rule.ID > 0 && rule.Name == resource.ExternalName && strings.Contains(rule.Description, "run="+runID)
+}
+
+// createRegisteredRun checks the campaign gate, creates the run row and registers it
+// as active under one activeMu hold, so a campaign cannot start in between and no
+// run row is ever created behind the gate. release unregisters, cancels and calls
+// runWG.Done; call it exactly once.
+func (r *Runtime) createRegisteredRun(ctx context.Context, targetID, scenarioID string) (domain.Run, context.Context, func(), error) {
+	r.activeMu.Lock()
+	defer r.activeMu.Unlock()
+	if r.closing {
+		return domain.Run{}, nil, nil, fmt.Errorf("runtime is closing")
+	}
+	if r.campaignActive.Load() {
+		return domain.Run{}, nil, nil, ErrCampaignActive
+	}
+	run, err := r.history.CreateRun(ctx, targetID, scenarioID, r.version)
+	if err != nil {
+		return domain.Run{}, nil, nil, err
+	}
+	executionCtx, cancel := context.WithCancel(r.rootCtx)
+	r.active[run.ID] = cancel
+	r.runWG.Add(1)
+	return run, executionCtx, func() {
+		r.activeMu.Lock()
+		delete(r.active, run.ID)
+		r.activeMu.Unlock()
+		cancel()
+		r.runWG.Done()
+	}, nil
 }

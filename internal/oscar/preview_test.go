@@ -248,15 +248,16 @@ func TestPreviewResolutionBodyUsesAuthoritativeRuntimePlaceholder(t *testing.T) 
 	}
 	operation := findPreview(t, operations, "cleanup.resolve_alert", "P01", 0)
 	alert := plan.Cases[0].Alerts[0]
-	want, err := oscar.BuildResolutionRequest(oscar.HistoryRecord{
-		AlertName: alert.Name, Fingerprint: "{server-fingerprint}", Status: alert.Status,
-		Labels: alert.Labels, Annotations: alert.Annotations,
-	})
+	want, err := oscar.BuildResolutionRequest(oscar.PreviewResolutionRecord(alert.Name, alert.Status, alert.Labels, alert.Annotations))
 	if err != nil {
 		t.Fatal(err)
 	}
+	want.Alerts[0].StartsAt = "{server-starts-at}"
 	wantJSON, _ := oscar.CanonicalJSON(want)
-	if operation.Method != "POST" || operation.Path != "/api/v1/alerts" || operation.Body != string(wantJSON) || !reflect.DeepEqual(operation.RuntimeFields, []string{"server-fingerprint"}) {
+	if want.Alerts[0].Fingerprint != "{server-am-fingerprint}" || want.CommonLabels["oscar_fingerprint"] != "{server-fingerprint}" {
+		t.Fatalf("resolution placeholders=%+v", want)
+	}
+	if operation.Method != "POST" || operation.Path != "/api/v1/alerts" || operation.Body != string(wantJSON) || !reflect.DeepEqual(operation.RuntimeFields, []string{"server-fingerprint", "server-am-fingerprint", "server-starts-at"}) {
 		t.Fatalf("resolution=%+v wantBody=%s", operation, wantJSON)
 	}
 }

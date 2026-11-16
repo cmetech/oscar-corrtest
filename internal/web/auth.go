@@ -1,10 +1,12 @@
 package web
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"net/http"
@@ -81,6 +83,10 @@ func (handler *authHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if handler.authorized(r) {
+		if handler.security.Mode == SecurityBearer && handler.headerAuthorized(r) {
+			// Only the Authorization header sets this; session cookies never do.
+			r = r.WithContext(context.WithValue(r.Context(), bearerIdentityKey{}, bearerIdentity(handler.security.BearerToken)))
+		}
 		handler.next.ServeHTTP(w, r)
 		return
 	}
@@ -89,12 +95,31 @@ func (handler *authHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "authentication required", http.StatusUnauthorized)
 }
 
+type bearerIdentityKey struct{}
+
+// bearerIdentity is "bearer:" plus the first 8 hex characters of SHA-256(token). The token is never stored.
+func bearerIdentity(token []byte) string {
+	sum := sha256.Sum256(token)
+	return "bearer:" + hex.EncodeToString(sum[:])[:8]
+}
+
+// requestBearerIdentity returns the identity set when the request carried a valid Authorization header.
+func requestBearerIdentity(r *http.Request) (string, bool) {
+	id, ok := r.Context().Value(bearerIdentityKey{}).(string)
+	return id, ok
+}
+
+func (handler *authHandler) headerAuthorized(r *http.Request) bool {
+	value := r.Header.Get("Authorization")
+	return strings.HasPrefix(value, "Bearer ") && secureEqual([]byte(strings.TrimPrefix(value, "Bearer ")), handler.security.BearerToken)
+}
+
 func (handler *authHandler) authorized(r *http.Request) bool {
 	switch handler.security.Mode {
 	case SecurityNone:
 		return true
 	case SecurityBearer:
-		if value := r.Header.Get("Authorization"); strings.HasPrefix(value, "Bearer ") && secureEqual([]byte(strings.TrimPrefix(value, "Bearer ")), handler.security.BearerToken) {
+		if handler.headerAuthorized(r) {
 			return true
 		}
 		cookie, err := r.Cookie("corrtest_session")

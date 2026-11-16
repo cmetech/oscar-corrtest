@@ -42,7 +42,7 @@ func TestLifecycleRequestCarriesEpisodeTimesWithoutChangingFingerprint(t *testin
 
 func TestHistoryCleanupRetainsReadBackFiringEpisode(t *testing.T) {
 	server := testoscar.New(t)
-	server.Enqueue(testoscar.Response{Status: 200, Body: `{"total_records":1,"records":[{"id":1,"alertname":"A","fingerprint":"server","status":"firing","startsAt":"2026-10-13T10:00:00Z","labels":[{"Label":"oscar_test_run_id","Value":"run"}]}]}`})
+	server.Enqueue(testoscar.Response{Status: 200, Body: `{"total_records":1,"records":[{"id":1,"alertname":"A","fingerprint":"server","status":"firing","startsAt":"2026-11-15T01:13:15.529000+00:00","labels":[{"Label":"oscar_test_run_id","Value":"run"},{"Label":"am_fingerprint","Value":"4d7ed70e44f07f78"},{"Label":"oscar_fingerprint","Value":"server"},{"Label":"oscar_handler_type","Value":"default"}]}]}`})
 	client := newClient(t, server.URL())
 	rows, err := client.FindHistory(context.Background(), oscar.HistoryQuery{AlertName: "A", Start: time.Now().Add(-time.Hour), End: time.Now()})
 	if err != nil || len(rows) != 1 {
@@ -53,7 +53,7 @@ func TestHistoryCleanupRetainsReadBackFiringEpisode(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(request)
-	if !strings.Contains(string(raw), `"startsAt":"2026-10-13T10:00:00Z"`) {
+	if !strings.Contains(string(raw), `"startsAt":"2026-11-15T01:13:15.529Z"`) || !strings.Contains(string(raw), `"fingerPrint":"4d7ed70e44f07f78"`) || strings.Contains(string(raw), "am_fingerprint") || strings.Contains(string(raw), "oscar_handler_type") {
 		t.Fatalf("cleanup lost source episode: %s", raw)
 	}
 }

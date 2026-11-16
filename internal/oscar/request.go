@@ -102,27 +102,54 @@ func BuildAlertRequest(alert compiler.AlertPlan) (AlertGroupRequest, error) {
 	}, nil
 }
 
-// BuildResolutionRequest converts an authoritative OSCAR history record into
-// the cleanup-only resolved alert body used by live execution.
+// oscarAddedHistoryLabels are stamped by OSCAR on ingest; echoing them on a
+// resolve would make its label set differ from the original occurrence.
+var oscarAddedHistoryLabels = []string{"am_fingerprint", "oscar_handler_type", "oscar_correlation_suppressed_notifiers"}
+
+// BuildResolutionRequest converts an authoritative OSCAR history record owned
+// by a correlation run (label oscar_test_run_id) into the cleanup-only resolved
+// alert body used by live execution.
 func BuildResolutionRequest(record HistoryRecord) (AlertGroupRequest, error) {
 	runID := strings.TrimSpace(record.Labels["oscar_test_run_id"])
+	if runID == "" {
+		return AlertGroupRequest{}, fmt.Errorf("history record lacks exact corrtest ownership or server fingerprint")
+	}
+	return BuildHistoryResolve(record, runID)
+}
+
+// BuildHistoryResolve is the one resolve builder for a History occurrence the
+// caller has verified that owner owns. OSCAR matches a resolve to its
+// occurrence by the native transport fingerprint (History label
+// am_fingerprint) plus the original startsAt, so both are echoed exactly.
+func BuildHistoryResolve(record HistoryRecord, owner string) (AlertGroupRequest, error) {
+	runID := strings.TrimSpace(owner)
 	if record.AlertName == "" || runID == "" || strings.TrimSpace(record.Fingerprint) == "" {
 		return AlertGroupRequest{}, fmt.Errorf("history record lacks exact corrtest ownership or server fingerprint")
 	}
+	if record.StartsAt.IsZero() {
+		return AlertGroupRequest{}, fmt.Errorf("history record %s lacks its original startsAt; OSCAR cannot match the resolve", record.AlertName)
+	}
 	labels := cloneStringMap(record.Labels)
+	for _, key := range oscarAddedHistoryLabels {
+		delete(labels, key)
+	}
+	delete(labels, "oscar_fingerprint")
 	labels["alertname"] = record.AlertName
+	fingerprint := strings.TrimSpace(record.Labels["am_fingerprint"])
+	if fingerprint == "" {
+		recomputed, err := alertmanagerTransportFingerprint(labels)
+		if err != nil {
+			return AlertGroupRequest{}, fmt.Errorf("history record %s lacks a native fingerprint: %w", record.AlertName, err)
+		}
+		fingerprint = recomputed
+	}
 	labels["oscar_fingerprint"] = record.Fingerprint
 	annotations := alertTransportAnnotations(record.Annotations)
 	if annotations == nil {
 		annotations = map[string]string{}
 	}
 	annotations["oscar_test_cleanup"] = "resolved by oscar-corrtest after exact history read-back"
-	startsAt := ""
-	if !record.StartsAt.IsZero() {
-		startsAt = record.StartsAt.UTC().Format(time.RFC3339Nano)
-	}
-	hash := sha256.Sum256([]byte("corrtest-resolve\x00" + record.Fingerprint))
-	fingerprint := hex.EncodeToString(hash[:])[:16]
+	startsAt := record.StartsAt.UTC().Format(time.RFC3339Nano)
 	return AlertGroupRequest{
 		Receiver: "oscar-corrtest", Status: "resolved", GroupKey: runID + ":cleanup:" + record.AlertName,
 		GroupLabels: map[string]string{"alertname": record.AlertName}, CommonLabels: cloneStringMap(labels),

@@ -24,6 +24,9 @@ import (
 const maxResponseBytes = 4 << 20
 const maxListPages = 100
 
+// maxLabelHistoryPages bounds HistoryByLabel (40,000 rows at perPage=100).
+const maxLabelHistoryPages = 400
+
 type Options struct {
 	InputPath      string
 	Now            func() time.Time
@@ -306,6 +309,32 @@ func (c *Client) FindHistory(ctx context.Context, query HistoryQuery) ([]History
 	return nil, paginationLimitError("GET /api/v1/alerts/history")
 }
 
+// HistoryByLabel lists History rows whose label key equals value in [start, end].
+func (c *Client) HistoryByLabel(ctx context.Context, key, value string, start, end time.Time) ([]HistoryRecord, error) {
+	filter, _ := json.Marshal(map[string]any{"items": []any{map[string]any{"field": "label:" + key, "operator": "equals", "value": value}}, "logicOperator": "and"})
+	values := url.Values{
+		"perPage": {"100"}, "order": {"asc"}, "column": {"createdAt"},
+		"start_datetime": {formattedTime(start)}, "end_datetime": {formattedTime(end)}, "filter": {string(filter)},
+	}
+	var result []HistoryRecord
+	seen := 0
+	for page := 1; page <= maxLabelHistoryPages; page++ {
+		values.Set("page", strconv.Itoa(page))
+		var response historyListResponse
+		if err := c.doJSON(ctx, http.MethodGet, historyPath, values, nil, &response); err != nil {
+			return nil, err
+		}
+		seen += len(response.Records)
+		for _, record := range response.Records {
+			result = append(result, record.normalized())
+		}
+		if listComplete(seen, response.TotalRecords, len(response.Records), response.PerPage) || (response.TotalPages > 0 && page >= response.TotalPages) {
+			return result, nil
+		}
+	}
+	return nil, paginationLimitError("GET /api/v1/alerts/history")
+}
+
 func (c *Client) CorrelationAudit(ctx context.Context, fingerprint string) ([]AuditRecord, error) {
 	values := correlationAuditQueryValues(fingerprint)
 	var result []AuditRecord
@@ -411,6 +440,13 @@ func (c *Client) ProbeLabelSurvival(ctx context.Context, runID, shortToken strin
 				}
 			}
 			sort.Strings(probe.MissingLabels)
+			// Resolve the diagnostic occurrence so every run leaves nothing firing.
+			// A failed cleanup is flagged, not fatal: compatibility is about labels.
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer cancel()
+			clear, clearErr := c.ResolveHistory(cleanupCtx, records[0])
+			probe.CleanupForwarded = clearErr == nil && clear.Class == InjectionAccepted
+			probe.CleanupRequired = !probe.CleanupForwarded
 			return probe, nil
 		}
 		if len(records) > 1 {
@@ -640,4 +676,9 @@ type notificationWire struct {
 	Status           string            `json:"status"`
 	CreatedAt        flexTime          `json:"created_at"`
 	Labels           map[string]string `json:"labels"`
+}
+
+// DoJSON is the exported form of doJSON so sibling packages reuse TLS, credentials and response caps.
+func (c *Client) DoJSON(ctx context.Context, method, path string, query url.Values, in, out any) error {
+	return c.doJSON(ctx, method, path, query, in, out)
 }

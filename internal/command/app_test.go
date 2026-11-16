@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -470,5 +471,30 @@ func TestOrdinaryRunSummaryDescribesActualInputRoute(t *testing.T) {
 	code := app.Run(context.Background(), []string{"run", "../../scenarios/reliability/flood-ordinary-webhook.yaml", "--target", "tgt_lab", "--pipeline-mode", "phase_b_dispatch"})
 	if code != 0 || !strings.Contains(stdout.String(), "ordinary webhook") || strings.Contains(stdout.String(), "Native Alertmanager bypassed") {
 		t.Fatalf("code=%d out=%s error=%s", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestServeRejectsBadCampaignConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "c.json")
+	if err := os.WriteFile(path, []byte(`{"Unknown":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	app := New(io.Discard, &stderr, version.Info{}, nil)
+	if code := app.Run(context.Background(), []string{"serve", "--campaign-config", path}); code != 2 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+}
+
+func TestServeCampaignWorkerFailsWhenWorkerCannotBeBuilt(t *testing.T) {
+	var stderr bytes.Buffer
+	open := func(context.Context, config.Settings) (ApplicationRuntime, error) { return &fakeRuntime{}, nil }
+	served := false
+	app := NewConfigured(io.Discard, &stderr, version.Info{}, func(context.Context, web.Options) error { served = true; return nil }, open, testGetenv)
+	if code := app.Run(context.Background(), []string{"serve", "--campaign-worker"}); code != 1 || served {
+		t.Fatalf("code=%d served=%v stderr=%s", code, served, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "campaign-worker") {
+		t.Fatalf("stderr=%q", stderr.String())
 	}
 }

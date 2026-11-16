@@ -86,6 +86,13 @@ func TestEveryCommandPathHasUsefulHelp(t *testing.T) {
 		{"retention apply", "oscar-corrtest retention apply --before <RFC3339> --yes [options]"},
 		{"export", "oscar-corrtest export <run-id> --output <zip-path> [options]"},
 		{"verify-bundle", "oscar-corrtest verify-bundle <zip-path> [options]"},
+		{"campaign", "oscar-corrtest campaign <action>"},
+		{"campaign precheck", "oscar-corrtest campaign precheck"},
+		{"campaign run", "oscar-corrtest campaign run"},
+		{"campaign status", "oscar-corrtest campaign status"},
+		{"campaign stop", "oscar-corrtest campaign stop"},
+		{"campaign compare", "oscar-corrtest campaign compare"},
+		{"campaign export", "oscar-corrtest campaign export"},
 		{"backup", "oscar-corrtest backup --output <path> [options]"},
 	}
 
@@ -155,6 +162,7 @@ func TestHelpExplainsOptionsAndExamplesForOperationalCommands(t *testing.T) {
 		{[]string{"target", "add", "--help"}, []string{"--url", "--credential-env", "OSCAR_API_KEY"}},
 		{[]string{"run", "--help"}, []string{"--target", "--pipeline-mode", "builtin:flood"}},
 		{[]string{"scenario", "validate", "--help"}, []string{"<file>", "--output", "scenario.yaml"}},
+		{[]string{"campaign", "run", "--help"}, []string{"--token-file", "--wait", "oscar-corrtest campaign run"}},
 	}
 	for _, test := range tests {
 		var stdout, stderr bytes.Buffer

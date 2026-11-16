@@ -395,7 +395,11 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 	}
 	completionCtx, completionCancel := context.WithTimeout(context.WithoutCancel(ctx), r.opts.CleanupTimeout)
 	defer completionCancel()
-	cleanup, resolutions, cleanupError := r.cleanup(completionCtx, run.ID, resources, observedHistory(results), nil)
+	// Observation keeps only the latest occurrence per fingerprint; discovery
+	// finds every History occurrence the run's sends produced.
+	cleanup, resolutions, cleanupError := r.cleanup(completionCtx, run.ID, resources, observedHistory(results), func(ctx context.Context) ([]oscar.HistoryRecord, error) {
+		return r.discoverAttemptedHistory(ctx, run, plan, attempts)
+	})
 	if cleanupError != nil {
 		cleanup = domain.CleanupDirty
 	}
@@ -440,11 +444,12 @@ func (r *Runner) cleanup(ctx context.Context, runID string, resources []domain.R
 	}
 	if discover != nil {
 		recovered, err := discover(ctx)
-		histories = append(histories, recovered...)
+		histories = uniqueHistory(append(histories, recovered...))
 		if err != nil {
 			failures = append(failures, "alert history recovery: "+err.Error())
 		}
 	}
+	var sent []oscar.HistoryRecord
 	for _, record := range histories {
 		if record.Labels["oscar_test_run_id"] != runID || record.Fingerprint == "" {
 			failures = append(failures, record.AlertName+": unsafe alert cleanup identity")
@@ -478,12 +483,70 @@ func (r *Runner) cleanup(ctx context.Context, runID string, resources []domain.R
 		resolutions = append(resolutions, fact)
 		if err != nil || !r.inputAccepted(result.Class) {
 			failures = append(failures, record.AlertName+": alert resolution was not accepted")
+			continue
 		}
+		sent = append(sent, record)
+	}
+	// An accepted resolve POST proves nothing about matching: only History
+	// showing each occurrence resolved makes cleanup CLEAN.
+	if firing := r.awaitResolvedHistory(ctx, sent); len(firing) != 0 {
+		failures = append(failures, "history still firing after resolve: "+strings.Join(firing, ", "))
 	}
 	if len(failures) != 0 {
 		return domain.CleanupDirty, resolutions, fmt.Errorf("cleanup failed for %s", strings.Join(failures, ", "))
 	}
 	return domain.CleanupClean, resolutions, nil
+}
+
+// resolveReadBackPolls bounds History read-back after resolves: at the default
+// 1s PollInterval this is ~15s, inside the 30s default CleanupTimeout that
+// also bounds ctx.
+const resolveReadBackPolls = 15
+
+// awaitResolvedHistory polls History until every record reads back resolved
+// and returns evidence for the occurrences that did not.
+func (r *Runner) awaitResolvedHistory(ctx context.Context, records []oscar.HistoryRecord) []string {
+	pending := records
+	for poll := 1; len(pending) != 0; poll++ {
+		var still []oscar.HistoryRecord
+		for _, record := range pending {
+			if !r.historyResolved(ctx, record) {
+				still = append(still, record)
+			}
+		}
+		pending = still
+		if len(pending) == 0 || poll >= resolveReadBackPolls || r.opts.Sleep(ctx, r.opts.PollInterval) != nil {
+			break
+		}
+	}
+	evidence := make([]string, 0, len(pending))
+	for _, record := range pending {
+		evidence = append(evidence, fmt.Sprintf("%s (history %s, fingerprint %s, startsAt %s)", record.AlertName, record.ID, record.Fingerprint, record.StartsAt.UTC().Format(time.RFC3339Nano)))
+	}
+	return evidence
+}
+
+// historyResolved reports whether the same History occurrence (by ID, else by
+// fingerprint and original startsAt) now has status resolved.
+func (r *Runner) historyResolved(ctx context.Context, record oscar.HistoryRecord) bool {
+	start := record.StartsAt
+	if start.IsZero() || (!record.CreatedAt.IsZero() && record.CreatedAt.Before(start)) {
+		start = record.CreatedAt
+	}
+	rows, err := r.api.FindHistory(ctx, oscar.HistoryQuery{AlertName: record.AlertName, Start: start.Add(-time.Second), End: r.opts.Now().UTC().Add(time.Minute)})
+	if err != nil {
+		return false
+	}
+	for _, row := range rows {
+		same := row.ID == record.ID
+		if record.ID == "" {
+			same = row.Fingerprint == record.Fingerprint && row.StartsAt.Equal(record.StartsAt)
+		}
+		if same && strings.EqualFold(row.Status, "resolved") {
+			return true
+		}
+	}
+	return false
 }
 
 // Refires share a fingerprint; API row order must not select an obsolete cleanup episode.
@@ -493,22 +556,35 @@ func retainLatestHistory(records map[string]oscar.HistoryRecord, next oscar.Hist
 	}
 }
 
+// uniqueHistory drops only repeated copies of the same History row (same ID,
+// else same fingerprint and startsAt). Repeated occurrences of one alert are
+// distinct rows and each must be resolved with its own startsAt.
 func uniqueHistory(records []oscar.HistoryRecord) []oscar.HistoryRecord {
-	byFingerprint := make(map[string]oscar.HistoryRecord, len(records))
+	byRow := make(map[string]oscar.HistoryRecord, len(records))
 	for _, record := range records {
-		if record.Fingerprint != "" {
-			retainLatestHistory(byFingerprint, record)
+		if record.Fingerprint == "" {
+			continue
 		}
+		key := "id\x00" + record.ID
+		if record.ID == "" {
+			key = "fp\x00" + record.Fingerprint + "\x00" + record.StartsAt.UTC().Format(time.RFC3339Nano)
+		}
+		byRow[key] = record
 	}
-	keys := make([]string, 0, len(byFingerprint))
-	for fingerprint := range byFingerprint {
-		keys = append(keys, fingerprint)
+	result := make([]oscar.HistoryRecord, 0, len(byRow))
+	for _, record := range byRow {
+		result = append(result, record)
 	}
-	sort.Strings(keys)
-	result := make([]oscar.HistoryRecord, 0, len(keys))
-	for _, fingerprint := range keys {
-		result = append(result, byFingerprint[fingerprint])
-	}
+	sort.Slice(result, func(i, j int) bool {
+		a, b := result[i], result[j]
+		if a.Fingerprint != b.Fingerprint {
+			return a.Fingerprint < b.Fingerprint
+		}
+		if !a.StartsAt.Equal(b.StartsAt) {
+			return a.StartsAt.Before(b.StartsAt)
+		}
+		return a.ID < b.ID
+	})
 	return result
 }
 
@@ -582,7 +658,7 @@ func (r *Runner) discoverAttemptedHistory(ctx context.Context, run domain.Run, p
 		start = run.StartedAt.UTC()
 	}
 	end := r.opts.Now().UTC().Add(time.Minute)
-	byFingerprint := map[string]oscar.HistoryRecord{}
+	var recovered []oscar.HistoryRecord
 	var failures []string
 	alertNames := make([]string, 0, len(expected))
 	for alertName := range expected {
@@ -595,7 +671,8 @@ func (r *Runner) discoverAttemptedHistory(ctx context.Context, run domain.Run, p
 			failures = append(failures, alertName+": "+err.Error())
 			continue
 		}
-		candidates := map[string]map[string]oscar.HistoryRecord{}
+		candidates := map[string]map[string]oscar.HistoryRecord{} // per event, by fingerprint: ambiguity check
+		matched := map[string][]oscar.HistoryRecord{}             // per event, every occurrence
 		for _, record := range records {
 			eventID := record.Labels["oscar_test_event_id"]
 			wanted, exists := expected[alertName][eventID]
@@ -622,6 +699,7 @@ func (r *Runner) discoverAttemptedHistory(ctx context.Context, run domain.Run, p
 				candidates[eventID] = map[string]oscar.HistoryRecord{}
 			}
 			retainLatestHistory(candidates[eventID], record)
+			matched[eventID] = append(matched[eventID], record)
 		}
 		for eventID, wanted := range expected[alertName] {
 			rows := candidates[eventID]
@@ -629,9 +707,7 @@ func (r *Runner) discoverAttemptedHistory(ctx context.Context, run domain.Run, p
 				failures = append(failures, alertName+"/"+eventID+": exact attempted history not found or ambiguous")
 				continue
 			}
-			for _, record := range rows {
-				retainLatestHistory(byFingerprint, record)
-			}
+			recovered = append(recovered, matched[eventID]...)
 		}
 	}
 	alertNames = alertNames[:0]
@@ -647,13 +723,9 @@ func (r *Runner) discoverAttemptedHistory(ctx context.Context, run domain.Run, p
 		}
 		for _, record := range records {
 			if record.AlertName == alertName && record.Labels["oscar_test_run_id"] == run.ID && record.Fingerprint != "" {
-				retainLatestHistory(byFingerprint, record)
+				recovered = append(recovered, record)
 			}
 		}
-	}
-	recovered := make([]oscar.HistoryRecord, 0, len(byFingerprint))
-	for _, record := range byFingerprint {
-		recovered = append(recovered, record)
 	}
 	recovered = uniqueHistory(recovered)
 	if len(failures) != 0 {

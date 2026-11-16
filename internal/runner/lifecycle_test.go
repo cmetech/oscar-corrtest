@@ -107,6 +107,7 @@ func (api *episodeOrderAPI) FindHistory(ctx context.Context, query oscar.History
 			continue
 		}
 		old, newer := row, row
+		old.ID = row.ID + "-old" // a distinct occurrence is a distinct History row
 		old.StartsAt = time.Date(2026, 10, 13, 10, 0, 0, 0, time.UTC)
 		newer.StartsAt = old.StartsAt.Add(time.Second)
 		if api.descending {
@@ -124,7 +125,8 @@ func (api *episodeOrderAPI) CorrelationAudit(ctx context.Context, key string) ([
 	return api.fakeAPI.CorrelationAudit(ctx, key)
 }
 
-func TestCleanupRetainsLatestHistoryEpisodeInEitherRowOrder(t *testing.T) {
+// Every occurrence is resolved with its own startsAt, whatever the row order.
+func TestCleanupResolvesEveryHistoryEpisodeInEitherRowOrder(t *testing.T) {
 	for _, descending := range []bool{false, true} {
 		for _, failAudit := range []bool{false, true} {
 			t.Run(fmt.Sprintf("descending=%v/failure=%v", descending, failAudit), func(t *testing.T) {
@@ -142,17 +144,15 @@ func TestCleanupRetainsLatestHistoryEpisodeInEitherRowOrder(t *testing.T) {
 				if (err != nil) != failAudit {
 					t.Fatalf("unexpected execution error: %v", err)
 				}
-				checked := 0
+				byStart := map[time.Time]int{}
 				for _, row := range api.resolved {
 					if row.Labels["oscar_test_alert_class"] == "source" {
-						checked++
-						if !row.StartsAt.Equal(time.Date(2026, 10, 13, 10, 0, 1, 0, time.UTC)) {
-							t.Fatalf("cleanup selected old firing episode: %v", row.StartsAt)
-						}
+						byStart[row.StartsAt]++
 					}
 				}
-				if checked != 9 {
-					t.Fatalf("expected nine source cleanup targets, got %d", checked)
+				old := time.Date(2026, 10, 13, 10, 0, 0, 0, time.UTC)
+				if len(byStart) != 2 || byStart[old] != 9 || byStart[old.Add(time.Second)] != 9 {
+					t.Fatalf("expected nine source cleanups per episode, got %v", byStart)
 				}
 			})
 		}

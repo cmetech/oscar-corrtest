@@ -143,7 +143,7 @@ func TestPublicRequestBuildersPinCurrentWireShape(t *testing.T) {
 		t.Fatalf("rule JSON=%s", encoded)
 	}
 
-	record := oscar.HistoryRecord{AlertName: "A", Fingerprint: "server-fingerprint", Labels: map[string]string{"alertname": "A", "oscar_test_run_id": "crt_abc"}}
+	record := oscar.HistoryRecord{AlertName: "A", Fingerprint: "server-fingerprint", StartsAt: time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC), Labels: map[string]string{"alertname": "A", "oscar_test_run_id": "crt_abc", "am_fingerprint": "fedf414208e60c28"}}
 	resolution, err := oscar.BuildResolutionRequest(record)
 	if err != nil {
 		t.Fatal(err)
@@ -174,8 +174,8 @@ func TestLiveResolutionUsesPublicRequestBuilder(t *testing.T) {
 	server.Enqueue(testoscar.Response{Status: 200, Body: `{"status":"accepted","task_id":"cleanup-1"}`})
 	client := newClient(t, server.URL())
 	record := oscar.HistoryRecord{
-		AlertName: "CORRTEST_FLOOD_P01_SOURCE_7Q9K2M4A", Fingerprint: "server-fingerprint", Status: "firing",
-		Labels: map[string]string{"alertname": "CORRTEST_FLOOD_P01_SOURCE_7Q9K2M4A", "oscar_test_run_id": "crt_abc"},
+		AlertName: "CORRTEST_FLOOD_P01_SOURCE_7Q9K2M4A", Fingerprint: "server-fingerprint", Status: "firing", StartsAt: time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC),
+		Labels: map[string]string{"alertname": "CORRTEST_FLOOD_P01_SOURCE_7Q9K2M4A", "oscar_test_run_id": "crt_abc", "am_fingerprint": "fedf414208e60c28"},
 		Annotations: map[string]string{
 			"oscar_test_attempt_index": "2", "oscar_test_event_id": "crt_abc-P01-001",
 			"oscar_test_event_index": "1", "summary": "source",
@@ -260,4 +260,48 @@ func valuesEqual(left, right any) bool {
 	leftJSON, leftErr := json.Marshal(left)
 	rightJSON, rightErr := json.Marshal(right)
 	return leftErr == nil && rightErr == nil && string(leftJSON) == string(rightJSON)
+}
+
+// OSCAR matches a resolve to its occurrence by (native transport fingerprint,
+// original startsAt); a fabricated fingerPrint is accepted but matches nothing.
+func TestResolutionEchoesNativeFingerprintAndOriginalStart(t *testing.T) {
+	startsAt := time.Date(2026, 11, 15, 1, 13, 15, 529000000, time.UTC)
+	record := oscar.HistoryRecord{
+		AlertName: "A", Fingerprint: "0123456789ab", Status: "firing", StartsAt: startsAt,
+		Labels: map[string]string{
+			"alertname": "A", "oscar_test_run_id": "crt_abc", "site": "s1",
+			"am_fingerprint": "4d7ed70e44f07f78", "oscar_fingerprint": "0123456789ab",
+			"oscar_handler_type": "default", "oscar_correlation_suppressed_notifiers": "[]",
+		},
+	}
+	request, err := oscar.BuildResolutionRequest(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alert := request.Alerts[0]
+	wantLabels := map[string]string{"alertname": "A", "oscar_test_run_id": "crt_abc", "site": "s1", "oscar_fingerprint": "0123456789ab"}
+	if alert.Fingerprint != "4d7ed70e44f07f78" || alert.StartsAt != "2026-11-15T01:13:15.529Z" || alert.Status != "resolved" ||
+		!reflect.DeepEqual(alert.Labels, wantLabels) || !reflect.DeepEqual(request.CommonLabels, wantLabels) {
+		t.Fatalf("resolution=%+v", request)
+	}
+
+	// Without am_fingerprint the native value is recomputed from the original labels.
+	delete(record.Labels, "am_fingerprint")
+	request, err = oscar.BuildResolutionRequest(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firing, err := oscar.BuildAlertRequest(compiler.AlertPlan{Name: "A", Status: "firing", Labels: map[string]string{"oscar_test_run_id": "crt_abc", "site": "s1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.Alerts[0].Fingerprint != firing.Alerts[0].Fingerprint {
+		t.Fatalf("fallback fingerprint=%s want %s", request.Alerts[0].Fingerprint, firing.Alerts[0].Fingerprint)
+	}
+
+	// A resolve without its original startsAt is rejected by OSCAR (422); never send it.
+	record.StartsAt = time.Time{}
+	if _, err := oscar.BuildResolutionRequest(record); err == nil {
+		t.Fatal("resolution without original startsAt was built")
+	}
 }

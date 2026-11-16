@@ -1,0 +1,14 @@
+{{define "campaign-compare"}}
+<section class="page-heading"><p class="eyebrow">Alerting day</p><h1>Compare campaigns</h1></section>
+{{if .Error}}<div class="notice notice--error" role="alert">{{.Error}}</div>{{end}}
+{{with .Campaign}}
+<form method="get" action="/campaigns/compare" class="filter-bar"><label>Campaign ids (comma separated)<input name="ids" value="{{.IDs}}"></label><button class="primary-button" type="submit">Compare</button></form>
+{{if .Compare.Items}}
+{{range .Compare.Items}}
+<section><h2><code>{{.ID}}</code> <span class="status-pill">{{.RunBy}}</span>{{range .Flags}} <span class="status-pill" data-status="warn">{{.}}</span>{{end}}</h2>
+<div class="data-table-wrapper"><table><caption>Headlines against reference median</caption><thead><tr><th>Headline</th><th>Value</th><th>Reference</th><th>Worse by</th><th></th></tr></thead><tbody>
+{{range .Deltas}}<tr><td>{{.Name}}</td><td>{{.Value}}</td><td>{{.Ref}}</td><td>{{printf "%.1f" .WorsePct}}%</td><td>{{if .Regressed}}worse{{else if lt .WorsePct 0.0}}better{{else}}ok{{end}}</td></tr>{{end}}
+</tbody></table></div></section>
+{{end}}{{end}}
+{{end}}
+{{end}}
