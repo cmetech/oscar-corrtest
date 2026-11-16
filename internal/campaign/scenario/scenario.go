@@ -120,6 +120,18 @@ type BreakerSpec struct {
 	ResolveProbes    int `json:"resolveProbes"`
 }
 
+// DeadTargetSpec adds a webhook notifier whose URL refuses connections, so every
+// alert leaves a delivery that fails before send (retryable_pre_send) while the
+// notifier queue is backed up: the delivery re-publish loop of 2026-11-16.
+// MaxCopies gates publishes per delivery; MinQueueAge is the tm_notifier wait
+// the run must reach, or it never exercised the loop (INCONCLUSIVE).
+type DeadTargetSpec struct {
+	Name        string        `json:"name"`
+	URL         string        `json:"url"`
+	MaxCopies   float64       `json:"maxCopies"`
+	MinQueueAge time.Duration `json:"minQueueAge"`
+}
+
 type Scenario struct {
 	ID          string          `json:"id"`
 	Version     string          `json:"version"`
@@ -132,11 +144,13 @@ type Scenario struct {
 	ResendUntil time.Duration   `json:"resendUntil"`
 	FrontOffice FrontOfficeSpec `json:"frontOffice"`
 	// v2 facets; nil (and absent from the hash) in v1.
-	Standing *StandingSpec  `json:"standing,omitempty"`
-	Breaker  *BreakerSpec   `json:"breaker,omitempty"`
-	Limits   Limits         `json:"limits"`
-	Precheck PrecheckLimits `json:"precheck"`
-	Seed     int64          `json:"seed"`
+	Standing *StandingSpec `json:"standing,omitempty"`
+	Breaker  *BreakerSpec  `json:"breaker,omitempty"`
+	// DeadTarget is the delivery-retry isolation facet.
+	DeadTarget *DeadTargetSpec `json:"deadTarget,omitempty"`
+	Limits     Limits          `json:"limits"`
+	Precheck   PrecheckLimits  `json:"precheck"`
+	Seed       int64           `json:"seed"`
 }
 
 // TransportDedupWindow is OSCAR's JetStream duplicate window for ordinary alerts
@@ -236,9 +250,30 @@ func AlertingDaySmokeV2() Scenario {
 	return s
 }
 
+// DeliveryRetryV1 isolates the delivery re-publish loop (oscar #57) in about 25
+// minutes: an 8-minute lane at 8 alerts/s (each resolved after 2 minutes) backs
+// up tm_notifier while a dead webhook target fails every delivery before send,
+// then a 15-minute drain. It passes when publishes per delivery stay at or below
+// MaxCopies and the queue drains; History, memory and front-office limits are
+// loose because the backlog is deliberate. Custom: never comparable.
+func DeliveryRetryV1() Scenario {
+	min := time.Minute
+	s := AlertingDayV1()
+	s.ID, s.Version, s.Custom = "delivery-retry", "v1", true
+	s.Phases = []Phase{{"preflight", -2 * min, 0}, {"baseline", 0, 8 * min}, {"drain", 8 * min, 23 * min}}
+	s.Baseline = BaselineSpec{Rate: 8, UniqueRatio: 0.9, PoolSize: 100, Instances: 50,
+		Severity: map[string]float64{"critical": 0.05, "major": 0.15, "minor": 0.40, "warning": 0.40}, ResolveAfter: 2 * min}
+	s.Correlation, s.Resend, s.ResendUntil = CorrelationSpec{}, nil, 0
+	s.DeadTarget = &DeadTargetSpec{Name: "CAMPAIGN_DEAD", URL: "https://load.home.arpa:9/dead",
+		MaxCopies: 1.2, MinQueueAge: 100 * time.Second}
+	s.Limits = Limits{HistoryP95: 30 * min, Drain: 15 * min, ContainerSlopeMiBPerHour: 1e6,
+		FrontOfficeP95: min, FrontOfficeP99: 2 * min, QuerySetVersion: "q2"}
+	return s
+}
+
 // Builtins are the built-in campaign scenarios.
 func Builtins() []Scenario {
-	return []Scenario{AlertingDayV1(), AlertingDayV2(), AlertingDaySmokeV1(), AlertingDaySmokeV2()}
+	return []Scenario{AlertingDayV1(), AlertingDayV2(), AlertingDaySmokeV1(), AlertingDaySmokeV2(), DeliveryRetryV1()}
 }
 
 // Lookup returns the built-in scenario named "id@version".

@@ -82,6 +82,9 @@ type Alert struct {
 type Target interface {
 	Notifiers(ctx context.Context) ([]targetops.Notifier, error)
 	SetNotifier(ctx context.Context, id string, enabled bool) (targetops.Notifier, error)
+	// CreateWebhookNotifier and DeleteNotifier manage the delivery-retry dead target.
+	CreateWebhookNotifier(ctx context.Context, name, endpoint string) (targetops.Notifier, error)
+	DeleteNotifier(ctx context.Context, id string) error
 	CreateDraft(ctx context.Context, def targetops.PolicyDefinition, rev int) (targetops.Policy, error)
 	Activate(ctx context.Context, id, notifierID, action string, rev int, wait time.Duration) (targetops.Policy, error)
 	Deactivate(ctx context.Context, id, notifierID, action string, rev int) (int, error)

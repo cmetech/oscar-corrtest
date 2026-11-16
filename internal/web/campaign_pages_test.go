@@ -175,3 +175,12 @@ func TestSmokeSelectableInUI(t *testing.T) {
 		t.Fatalf("started %+v", f.started)
 	}
 }
+
+// A Scenarios page link (/campaigns?scenario=...) preselects that campaign scenario.
+func TestCampaignsPagePreselectsLinkedScenario(t *testing.T) {
+	g := httptest.NewRecorder()
+	newPagesHandler(&pageData2{}).ServeHTTP(g, httptest.NewRequest(http.MethodGet, "/campaigns?scenario=delivery-retry%40v1", nil))
+	if !strings.Contains(g.Body.String(), `<option value="delivery-retry@v1" selected>`) {
+		t.Fatal("campaigns page does not preselect the linked scenario")
+	}
+}

@@ -318,6 +318,16 @@ func (r *run) attStats(ctx context.Context) *score.ATT {
 	return a
 }
 
+// deliveryStats is the delivery-retry section: the per-alert budgets plus the
+// delivery queries, over T0 to end (copies keep being made through the drain).
+func (r *run) deliveryStats(ctx context.Context, end time.Time) *score.ATT {
+	a := &score.ATT{Budgets: map[string]float64{}, Breaker: score.BreakerStats{Skipped: "not part of this scenario"}}
+	r.scalars(ctx, a.Budgets, score.BudgetQueries, r.t0, end)
+	r.scalars(ctx, a.Budgets, score.DeliveryQueries, r.t0, end)
+	a.Derive()
+	return a
+}
+
 // scalars evaluates each windowed query at end; a missing series is left out.
 func (r *run) scalars(ctx context.Context, into map[string]float64, queries map[string]string, start, end time.Time) {
 	if !end.After(start) {

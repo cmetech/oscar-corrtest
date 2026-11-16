@@ -154,6 +154,12 @@ func (t oscarTarget) Notifiers(ctx context.Context) ([]targetops.Notifier, error
 func (t oscarTarget) SetNotifier(ctx context.Context, id string, on bool) (targetops.Notifier, error) {
 	return targetops.SetNotifierStatus(ctx, t.c, id, on)
 }
+func (t oscarTarget) CreateWebhookNotifier(ctx context.Context, name, endpoint string) (targetops.Notifier, error) {
+	return targetops.CreateWebhookNotifier(ctx, t.c, name, endpoint)
+}
+func (t oscarTarget) DeleteNotifier(ctx context.Context, id string) error {
+	return targetops.DeleteNotifier(ctx, t.c, id)
+}
 func (t oscarTarget) CreateDraft(ctx context.Context, def targetops.PolicyDefinition, rev int) (targetops.Policy, error) {
 	return targetops.CreateDraft(ctx, t.c, def, rev)
 }

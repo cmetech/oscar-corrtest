@@ -2,6 +2,7 @@ package targetops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -91,4 +92,43 @@ func SetNotifierStatus(ctx context.Context, c *oscar.Client, id string, enabled 
 // ListNotifiers returns every notifier on the target, any status.
 func ListNotifiers(ctx context.Context, c *oscar.Client) ([]Notifier, error) {
 	return listNotifiers(ctx, c)
+}
+
+// CreateWebhookNotifier creates an enabled webhook notifier and returns it by
+// name readback (the create response carries no id).
+func CreateWebhookNotifier(ctx context.Context, c *oscar.Client, name, endpoint string) (Notifier, error) {
+	body := map[string]any{"name": name, "type": "webhook", "status": "enabled",
+		"description":      "CorrTest campaign dead target; removed by campaign cleanup",
+		"webhook_notifier": map[string]string{"url": endpoint}}
+	if err := c.DoJSON(ctx, http.MethodPost, "/api/v1/notifiers", nil, body, nil); err != nil {
+		return Notifier{}, err
+	}
+	return FindNotifier(ctx, c, name)
+}
+
+// FindNotifier returns the notifier with this exact (case-insensitive) name.
+func FindNotifier(ctx context.Context, c *oscar.Client, name string) (Notifier, error) {
+	all, err := listNotifiers(ctx, c)
+	if err != nil {
+		return Notifier{}, err
+	}
+	for _, n := range all {
+		if strings.EqualFold(n.Name, name) {
+			return n, nil
+		}
+	}
+	return Notifier{}, ErrNotifierNotFound
+}
+
+// ErrNotifierNotFound is FindNotifier's miss.
+var ErrNotifierNotFound = errors.New("notifier not found")
+
+// DeleteNotifier deletes one notifier; a missing one counts as deleted.
+func DeleteNotifier(ctx context.Context, c *oscar.Client, id string) error {
+	err := c.DoJSON(ctx, http.MethodDelete, "/api/v1/notifiers/"+url.PathEscape(id), nil, nil, nil)
+	var machine *oscar.MachineError
+	if errors.As(err, &machine) && machine.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	return err
 }

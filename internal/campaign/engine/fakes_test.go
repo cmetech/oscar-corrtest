@@ -181,6 +181,7 @@ type fakeOSCAR struct {
 	rejectResolves bool // resolves are refused while tripped (26.4.4)
 	forcedPosts    int
 	queryValues    map[string]float64 // instant query results by query substring (default 0)
+	deadCreated    []string           // "name url" of each dead target created
 }
 
 func newFakeOSCAR(t *testing.T, clock *scaledClock, s scenario.Scenario) *fakeOSCAR {
@@ -924,4 +925,20 @@ func (h *harness) assertRestored() {
 	if err != nil || len(open) > 0 {
 		h.t.Errorf("open mutations: %v %+v", err, open)
 	}
+}
+
+func (f *fakeOSCAR) CreateWebhookNotifier(_ context.Context, name, endpoint string) (targetops.Notifier, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := &targetops.Notifier{ID: "dead-" + name, Name: name, Type: "webhook", Status: "enabled"}
+	f.notifiers[n.ID] = n
+	f.deadCreated = append(f.deadCreated, name+" "+endpoint)
+	return *n, nil
+}
+
+func (f *fakeOSCAR) DeleteNotifier(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.notifiers, id)
+	return nil
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/applog"
 	"github.com/cmetech/oscar-corrtest/internal/authoring"
 	"github.com/cmetech/oscar-corrtest/internal/campaign"
+	campaignscenario "github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/evidence"
 	"github.com/cmetech/oscar-corrtest/internal/operations"
@@ -90,6 +91,7 @@ type pageData struct {
 	Help                 HelpTopic
 	ReferenceTopics      []HelpTopic
 	ScenarioCatalog      []scenarioCatalogItem
+	CampaignScenarios    []string // built-in campaign scenarios (id@version), run from the Campaigns page
 	SelectedScenario     string
 	SelectedScenarioID   string
 	SelectedName         string
@@ -989,6 +991,9 @@ func scenarioWorkbench(ctx context.Context, info version.Info, data DataSource, 
 		selected = "builtin:flood"
 	}
 	view := pageData{Version: info, Page: "scenarios", Readiness: readiness(data), ImportedScenarios: imported, SelectedScenario: selected}
+	for _, s := range campaignscenario.Builtins() {
+		view.CampaignScenarios = append(view.CampaignScenarios, s.ID+"@"+s.Version)
+	}
 	for _, builtin := range scenario.AllBuiltins() {
 		ref := "builtin:" + builtin.Pattern
 		view.ScenarioCatalog = append(view.ScenarioCatalog, scenarioCatalogItem{Ref: ref, Name: builtin.Name, Pattern: builtin.Pattern, Kind: "Built-in", Selected: ref == selected})

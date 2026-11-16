@@ -81,6 +81,17 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 		card.ATT = r.attStats(ctx)
 		report["att"] = card.ATT
 	}
+	if d := r.s.DeadTarget; d != nil { // delivery-retry: gated, over T0 to the end of drain
+		card.ATT = r.deliveryStats(ctx, end)
+		report["att"] = card.ATT
+		fails, incon := score.JudgeDeliveryRetry(card.ATT.Budgets, d.MaxCopies, d.MinQueueAge.Seconds())
+		if len(fails) > 0 {
+			card.Verdict = domain.VerdictFail
+		} else if len(incon) > 0 && card.Verdict == domain.VerdictPass {
+			card.Verdict = domain.VerdictInconclusive
+		}
+		card.Reasons = append(append(card.Reasons, fails...), incon...)
+	}
 	r.mu.Lock()
 	missing, stopped, open, corrT := append([]string{}, r.missing...), r.stopped, r.openIncidents, r.corrTickets
 	r.mu.Unlock()
