@@ -56,17 +56,20 @@ func Outcome(status int) string {
 // takes the window length (a PromQL duration) for %s and is evaluated at the
 // window end. Names confirmed against the live VictoriaMetrics on 2026-11-16.
 var BudgetQueries = map[string]string{
-	"alerts":             `sum(increase(celery_task_sent_total{name="tm.alerts.send_individual_notification"}[%s]))`,
-	"notifier_jobs":      `sum(increase(celery_task_sent_total{name="tm.notifier.common"}[%s]))`,
-	"handoff_publishes":  `sum(increase(celery_task_sent_total{name="tm.notifier.ordinary_history_handoff"}[%s]))`,
-	"handoffs_sent":      `sum(increase(oscar_history_gateway_handoffs_total{outcome="sent"}[%s]))`, // per target, not per hand-off
-	"recovered":          `sum(increase(oscar_history_gateway_handoffs_total{outcome="recovered"}[%s]))`,
-	"redispatched":       `sum(increase(oscar_history_gateway_handoffs_total{outcome="redispatched"}[%s]))`,
-	"recover_deferred":   `sum(increase(oscar_history_gateway_handoffs_total{outcome="recover_deferred"}[%s]))`,
-	"history_creates":    `sum(increase(oscar_alert_history_commits_total{operation="create"}[%s]))`,
-	"history_updates":    `sum(increase(oscar_alert_history_commits_total{operation="update"}[%s]))`,
-	"mysql_queries":      `sum(increase(mysql_global_status_queries[%s]))`,
-	"redis_growth_bytes": `sum(delta(redis_memory_used_bytes[%s]))`,
+	"alerts":            `sum(increase(celery_task_sent_total{name="tm.alerts.send_individual_notification"}[%s]))`,
+	"notifier_jobs":     `sum(increase(celery_task_sent_total{name="tm.notifier.common"}[%s]))`,
+	"handoff_publishes": `sum(increase(celery_task_sent_total{name="tm.notifier.ordinary_history_handoff"}[%s]))`,
+	"handoffs_sent":     `sum(increase(oscar_history_gateway_handoffs_total{outcome="sent"}[%s]))`, // per target, not per hand-off
+	"recovered":         `sum(increase(oscar_history_gateway_handoffs_total{outcome="recovered"}[%s]))`,
+	"redispatched":      `sum(increase(oscar_history_gateway_handoffs_total{outcome="redispatched"}[%s]))`,
+	"recover_deferred":  `sum(increase(oscar_history_gateway_handoffs_total{outcome="recover_deferred"}[%s]))`,
+	// Delivery copies: first publishes by the admission request vs recovery republishes (OSCAR worker 9201).
+	"delivery_requests":    `sum(increase(oscar_taskmanager_notification_admission_stage_seconds_count{stage="claim_total",source="request",outcome="ok"}[%s]))`,
+	"delivery_republished": `sum(increase(oscar_notification_delivery_recovery_total{outcome="republished"}[%s]))`,
+	"history_creates":      `sum(increase(oscar_alert_history_commits_total{operation="create"}[%s]))`,
+	"history_updates":      `sum(increase(oscar_alert_history_commits_total{operation="update"}[%s]))`,
+	"mysql_queries":        `sum(increase(mysql_global_status_queries[%s]))`,
+	"redis_growth_bytes":   `sum(delta(redis_memory_used_bytes[%s]))`,
 }
 
 var BreakerQueries = map[string]string{
@@ -104,6 +107,13 @@ func (a *ATT) Derive() {
 		b["handoff_copies"] = v
 		if v > 1.2 {
 			f = append(f, fmt.Sprintf("hand-off re-queue: %.2f publishes per hand-off (AT&T 10.7)", v))
+		}
+	}
+	if first := b["delivery_requests"]; first > 0 {
+		v := (first + b["delivery_republished"]) / first
+		b["delivery_copies"] = v
+		if v > 1.2 {
+			f = append(f, fmt.Sprintf("delivery re-queue: %.2f publishes per delivery", v))
 		}
 	}
 	ratio("mysql_queries_per_alert", "mysql_queries", "alerts")
