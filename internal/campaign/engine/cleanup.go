@@ -240,6 +240,10 @@ func (r *run) closeIncidents(ctx context.Context) []targetops.Incident {
 		incs, err := r.e.d.SNOW.OpenCampaignIncidents(ctx, r.id)
 		if err != nil {
 			listErr = fmt.Errorf("incident listing: %w", err)
+		} else {
+			r.mu.Lock()
+			r.incidentsRead = true // R4 resend evidence is readable
+			r.mu.Unlock()
 		}
 		for _, inc := range incs {
 			campaign[inc.Number] = inc
@@ -449,11 +453,15 @@ func (r *run) deactivatePolicy(ctx context.Context, p policyPrior) error {
 // resolvedComment reports OSCAR's resolution comment on an incident.
 func resolvedComment(i targetops.Incident) bool {
 	for _, c := range i.Comments {
-		if strings.Contains(c.Value, "[OSCAR AUTO-UPDATE") && strings.Contains(c.Value, "Alert has been resolved") {
+		if isResolution(c.Value) {
 			return true
 		}
 	}
 	return false
+}
+
+func isResolution(comment string) bool {
+	return strings.Contains(comment, "[OSCAR AUTO-UPDATE") && strings.Contains(comment, "Alert has been resolved")
 }
 
 // removeByName resolves a create intent that never got an id: an exact-name

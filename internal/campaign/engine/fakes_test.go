@@ -484,11 +484,14 @@ func (f *fakeOSCAR) OpenCampaignIncidents(context.Context, string) ([]targetops.
 			continue
 		}
 		c := *inc
-		if ds := f.cohort[name]; len(ds) > 0 { // R4 resends land as incident comments
+		if ds := f.cohort[name]; len(ds) > 0 { // R4 resends land as incident comments, before any resolution
 			_, origin, exp := f.expected(name)
-			for _, d := range exp.Resends {
-				c.Comments = append(c.Comments, targetops.Comment{Value: "resend_comment", CreatedOn: origin.Add(d).Format("2006-01-02 15:04:05")})
+			var resends []targetops.Comment
+			for i, d := range exp.Resends {
+				resends = append(resends, targetops.Comment{Value: fmt.Sprintf("OSCAR alert still firing: episode 1, occurrence %d.", i+2),
+					CreatedOn: origin.Add(d).Format("2006-01-02 15:04:05")})
 			}
+			c.Comments = append(resends, c.Comments...)
 		}
 		out = append(out, c)
 	}
@@ -793,6 +796,7 @@ func (h *harness) scorecard() (c domain.Campaign, card struct {
 	Reasons   []string
 	Headlines []struct{ Name string }
 	Tickets   struct{ Expected, Succeeded, Failed, Unknown int }
+	Resend    struct{ Expected, Succeeded, Failed, Unknown int }
 	Baseline  struct{ Planned, Offered int }
 	Homelab   struct {
 		Completed, Failed int

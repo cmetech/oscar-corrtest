@@ -178,6 +178,7 @@ type run struct {
 	stopped       bool // operator Stop
 	missing       []string
 	openIncidents []string
+	incidentsRead bool     // a campaign incident listing succeeded (R4 evidence)
 	dirty         []string // cleanup failures that are not open mutations
 	corrTickets   corrTicketStats
 	corrTicketed  []corrTicket

@@ -77,6 +77,9 @@ func TestEngineHappyPathPass(t *testing.T) {
 			t.Errorf("missing memory headline for %s", n)
 		}
 	}
+	if card.Resend.Expected != 4 || card.Resend.Succeeded != 4 { // R1-R3 from sink receipts, R4 from incident comments
+		t.Errorf("resend %+v, want all 4 policies' members succeeded", card.Resend)
+	}
 	if card.Tickets.Expected == 0 {
 		t.Error("no tickets expected; the scenario should ticket")
 	}

@@ -390,3 +390,18 @@ func TestHomelabTaskStats(t *testing.T) {
 		t.Fatalf("not collected %+v", h)
 	}
 }
+
+// R4 evidence: an unreadable incident is Unknown; a violation (too many
+// resend comments, or one after resolution) fails even when the count fits.
+func TestResendUnreadIsUnknownAndViolationFails(t *testing.T) {
+	p := scenario.PolicySpec{Mode: "time", Interval: time.Minute}
+	ds := []resend.Delivery{{At: 0}, {At: 70 * time.Second}}
+	r := reconcileResend([]ResendCase{
+		{Policy: p, Deliveries: ds, Unread: "incidents not read"},
+		{Policy: p, Deliveries: ds, Observed: []time.Duration{70 * time.Second}, Violation: "resend comment after resolution"},
+		{Policy: p, Deliveries: ds, Observed: []time.Duration{70 * time.Second}},
+	})
+	if r.Unknown != 1 || r.Failed != 1 || r.Succeeded != 1 {
+		t.Fatalf("got %+v", r)
+	}
+}

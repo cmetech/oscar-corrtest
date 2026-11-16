@@ -273,8 +273,12 @@ func mentions(s, id string) bool {
 }
 
 // resendCases builds each cohort identity's observed resends: sink receipts
-// for notification policies, SNOW resend comments for the ticket policy.
+// for notification policies, OSCAR's "still firing" incident comments for
+// the ticket policy (R4).
 func (r *run) resendCases(ctx context.Context, receipts []targetops.Receipt, incs []targetops.Incident) []score.ResendCase {
+	r.mu.Lock()
+	read := r.incidentsRead
+	r.mu.Unlock()
 	exhausted := map[*policyState]bool{}
 	for _, p := range r.policies {
 		if st, err := r.e.d.Target.PolicyStatus(ctx, p.notifierID, p.spec.Action, p.id); err == nil {
@@ -287,17 +291,9 @@ func (r *run) resendCases(ctx context.Context, receipts []targetops.Receipt, inc
 		c := score.ResendCase{Policy: m.policy.spec, Deliveries: m.deliveries, Exhausted: exhausted[m.policy]}
 		var times []time.Time
 		if m.policy.spec.Action == "ticket" {
-			for _, inc := range incs {
-				if !mentions(inc.ShortDescription, m.alert.Name) {
-					continue
-				}
-				for _, cm := range inc.Comments {
-					if strings.Contains(strings.ToLower(cm.Value), "resend") {
-						if t, err := time.Parse("2006-01-02 15:04:05", cm.CreatedOn); err == nil {
-							times = append(times, t)
-						}
-					}
-				}
+			c.Observed, c.Unread, c.Violation = ticketResends(m, incs, read)
+			if c.Violation != "" {
+				r.event(ctx, "campaign.resend", "warn", "resend "+m.policy.spec.Key+" "+m.alert.Name+": "+c.Violation, nil)
 			}
 		} else {
 			var all []time.Time
@@ -320,6 +316,52 @@ func (r *run) resendCases(ctx context.Context, receipts []targetops.Receipt, inc
 		out = append(out, c)
 	}
 	return out
+}
+
+// resendComment is OSCAR's ticket-policy resend comment ("OSCAR alert still
+// firing: episode <n>, occurrence <m>.").
+const resendComment = "OSCAR alert still firing"
+
+// ticketResends reads one R4 member's evidence from its incident(s): each
+// resend comment as an offset from the member's origin. read is whether the
+// campaign incidents were listed at all; no listing, or no incident for the
+// member, is unread (Unknown). More resend comments than max_resends, or one
+// after the resolution comment, is a violation.
+func ticketResends(m *cohortMember, incs []targetops.Incident, read bool) (observed []time.Duration, unread, violation string) {
+	if !read {
+		return nil, "campaign incidents not read", ""
+	}
+	found := false
+	for _, inc := range incs {
+		if !mentions(inc.ShortDescription, m.alert.Name) {
+			continue
+		}
+		found = true
+		resolved := false
+		for _, cm := range inc.Comments {
+			switch {
+			case isResolution(cm.Value):
+				resolved = true
+			case strings.Contains(cm.Value, resendComment):
+				at, err := time.Parse("2006-01-02 15:04:05", cm.CreatedOn)
+				if err != nil {
+					return nil, fmt.Sprintf("incident %s: unreadable comment time %q", inc.Number, cm.CreatedOn), ""
+				}
+				observed = append(observed, at.Sub(m.origin))
+				if resolved {
+					violation = "incident " + inc.Number + ": resend comment after resolution"
+				}
+			}
+		}
+	}
+	if !found {
+		return nil, "no incident for " + m.alert.Name, ""
+	}
+	if mx := m.policy.spec.MaxResends; mx != nil && len(observed) > *mx && violation == "" {
+		violation = fmt.Sprintf("%d resend comments, max_resends %d", len(observed), *mx)
+	}
+	sort.Slice(observed, func(i, j int) bool { return observed[i] < observed[j] })
+	return observed, "", violation
 }
 
 // unknownOutcome is a ledger row sent without a definite answer.

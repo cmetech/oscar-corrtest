@@ -196,12 +196,16 @@ func reconcileTickets(in TicketInputs) Rate {
 // ResendCase is one identity: the policy, its deliveries, and the observed
 // resends from the status, sink or SNOW resend_comment evidence. Observed
 // offsets use the same time frame as the deliveries (offset from the initial
-// action). Exhausted is the status's sticky_exhausted.
+// action). Exhausted is the status's sticky_exhausted. Unread says why the
+// evidence could not be read (Unknown); Violation is a definite failure seen
+// in it (R4: more resend comments than max_resends, or one after resolution).
 type ResendCase struct {
 	Policy     scenario.PolicySpec
 	Deliveries []resend.Delivery
 	Observed   []time.Duration
 	Exhausted  bool
+	Unread     string `json:",omitempty"`
+	Violation  string `json:",omitempty"`
 }
 
 const resendTolerance = 60 * time.Second
@@ -210,6 +214,12 @@ const resendTolerance = 60 * time.Second
 // agrees, and each resend is within 60 s of its modelled time (either way).
 // A case that models no resend is no evidence (Unknown), never a pass.
 func resendOK(c ResendCase) (ok bool, err error) {
+	if c.Violation != "" {
+		return false, nil
+	}
+	if c.Unread != "" {
+		return false, fmt.Errorf("resend %s: %s", c.Policy.Key, c.Unread)
+	}
 	exp, err := resend.Expect(c.Policy, c.Deliveries)
 	if err != nil {
 		return false, err
