@@ -357,3 +357,44 @@ func TestFirstCampaignEventFindsOldEventByType(t *testing.T) {
 		t.Fatalf("missing type: ok=%v err=%v", ok, err)
 	}
 }
+
+// The bundle export pages every event by sequence instead of a newest-N window.
+func TestCampaignEventsAfterPagesBySequence(t *testing.T) {
+	ctx := context.Background()
+	d := openCampaignDB(t)
+	newCampaign(t, d, "c1") // sequence 1: campaign.created
+	newCampaign(t, d, "c2")
+	for i := 0; i < 24; i++ {
+		if err := d.AppendCampaignEvent(ctx, "c1", "campaign.x", "info", "e", json.RawMessage(`{"i":1}`), time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.AppendCampaignEvent(ctx, "c2", "campaign.other", "info", "e", nil, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var got []int
+	for after := 0; ; {
+		page, err := d.CampaignEventsAfter(ctx, "c1", after, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, ev := range page {
+			if ev.CampaignID != "c1" {
+				t.Fatalf("foreign event %+v", ev)
+			}
+			got = append(got, ev.Sequence)
+			after = ev.Sequence
+		}
+		if len(page) < 10 {
+			break
+		}
+	}
+	if len(got) != 25 {
+		t.Fatalf("paged %d events, want 25: %v", len(got), got)
+	}
+	for i, s := range got {
+		if s != i+1 {
+			t.Fatalf("sequence %d at %d, want ascending from 1: %v", s, i, got)
+		}
+	}
+}

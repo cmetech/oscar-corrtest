@@ -375,6 +375,21 @@ func (d *Database) RecentCampaignEvents(ctx context.Context, id string, limit in
 	if err != nil {
 		return nil, fmt.Errorf("list campaign events: %w", err)
 	}
+	return scanCampaignEvents(rows)
+}
+
+// CampaignEventsAfter returns up to limit events with sequence > afterSeq,
+// oldest first: page with afterSeq = the last sequence returned.
+func (d *Database) CampaignEventsAfter(ctx context.Context, id string, afterSeq, limit int) ([]domain.CampaignEvent, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT campaign_id, sequence, type, level, occurred_at, summary, detail_json
+        FROM campaign_events WHERE campaign_id=? AND sequence>? ORDER BY sequence LIMIT ?`, id, afterSeq, limit)
+	if err != nil {
+		return nil, fmt.Errorf("page campaign events: %w", err)
+	}
+	return scanCampaignEvents(rows)
+}
+
+func scanCampaignEvents(rows *sql.Rows) ([]domain.CampaignEvent, error) {
 	defer rows.Close()
 	var out []domain.CampaignEvent
 	for rows.Next() {
@@ -384,6 +399,7 @@ func (d *Database) RecentCampaignEvents(ctx context.Context, id string, limit in
 		if err := rows.Scan(&e.CampaignID, &e.Sequence, &e.Type, &e.Level, &at, &e.Summary, &detail); err != nil {
 			return nil, err
 		}
+		var err error
 		if e.OccurredAt, err = time.Parse(time.RFC3339Nano, at); err != nil {
 			return nil, err
 		}

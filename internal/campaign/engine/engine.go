@@ -47,6 +47,7 @@ type Store interface {
 	AppendCampaignEvent(ctx context.Context, id, typ, level, summary string, detail json.RawMessage, at time.Time) error
 	RecentCampaignEvents(ctx context.Context, id string, limit int) ([]domain.CampaignEvent, error)
 	FirstCampaignEvent(ctx context.Context, id, typ string) (domain.CampaignEvent, bool, error)
+	CampaignEventsAfter(ctx context.Context, id string, afterSeq, limit int) ([]domain.CampaignEvent, error)
 	TransitionCampaign(ctx context.Context, id string, next domain.CampaignStatus, at time.Time, summary string) error
 	RecordPrecheck(ctx context.Context, id string, r domain.PrecheckResult) error
 	LinkCampaignRun(ctx context.Context, campaignID, runID, kind string) error
@@ -283,7 +284,6 @@ func (e *Engine) Run(ctx context.Context, id string, o runtime.CampaignOptions) 
 const (
 	scenarioEvent = "campaign.scenario"
 	precheckEvent = "campaign.precheck"
-	maxEvents     = 1 << 20 // bundle event cap; ponytail: newest 1M only, page the export if a campaign can log more
 )
 
 // Recover drains and cleans up an interrupted campaign with verdict

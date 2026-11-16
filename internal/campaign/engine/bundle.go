@@ -85,6 +85,81 @@ func ledgerAttachment(raw []byte, limit int) (evidence.Attachment, error) {
 	return attach("lane-ledger.ndjson.gz", buf.Bytes()), nil
 }
 
+const (
+	eventPage       = 5000    // campaign events read per store query
+	eventChunkSlack = 1 << 20 // headroom under the entry limit for deflate's unflushed output
+)
+
+type eventExport struct {
+	scenario, prechecks json.RawMessage
+	guards              []json.RawMessage
+	count               int
+}
+
+// exportEvents pages every campaign event by sequence into gzipped ndjson
+// attachments (campaign-events-NNN.ndjson.gz), starting a new one before a
+// chunk's compressed size passes chunk, so no entry exceeds the bundle's
+// 16 MiB limit. Events are not held; only the compressed chunks are. It also
+// picks out the scenario, pre-check and guard events.
+// ponytail: chunks sit in memory because evidence.WriteWithArtifacts takes []byte; ~10x smaller than the events, stream attachments if that bites.
+func (e *Engine) exportEvents(ctx context.Context, id string, chunk int) ([]evidence.Attachment, eventExport, error) {
+	ex := eventExport{scenario: json.RawMessage("null"), prechecks: json.RawMessage("null")}
+	var atts []evidence.Attachment
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	rows := 0 // in the open chunk
+	flush := func() error {
+		if err := zw.Close(); err != nil {
+			return err
+		}
+		atts = append(atts, attach(fmt.Sprintf("campaign-events-%03d.ndjson.gz", len(atts)), bytes.Clone(buf.Bytes())))
+		buf.Reset()
+		zw.Reset(&buf)
+		rows = 0
+		return nil
+	}
+	for after := 0; ; {
+		page, err := e.d.Store.CampaignEventsAfter(ctx, id, after, eventPage)
+		if err != nil {
+			return nil, ex, err
+		}
+		for _, ev := range page {
+			switch ev.Type {
+			case scenarioEvent:
+				ex.scenario = ev.Detail
+			case precheckEvent:
+				ex.prechecks = ev.Detail
+			case "campaign.guard":
+				ex.guards = append(ex.guards, ev.Detail)
+			}
+			b, err := json.Marshal(ev)
+			if err != nil {
+				return nil, ex, err
+			}
+			if rows > 0 && buf.Len()+len(b) > chunk {
+				if err := flush(); err != nil {
+					return nil, ex, err
+				}
+			}
+			if _, err := zw.Write(append(b, '\n')); err != nil {
+				return nil, ex, err
+			}
+			rows++
+			ex.count++
+			after = ev.Sequence
+		}
+		if len(page) < eventPage {
+			break
+		}
+	}
+	if rows > 0 || len(atts) == 0 {
+		if err := flush(); err != nil {
+			return nil, ex, err
+		}
+	}
+	return atts, ex, nil
+}
+
 // ExportCampaign writes the campaign evidence bundle for a completed campaign.
 func (e *Engine) ExportCampaign(ctx context.Context, id, destination string) (evidence.Result, error) {
 	c, err := e.d.Store.GetCampaign(ctx, id)
@@ -94,7 +169,7 @@ func (e *Engine) ExportCampaign(ctx context.Context, id, destination string) (ev
 	if c.Status != domain.CampaignCompleted {
 		return evidence.Result{}, fmt.Errorf("campaign %s is not completed", id)
 	}
-	events, err := e.d.Store.RecentCampaignEvents(ctx, id, maxEvents)
+	eventAtts, ex, err := e.exportEvents(ctx, id, maxAttachment-eventChunkSlack)
 	if err != nil {
 		return evidence.Result{}, err
 	}
@@ -106,24 +181,12 @@ func (e *Engine) ExportCampaign(ctx context.Context, id, destination string) (ev
 	}
 	var report map[string]json.RawMessage
 	note("campaign report", json.Unmarshal(c.Report, &report))
-	var scenarioDoc json.RawMessage = json.RawMessage("null")
-	var prechecks json.RawMessage = json.RawMessage("null")
-	var guards []json.RawMessage
-	for _, ev := range events {
-		switch ev.Type {
-		case scenarioEvent:
-			scenarioDoc = ev.Detail
-		case precheckEvent:
-			prechecks = ev.Detail
-		case "campaign.guard":
-			guards = append(guards, ev.Detail)
-		}
-	}
+	scenarioDoc, prechecks, guards := ex.scenario, ex.prechecks, ex.guards
 	links, err := e.d.Store.CampaignRuns(ctx, id)
 	if err != nil {
 		return evidence.Result{}, err
 	}
-	var atts []evidence.Attachment
+	atts := eventAtts
 	var firstErr error
 	put := func(a evidence.Attachment, err error) {
 		if err != nil && firstErr == nil {
@@ -208,7 +271,7 @@ func (e *Engine) ExportCampaign(ctx context.Context, id, destination string) (ev
 	}
 	put(jsonAtt("campaign.json", map[string]any{"campaign": c.ID, "scenario": c.ScenarioID, "scenarioHash": c.ScenarioHash, "plan": scenarioDoc,
 		"seed": seedOf(scenarioDoc), "trigger": c.Trigger, "runBy": c.RunBy, "status": c.Status, "verdict": c.Verdict, "cleanup": c.Cleanup,
-		"comparable": c.Comparable, "startedAt": c.StartedAt, "endedAt": c.EndedAt, "correlationRuns": children,
+		"comparable": c.Comparable, "startedAt": c.StartedAt, "endedAt": c.EndedAt, "correlationRuns": children, "events": ex.count,
 		"complete": len(missing) == 0, "missing": append([]string{}, missing...)}))
 	var html bytes.Buffer
 	cardPretty, _ := json.MarshalIndent(json.RawMessage(card), "", "  ")
