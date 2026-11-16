@@ -158,7 +158,7 @@ func TestAlertingDaySmokeV1(t *testing.T) {
 }
 
 func TestLookup(t *testing.T) {
-	for _, ref := range []string{"alerting-day@v1", "alerting-day@v2", "alerting-day-smoke@v1"} {
+	for _, ref := range []string{"alerting-day@v1", "alerting-day@v2", "alerting-day-smoke@v1", "alerting-day-smoke@v2"} {
 		s, ok := Lookup(ref)
 		if !ok || s.ID+"@"+s.Version != ref {
 			t.Errorf("%s: %v %s@%s", ref, ok, s.ID, s.Version)
@@ -202,5 +202,15 @@ func TestAlertingDayV2AddsTheATTShapeWithoutTouchingV1(t *testing.T) {
 	}
 	if v2.Limits.QuerySetVersion != "q2" || v2.Baseline.Rate != v1.Baseline.Rate || len(v2.Resend) != len(v1.Resend) {
 		t.Fatal("v2 keeps v1's facets and adds q2")
+	}
+}
+
+func TestAlertingDaySmokeV2IsShortCustomAndCarriesBothFacets(t *testing.T) {
+	s := AlertingDaySmokeV2()
+	if !s.Custom || s.Standing == nil || s.Breaker == nil || s.Phase("drain").End != 14*time.Minute {
+		t.Fatalf("smoke v2 %+v", s)
+	}
+	if b := s.Phase("breaker"); b.End-b.Start != 2*time.Minute || s.Standing.Until > b.Start {
+		t.Fatalf("breaker %+v standing until %s", b, s.Standing.Until)
 	}
 }

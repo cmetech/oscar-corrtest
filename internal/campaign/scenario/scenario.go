@@ -220,8 +220,26 @@ func AlertingDaySmokeV1() Scenario {
 	return s
 }
 
+// AlertingDaySmokeV2 is the v1 smoke plus a small standing pool (100 alerts
+// re-delivered every 2 minutes) and a 2-minute forced breaker window before a
+// 2-minute drain: about 14 minutes, proving the v2 facets live (including the
+// rate-limit permission) before a 2.5-hour v2 run. Custom: never comparable.
+func AlertingDaySmokeV2() Scenario {
+	min := time.Minute
+	s := AlertingDaySmokeV1()
+	s.Version = "v2"
+	s.Phases = []Phase{{"preflight", -2 * min, 0}, {"baseline", 0, 2 * min}, {"correlation", 2 * min, 4 * min},
+		{"ticketing", 4 * min, 6 * min}, {"resend", 6 * min, 10 * min}, {"breaker", 10 * min, 12 * min}, {"drain", 12 * min, 14 * min}}
+	s.Standing = &StandingSpec{Size: 100, Instances: 25, Interval: 2 * min, Until: 10 * min, Concurrency: 4}
+	s.Breaker = &BreakerSpec{QueueHigh: 100, QueueLow: 10, BurstConcurrency: 32, ResolveProbes: 10}
+	s.Limits.QuerySetVersion = "q2"
+	return s
+}
+
 // Builtins are the built-in campaign scenarios.
-func Builtins() []Scenario { return []Scenario{AlertingDayV1(), AlertingDayV2(), AlertingDaySmokeV1()} }
+func Builtins() []Scenario {
+	return []Scenario{AlertingDayV1(), AlertingDayV2(), AlertingDaySmokeV1(), AlertingDaySmokeV2()}
+}
 
 // Lookup returns the built-in scenario named "id@version".
 func Lookup(ref string) (Scenario, bool) {
