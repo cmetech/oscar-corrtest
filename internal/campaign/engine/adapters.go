@@ -50,7 +50,7 @@ func sampleGuard(ctx context.Context, m Metrics, probe func(context.Context) (ta
 			into[x.Metric["queue"]] = x.Value
 		}
 	}
-	for q, into := range map[string]*float64{score.Queries["mysql_max_conn_errors"]: &s.MySQLRefusals, score.Queries["redis_rejected_cmds"]: &s.RedisDenied} {
+	for q, into := range map[string]*float64{score.Queries["mysql_max_conn_errors"]: &s.MySQLRefusals, redisWriteDeniedQuery: &s.RedisDenied} {
 		v, err := vec(q)
 		if err != nil {
 			return s, err
@@ -539,3 +539,8 @@ func (a *PrecheckAdapter) get(ctx context.Context, hc *http.Client, url string, 
 	_ = resp.Body.Close() // status already read; close error is not actionable
 	return resp.StatusCode, nil
 }
+
+// redisWriteDeniedQuery is the redis_denied guard input: replies refusing a write
+// (out of memory, failed persistence, read-only replica). Any rejected command was
+// too broad: one client handshake before AUTH (NOAUTH) stopped a 2.5-hour v2 run.
+const redisWriteDeniedQuery = `sum(redis_errors_total{err=~"OOM|MISCONF|READONLY"}) or vector(0)`
