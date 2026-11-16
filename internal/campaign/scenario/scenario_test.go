@@ -158,7 +158,7 @@ func TestAlertingDaySmokeV1(t *testing.T) {
 }
 
 func TestLookup(t *testing.T) {
-	for _, ref := range []string{"alerting-day@v1", "alerting-day-smoke@v1"} {
+	for _, ref := range []string{"alerting-day@v1", "alerting-day@v2", "alerting-day-smoke@v1", "alerting-day-smoke@v2"} {
 		s, ok := Lookup(ref)
 		if !ok || s.ID+"@"+s.Version != ref {
 			t.Errorf("%s: %v %s@%s", ref, ok, s.ID, s.Version)
@@ -167,10 +167,50 @@ func TestLookup(t *testing.T) {
 			t.Errorf("%s: by hash %v", ref, ok)
 		}
 	}
-	if _, ok := Lookup("alerting-day@v2"); ok {
+	if _, ok := Lookup("alerting-day@v9"); ok {
 		t.Error("unknown scenario resolved")
 	}
 	if _, ok := ByHash(""); ok {
 		t.Error("empty hash resolved")
+	}
+}
+
+func TestAlertingDayV2AddsTheATTShapeWithoutTouchingV1(t *testing.T) {
+	v1, v2 := AlertingDayV1(), AlertingDayV2()
+	if v1.Hash() != goldenHash || v1.Standing != nil || v1.Breaker != nil {
+		t.Fatal("v1 must stay frozen")
+	}
+	if v2.ID != "alerting-day" || v2.Version != "v2" || v2.Custom || v2.Hash() == goldenHash {
+		t.Fatalf("v2 identity %s@%s", v2.ID, v2.Version)
+	}
+	if b := v2.Phase("breaker"); b.Start != 120*time.Minute || b.End != 130*time.Minute {
+		t.Fatalf("breaker phase %+v", b)
+	}
+	if d := v2.Phase("drain"); d.Start != 130*time.Minute || d.End != 150*time.Minute {
+		t.Fatalf("drain %+v", d)
+	}
+	st, br := v2.Standing, v2.Breaker
+	if st == nil || st.Size != 2000 || st.Interval != 10*time.Minute || st.Until != 120*time.Minute || st.Instances != 500 || st.Concurrency < 1 {
+		t.Fatalf("standing %+v", st)
+	}
+	// ~3.3 repeats/s on top of the 3.5/s baseline: close to AT&T's 7.8 webhooks/s.
+	if rate := float64(st.Size)/st.Interval.Seconds() + v2.Baseline.Rate; rate < 6.5 || rate > 7.8 {
+		t.Fatalf("offered %.1f/s", rate)
+	}
+	if br == nil || br.QueueHigh != 100 || br.QueueLow != 10 || br.ResolveProbes < 1 || br.BurstConcurrency < 1 {
+		t.Fatalf("breaker %+v", br)
+	}
+	if v2.Limits.QuerySetVersion != "q2" || v2.Baseline.Rate != v1.Baseline.Rate || len(v2.Resend) != len(v1.Resend) {
+		t.Fatal("v2 keeps v1's facets and adds q2")
+	}
+}
+
+func TestAlertingDaySmokeV2IsShortCustomAndCarriesBothFacets(t *testing.T) {
+	s := AlertingDaySmokeV2()
+	if !s.Custom || s.Standing == nil || s.Breaker == nil || s.Phase("drain").End != 14*time.Minute {
+		t.Fatalf("smoke v2 %+v", s)
+	}
+	if b := s.Phase("breaker"); b.End-b.Start != 2*time.Minute || s.Standing.Until > b.Start {
+		t.Fatalf("breaker %+v standing until %s", b, s.Standing.Until)
 	}
 }

@@ -251,6 +251,10 @@ func (r *run) guards(ctx context.Context, stop context.CancelFunc) {
 		r.mu.Lock()
 		c := guard.Counters{Offered: st.Sent + st.Failed + st.Unknown, Unknown: st.Unknown, TicketUnknown: r.ticketUnknown, WorkerHeartbeat: r.lastHeartbeat,
 			LaneState: r.laneState, LaneError: r.laneErr, BaselineEnd: r.at("drain", false)}
+		if r.s.Breaker != nil { // the forced breaker stalls History and grows queues on purpose
+			_, _, tail := r.breakerTiming()
+			c.QuietFrom, c.QuietUntil = r.at("breaker", false), r.at("breaker", true).Add(tail)
+		}
 		r.mu.Unlock()
 		trips := guard.Evaluate(r.now(), window, c, baseline)
 		if len(trips) == 0 {
@@ -327,6 +331,9 @@ func (r *run) correlation(ctx context.Context) {
 		return
 	}
 	stopAt := r.at("drain", false)
+	if r.s.Breaker != nil { // set B runs must finish before the forced breaker window
+		stopAt = r.at("breaker", false).Add(-setBBreakerMargin)
+	}
 	for ctx.Err() == nil {
 		ran := false
 		for _, ref := range setB {
@@ -343,6 +350,10 @@ func (r *run) correlation(ctx context.Context) {
 
 // setBBackoff spaces set B passes in which every run failed to start.
 const setBBackoff = 30 * time.Second
+
+// setBBreakerMargin stops starting set B runs this long before the breaker
+// window, so their injections are not refused by the tripped breaker.
+const setBBreakerMargin = 5 * time.Minute
 
 // correlate executes one case document through the runtime and links it.
 //

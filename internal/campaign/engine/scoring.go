@@ -77,6 +77,10 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 		in.PlannedResend += p.Cohort
 	}
 	card := score.Compute(in, r.s.Limits)
+	if r.s.Standing != nil || r.s.Breaker != nil { // v2: AT&T shape, report-only
+		card.ATT = r.attStats(ctx)
+		report["att"] = card.ATT
+	}
 	r.mu.Lock()
 	missing, stopped, open, corrT := append([]string{}, r.missing...), r.stopped, r.openIncidents, r.corrTickets
 	r.mu.Unlock()

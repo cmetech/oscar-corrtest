@@ -120,6 +120,7 @@ type Scorecard struct {
 	FrontOffice                  map[string]Percentiles // API-level, per action
 	Homelab                      TaskStats
 	Headlines                    []Headline
+	ATT                          *ATT // v2 only: the AT&T-shape measurements (report-only)
 	Verdict                      domain.Verdict
 	Reasons                      []string
 }

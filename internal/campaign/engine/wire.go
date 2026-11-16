@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -177,6 +178,13 @@ func (t oscarTarget) History(ctx context.Context, run string, start, end time.Ti
 
 // PostAlert sends a firing Alertmanager webhook delivery to the middleware
 // (POST /api/v1/alerts; see the cohort route note in cohorts.go).
+func (t oscarTarget) AlertLimits(ctx context.Context) (targetops.AlertLimits, error) {
+	return targetops.GetAlertLimits(ctx, t.c)
+}
+func (t oscarTarget) SetAlertLimits(ctx context.Context, rev int, overrides json.RawMessage) (targetops.AlertLimits, error) {
+	return targetops.PutAlertLimits(ctx, t.c, rev, overrides)
+}
+
 func (t oscarTarget) PostAlert(ctx context.Context, a Alert) (int, error) {
 	req, err := oscar.BuildAlertRequest(compiler.AlertPlan{Name: a.Name, Status: "firing", Labels: a.Labels,
 		Annotations: map[string]string{"summary": a.Name}, StartsAt: a.StartsAt})
