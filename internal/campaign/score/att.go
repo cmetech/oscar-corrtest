@@ -72,6 +72,36 @@ var BudgetQueries = map[string]string{
 	"redis_growth_bytes":   `sum(delta(redis_memory_used_bytes[%s]))`,
 }
 
+// DeliveryQueries feed the delivery-retry isolation verdict (T0 to drain end).
+// delivery_recovery_series is 0 or absent on an OSCAR build without the counter.
+var DeliveryQueries = map[string]string{
+	"notifier_queue_age_max":   `max(max_over_time(oscar_celery_queue_oldest_age_seconds{queue_name="tm_notifier"}[%s]))`,
+	"delivery_recovery_series": `count(count_over_time(oscar_notification_delivery_recovery_total[%s]))`,
+	"delivery_deferred":        `sum(increase(oscar_notification_delivery_recovery_total{outcome="deferred"}[%s]))`,
+}
+
+// JudgeDeliveryRetry is the delivery-retry verdict: FAIL above maxCopies
+// publishes per delivery; INCONCLUSIVE when the run never backed the notifier
+// queue up to minQueueAge seconds or the target lacks the recovery counter.
+func JudgeDeliveryRetry(b map[string]float64, maxCopies, minQueueAge float64) (fail, incon []string) {
+	if age := b["notifier_queue_age_max"]; age < minQueueAge {
+		incon = append(incon, fmt.Sprintf("delivery-retry: tm_notifier oldest wait peaked at %.0f s, below %.0f s: the loop was not exercised", age, minQueueAge))
+	}
+	if b["delivery_recovery_series"] <= 0 {
+		return fail, append(incon, "delivery-retry: no oscar_notification_delivery_recovery_total series (OSCAR without oscar #57, or recovery never ran)")
+	}
+	first := b["delivery_requests"]
+	if first <= 0 {
+		return fail, append(incon, "delivery-retry: no delivery request publishes measured")
+	}
+	copies := (first + b["delivery_republished"]) / first
+	b["delivery_copies"] = copies
+	if copies > maxCopies {
+		fail = append(fail, fmt.Sprintf("delivery-retry: %.2f publishes per delivery, limit %.2f", copies, maxCopies))
+	}
+	return fail, incon
+}
+
 var BreakerQueries = map[string]string{
 	"am_webhook_sent":       `sum(increase(alertmanager_notifications_total{integration="webhook"}[%s]))`,
 	"am_webhook_failed":     `sum(increase(alertmanager_notifications_failed_total{integration="webhook"}[%s]))`,

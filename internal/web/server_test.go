@@ -1914,3 +1914,20 @@ func TestSNMPLoadDetailExplainsItsCoverage(t *testing.T) {
 		t.Fatalf("wrong SNMP load coverage: %d", response.Code)
 	}
 }
+
+// The Scenarios page lists the built-in campaign scenarios, each linking to the Campaigns page.
+func TestScenarioWorkbenchListsCampaignScenarios(t *testing.T) {
+	runtime, err := appruntime.Open(context.Background(), config.Settings{DataDir: t.TempDir(), ListenAddress: "127.0.0.1:8787"}, version.Info{Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	response := httptest.NewRecorder()
+	NewHandlerWithData(version.Info{Version: "test"}, runtime).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://example.com/scenarios", nil))
+	body := response.Body.String()
+	for _, ref := range []string{"alerting-day%40v2", "delivery-retry%40v1"} {
+		if !strings.Contains(body, `href="/campaigns?scenario=`+ref+`"`) {
+			t.Fatalf("status=%d: no campaign link for %s", response.Code, ref)
+		}
+	}
+}

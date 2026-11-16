@@ -27,6 +27,7 @@ const precheckEventType = "campaign.precheck"
 // campaignPage carries everything the three campaign templates need.
 type campaignPage struct {
 	Scenarios  []string // built-in scenario refs (id@version) for the pre-check form
+	Selected   string   // scenario preselected from ?scenario= (the Scenarios page links here)
 	Campaigns  []domain.Campaign
 	Campaign   domain.Campaign
 	Events     []domain.CampaignEvent
@@ -92,7 +93,7 @@ func registerCampaignPages(mux *http.ServeMux, info version.Info, data DataSourc
 			return
 		}
 		sort.SliceStable(cs, func(i, j int) bool { return cs[i].StartedAt.After(cs[j].StartedAt) })
-		cp := &campaignPage{Campaigns: cs, PrecheckID: precheckID}
+		cp := &campaignPage{Campaigns: cs, PrecheckID: precheckID, Selected: r.URL.Query().Get("scenario")}
 		for _, s := range campaignscenario.Builtins() {
 			cp.Scenarios = append(cp.Scenarios, s.ID+"@"+s.Version)
 		}

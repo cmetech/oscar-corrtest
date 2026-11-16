@@ -31,6 +31,9 @@ const (
 	kindPolicyCreate   = "policy_create"
 	kindPolicyActivate = "policy_activate"
 	kindIncident       = "incident_close"
+	// kindDeadNotifier is the delivery-retry dead target: ObjectID is its name
+	// (recorded before the create, so the id is not known yet); restore deletes it.
+	kindDeadNotifier = "dead_notifier_create"
 )
 
 // keepNotifiers stay enabled during a campaign (besides CAMPAIGN_SINK).
@@ -78,7 +81,32 @@ func (r *run) isolate(ctx context.Context) error {
 			return err
 		}
 	}
-	return r.setNotifier(stable, kindSink, targetops.Notifier{ID: r.sinkID, Name: r.e.d.CampaignNotifier, Status: "disabled"}, true)
+	if err := r.setNotifier(stable, kindSink, targetops.Notifier{ID: r.sinkID, Name: r.e.d.CampaignNotifier, Status: "disabled"}, true); err != nil {
+		return err
+	}
+	return r.createDeadTarget(stable)
+}
+
+// createDeadTarget adds the delivery-retry facet's webhook notifier, enabled,
+// so every alert gets a delivery that fails before send.
+func (r *run) createDeadTarget(ctx context.Context) error {
+	d := r.s.DeadTarget
+	if d == nil {
+		return nil
+	}
+	name := d.Name + "_" + strings.TrimPrefix(r.id, "camp_")
+	if _, err := r.record(ctx, kindDeadNotifier, name, notifierPrior{Name: name}); err != nil {
+		return err
+	}
+	n, err := r.e.d.Target.CreateWebhookNotifier(ctx, name, d.URL)
+	if err != nil {
+		return err
+	}
+	if n.Status != "enabled" {
+		return fmt.Errorf("dead target %s read back %q, want enabled", name, n.Status)
+	}
+	r.event(ctx, "campaign.isolation", "info", "dead target "+name+" created", map[string]string{"url": d.URL})
+	return nil
 }
 
 func (r *run) setNotifier(ctx context.Context, kind string, n targetops.Notifier, on bool) error {

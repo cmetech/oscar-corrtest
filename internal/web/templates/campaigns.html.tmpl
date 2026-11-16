@@ -3,7 +3,7 @@
 {{if .Error}}<div class="notice notice--error" role="alert">{{.Error}}</div>{{end}}
 {{with .Campaign}}
 <form method="post" action="/campaigns/prechecks"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-  <label>Scenario <select name="scenario">{{range .Scenarios}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
+  {{$sel := .Selected}}<label>Scenario <select name="scenario">{{range .Scenarios}}<option value="{{.}}"{{if eq . $sel}} selected{{end}}>{{.}}</option>{{end}}</select></label>
   <button class="primary-button" type="submit">Run pre-checks</button></form>
 {{if .Pending}}<p data-autoreload="3000">Pre-checks for <code>{{.PrecheckID}}</code> are running. This page refreshes.</p>{{end}}
 {{if .Checks}}

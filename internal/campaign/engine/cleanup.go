@@ -409,6 +409,17 @@ func (r *run) restore(ctx context.Context, m domain.CampaignMutation) (err error
 		// earlier partial cleanup) counts as restored: OSCAR answers a DELETE of a
 		// missing policy with an ambiguous 409, not a 404.
 		return r.removeByName(ctx, p)
+	case kindDeadNotifier:
+		all, err := r.e.d.Target.Notifiers(ctx)
+		if err != nil {
+			return err
+		}
+		for _, n := range all {
+			if strings.EqualFold(n.Name, m.ObjectID) {
+				return r.e.d.Target.DeleteNotifier(ctx, n.ID)
+			}
+		}
+		return nil // never created, or already removed
 	case kindSink, kindNotifier, kindNotifierEnable:
 		var p notifierPrior
 		if err := json.Unmarshal(m.Prior, &p); err != nil {

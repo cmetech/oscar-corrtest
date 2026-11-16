@@ -18,6 +18,11 @@
       {{range .ScenarioCatalog}}<a href="/scenarios?selected={{urlquery .Ref}}" data-scenario-item data-search-value="{{.Name}} {{.Kind}} {{.Pattern}}"{{if .Selected}} aria-current="page"{{end}}><span>{{.Name}}</span><small>{{.Kind}} · {{.Pattern}}</small></a>{{end}}
       <p class="muted catalog-empty" data-scenario-empty hidden>No matching scenarios.</p>
     </nav>
+    {{if .CampaignScenarios}}<div class="catalog-guidance">
+      <strong>Campaign scenarios</strong>
+      <p>Built-in load campaigns (alerting day, smokes, isolation tests). They run from the Campaigns page.</p>
+      <ul>{{range .CampaignScenarios}}<li><a href="/campaigns?scenario={{urlquery .}}">{{.}}</a></li>{{end}}</ul>
+    </div>{{end}}
     <div class="catalog-guidance">
       <strong>Custom scenarios</strong>
       <p><em>Edit a copy</em> opens an unsaved draft. Validate it, then save one immutable custom version. Modified saved versions are stored separately; unused versions can be deleted.</p>
