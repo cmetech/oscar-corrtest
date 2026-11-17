@@ -198,8 +198,16 @@ func (c *Client) FindRules(ctx context.Context, name string) ([]Rule, error) {
 }
 
 func (c *Client) DeleteRule(ctx context.Context, id int) error {
-	err := c.doJSON(ctx, http.MethodDelete, createRulePath+"/"+strconv.Itoa(id), nil, nil, nil)
+	path := createRulePath + "/" + strconv.Itoa(id)
+	err := c.doJSON(ctx, http.MethodDelete, path, nil, nil, nil)
 	var machine *MachineError
+	if errors.As(err, &machine) && machine.StatusCode == http.StatusConflict {
+		// OSCAR deletes a rolling Threshold rule only once it is retired and
+		// drained; retirement does not apply to other rules, which keep the 409.
+		if c.doJSON(ctx, http.MethodPost, path+"/retire-rolling", nil, nil, nil) == nil {
+			err = c.doJSON(ctx, http.MethodDelete, path, nil, nil, nil)
+		}
+	}
 	if errors.As(err, &machine) && machine.StatusCode == http.StatusNotFound {
 		return nil
 	}

@@ -513,3 +513,52 @@ func TestValidationErrorListDetailIsReported(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+// OSCAR refuses to delete a rolling Threshold rule until it is retired and
+// drained (409); cleanup retires it and deletes again instead of leaking it.
+func TestDeleteRuleRetiresRollingThresholdBeforeDelete(t *testing.T) {
+	var calls []string
+	deleted := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		calls = append(calls, request.Method+" "+request.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case request.Method == http.MethodPost && request.URL.Path == "/api/v1/correlation_rules/7/retire-rolling":
+			deleted = true // retired and drained: delete is now allowed
+			_, _ = w.Write([]byte(`{"rule_id":7,"retired":true,"drained":true}`))
+		case request.Method == http.MethodDelete && !deleted:
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"detail":"rolling rule must be retired and drained before removal"}`))
+		default:
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	defer server.Close()
+
+	if err := newClient(t, server.URL).DeleteRule(context.Background(), 7); err != nil {
+		t.Fatalf("err=%v calls=%v", err, calls)
+	}
+	want := []string{"DELETE /api/v1/correlation_rules/7", "POST /api/v1/correlation_rules/7/retire-rolling", "DELETE /api/v1/correlation_rules/7"}
+	if strings.Join(calls, ",") != strings.Join(want, ",") {
+		t.Fatalf("calls=%v", calls)
+	}
+}
+
+// A 409 that retirement cannot clear (not a Threshold rule) keeps the original error.
+func TestDeleteRuleKeepsConflictWhenRetirementDoesNotApply(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		if request.Method == http.MethodPost {
+			_, _ = w.Write([]byte(`{"detail":"rolling retirement applies to Threshold rules"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"detail":"rule is busy"}`))
+	}))
+	defer server.Close()
+
+	err := newClient(t, server.URL).DeleteRule(context.Background(), 7)
+	if err == nil || !strings.Contains(err.Error(), "rule is busy") {
+		t.Fatalf("err=%v", err)
+	}
+}
