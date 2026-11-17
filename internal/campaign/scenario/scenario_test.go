@@ -1,6 +1,7 @@
 package scenario
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -212,5 +213,25 @@ func TestAlertingDaySmokeV2IsShortCustomAndCarriesBothFacets(t *testing.T) {
 	}
 	if b := s.Phase("breaker"); b.End-b.Start != 2*time.Minute || s.Standing.Until > b.Start {
 		t.Fatalf("breaker %+v standing until %s", b, s.Standing.Until)
+	}
+}
+
+// resend-only@v1 isolates the four v1 resend policies against a 5/s lane, with
+// no correlation or baseline ticketing, and keeps v1's limits.
+func TestResendOnlyV1IsolatesResendAtFivePerSecond(t *testing.T) {
+	s, ok := Lookup("resend-only@v1")
+	if !ok || !s.Custom || s.Baseline.Rate != 5 || s.Baseline.TicketEveryNth != 0 {
+		t.Fatalf("resend-only %v %+v", ok, s.Baseline)
+	}
+	v1 := AlertingDayV1()
+	if !reflect.DeepEqual(s.Resend, v1.Resend) || s.Redelivery != v1.Redelivery || !reflect.DeepEqual(s.Limits, v1.Limits) {
+		t.Fatal("resend-only must reuse v1's policies, redelivery and limits")
+	}
+	if len(s.Correlation.SetA)+len(s.Correlation.SetB) != 0 || s.Standing != nil || s.Breaker != nil || s.DeadTarget != nil {
+		t.Fatal("resend-only runs only the lane and the resend cohorts")
+	}
+	r, d := s.Phase("resend"), s.Phase("drain")
+	if r.End-r.Start != 30*time.Minute || d.Start != r.End || s.ResendUntil <= r.Start || s.ResendUntil > r.End-s.Redelivery+10*time.Second {
+		t.Fatalf("resend %+v drain %+v until %s", r, d, s.ResendUntil)
 	}
 }

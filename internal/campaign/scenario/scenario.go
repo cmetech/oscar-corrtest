@@ -271,9 +271,26 @@ func DeliveryRetryV1() Scenario {
 	return s
 }
 
+// ResendOnlyV1 isolates v1's four resend policies (time, occurrences, either,
+// ticket) in about 52 minutes: a 5 alerts/s lane with no baseline tickets or
+// correlation, a 30-minute resend phase from T+5 (activation waits ~90 s for
+// cutover), then a 15-minute drain. Policies, redelivery and limits are v1's.
+// Custom: never comparable.
+func ResendOnlyV1() Scenario {
+	min := time.Minute
+	s := AlertingDayV1()
+	s.ID, s.Version, s.Custom = "resend-only", "v1", true
+	s.Phases = []Phase{{"preflight", -2 * min, 0}, {"baseline", 0, 5 * min}, {"resend", 5 * min, 35 * min}, {"drain", 35 * min, 50 * min}}
+	s.Baseline.Rate = 5
+	s.Baseline.TicketEveryNth, s.Baseline.TicketFrom, s.Baseline.TicketTo = 0, 0, 0
+	s.Correlation = CorrelationSpec{}
+	s.ResendUntil = 33 * min // as v1: cohorts stop 2 minutes before drain
+	return s
+}
+
 // Builtins are the built-in campaign scenarios.
 func Builtins() []Scenario {
-	return []Scenario{AlertingDayV1(), AlertingDayV2(), AlertingDaySmokeV1(), AlertingDaySmokeV2(), DeliveryRetryV1()}
+	return []Scenario{AlertingDayV1(), AlertingDayV2(), AlertingDaySmokeV1(), AlertingDaySmokeV2(), DeliveryRetryV1(), ResendOnlyV1()}
 }
 
 // Lookup returns the built-in scenario named "id@version".
