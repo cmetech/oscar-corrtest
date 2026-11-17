@@ -286,7 +286,7 @@ func TestSemanticModelPersistenceUsesGroupTimerCancellation(t *testing.T) {
 				if err := m.Sleep(ctx, base.Add(time.Duration(event.second)*time.Second).Sub(m.Now())); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := m.Inject(ctx, compiler.AlertPlan{Name: "SOURCE", Status: event.status, Labels: map[string]string{"alertname": "SOURCE", "source": event.source, "site": event.site, "oscar_test_rule_name": "rule"}}); err != nil {
+				if _, err := m.Inject(ctx, compiler.AlertPlan{Name: "SOURCE", Status: event.status, StartsAt: base.Add(time.Duration(event.second) * time.Second), Labels: map[string]string{"alertname": "SOURCE", "source": event.source, "site": event.site, "oscar_test_rule_name": "rule"}}); err != nil {
 					t.Fatal(err)
 				}
 			}

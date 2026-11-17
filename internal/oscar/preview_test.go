@@ -66,6 +66,12 @@ func TestBuildOperationPreviewShowsOrderedCredentialFreeLifecycle(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
+			if alert.EpisodeOffset != nil { // runtime fields, filled at send time
+				want.Alerts[0].StartsAt = "{case-start+" + alert.EpisodeOffset.String() + "}"
+				if alert.Status == "resolved" {
+					want.Alerts[0].EndsAt = "{case-start+" + alert.Delay.String() + "}"
+				}
+			}
 			wantJSON, _ := oscar.CanonicalJSON(want)
 			if operation.Method != "POST" || operation.Path != "/api/v1/alerts" || operation.Body != string(wantJSON) || operation.Attempt != index+1 || operation.ScheduledDelay != alert.Delay {
 				t.Fatalf("alert operation=%+v", operation)

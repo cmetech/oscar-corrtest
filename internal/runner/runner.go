@@ -270,6 +270,8 @@ func (r *Runner) Execute(ctx context.Context, run domain.Run, plan compiler.Plan
 				if alert.Status == "resolved" {
 					alert.EndsAt = caseStarted[item.Code].Truncate(time.Millisecond).Add(alert.Delay)
 				}
+			}
+			if alert.EpisodeOffset != nil && alert.Source != "" {
 				detail, _ := json.Marshal(map[string]any{"caseCode": item.Code, "eventId": alert.Labels["oscar_test_event_id"], "attempt": alertIndex + 1, "status": alert.Status, "startsAt": alert.StartsAt, "endsAt": alert.EndsAt})
 				if _, err := r.store.AppendRunEvent(ctx, domain.RunEvent{RunID: run.ID, Type: "alert.prepared", Level: "info", OccurredAt: r.opts.Now().UTC(), Summary: "Named source episode prepared for OSCAR Alert Engine ingress", DetailJSON: string(detail)}); err != nil {
 					return r.failAndCleanup(ctx, run, plan, capabilities, resources, attempts, checkpoints, err)

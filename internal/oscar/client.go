@@ -549,16 +549,36 @@ func (c *Client) doPreparedBytesWithHeaders(ctx context.Context, method, path st
 
 func safeDetail(raw []byte) string {
 	var value struct {
-		Code   string `json:"code"`
-		Detail string `json:"detail"`
+		Detail json.RawMessage `json:"detail"`
 	}
-	if json.Unmarshal(raw, &value) == nil && value.Detail != "" {
-		if len(value.Detail) > 512 {
-			return value.Detail[:512]
+	if json.Unmarshal(raw, &value) != nil {
+		return http.StatusText(http.StatusBadGateway)
+	}
+	var detail string
+	if json.Unmarshal(value.Detail, &detail) != nil {
+		// FastAPI validation errors: [{"loc": [...], "msg": "..."}]. Never echo "input".
+		var items []struct {
+			Loc []any  `json:"loc"`
+			Msg string `json:"msg"`
 		}
-		return value.Detail
+		_ = json.Unmarshal(value.Detail, &items)
+		parts := make([]string, 0, len(items))
+		for _, item := range items {
+			loc := make([]string, len(item.Loc))
+			for i, part := range item.Loc {
+				loc[i] = fmt.Sprint(part)
+			}
+			parts = append(parts, strings.Join(loc, ".")+": "+item.Msg)
+		}
+		detail = strings.Join(parts, "; ")
 	}
-	return http.StatusText(http.StatusBadGateway)
+	if detail == "" {
+		return http.StatusText(http.StatusBadGateway)
+	}
+	if len(detail) > 512 {
+		return detail[:512]
+	}
+	return detail
 }
 
 type ruleResponse struct {

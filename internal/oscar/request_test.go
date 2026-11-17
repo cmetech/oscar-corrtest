@@ -123,7 +123,14 @@ func TestBuildAlertRequestKeepsEventIdentityButExcludesAttemptMetadata(t *testin
 		t.Fatal(err)
 	}
 	preview := findPreview(t, operations, "stimulus.inject_alert", "N01", 2)
-	if server.Requests()[0].Body != string(encoded) || preview.Body != string(encoded) || preview.Attempt != 2 || preview.ScheduledDelay != 10*time.Second {
+	withRuntime := request
+	withRuntime.Alerts = []oscar.AlertRequest{request.Alerts[0]}
+	withRuntime.Alerts[0].StartsAt, withRuntime.Alerts[0].EndsAt = "{case-start+0s}", "{case-start+10s}"
+	previewJSON, err := oscar.CanonicalJSON(withRuntime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if server.Requests()[0].Body != string(encoded) || preview.Body != string(previewJSON) || preview.Attempt != 2 || preview.ScheduledDelay != 10*time.Second {
 		t.Fatalf("live=%s preview=%+v builder=%s", server.Requests()[0].Body, preview, encoded)
 	}
 }
