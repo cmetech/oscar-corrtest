@@ -217,16 +217,15 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 			labels["alertname"] = name
 			if !strings.EqualFold(event.Status, "resolved") {
 				activeByRole[key] = cloneLabels(labels)
+				episodeOffsets[key] = event.Delay
 				if event.Source != "" {
 					retainedSources[key] = cloneLabels(labels)
-					episodeOffsets[key] = event.Delay
 				}
 			}
-			var episodeOffset *time.Duration
-			if event.Source != "" {
-				value := episodeOffsets[key]
-				episodeOffset = &value
-			}
+			// Every event names its occurrence start: OSCAR rejects a resolve without
+			// the original startsAt (HTTP 422) and stamps receipt time on a bare firing.
+			value := episodeOffsets[key]
+			episodeOffset := &value
 			summary := fmt.Sprintf("[CORRTEST][%s][%s][%s] %s: source alert %d of %d", input.Pattern, trigger, short, source.Name, index+1, len(events))
 			item.Alerts = append(item.Alerts, AlertPlan{Source: event.Source, EpisodeOffset: episodeOffset, Name: name, Status: event.Status, Labels: labels, Delay: event.Delay, Annotations: map[string]string{"oscar_test_event_id": labels["oscar_test_event_id"], "oscar_test_event_index": labels["oscar_test_event_index"], "oscar_test_attempt_index": strconv.Itoa(index + 1), "summary": summary, "description": summary}})
 			if event.Delay > item.ObservationWindow || event.Delay > input.MaxDuration {

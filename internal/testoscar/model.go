@@ -113,6 +113,10 @@ func (m *Model) InjectRecorded(ctx context.Context, alert compiler.AlertPlan, re
 }
 
 func (m *Model) Inject(_ context.Context, alert compiler.AlertPlan) (oscar.InjectionResult, error) {
+	if alert.Status == "resolved" && alert.StartsAt.IsZero() {
+		// OSCAR's public ingress contract (main 2ccc0c683).
+		return oscar.InjectionResult{}, &oscar.MachineError{Operation: "POST /api/v1/alerts", StatusCode: 422, Code: "http_error", Detail: "body.alerts.0: Value error, resolved alerts require the original startsAt"}
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	fingerprint := labelFingerprint(alert.Labels)

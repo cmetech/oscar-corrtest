@@ -72,6 +72,32 @@ func TestResolvedAttemptReusesFiringIdentity(t *testing.T) {
 	}
 }
 
+// OSCAR rejects a resolved alert without its original startsAt (HTTP 422), so every
+// builtin event needs an episode offset and a resolve must reuse its firing's.
+func TestEveryBuiltinEventCarriesAnEpisodeStartAndResolvesReuseIt(t *testing.T) {
+	run := domain.Run{ID: "crt_0123456789ABCDEFGHJKMNPQRS", ShortToken: "7Q9K2M4A"}
+	for _, input := range scenario.AllBuiltins() {
+		plan, err := compiler.Compile(run, input, compiler.Capabilities{PipelineMode: "phase_b_dispatch"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range plan.Cases {
+			firingOffset := map[string]time.Duration{}
+			for index, alert := range item.Alerts {
+				if alert.EpisodeOffset == nil {
+					t.Fatalf("%s %s event %d (%s) has no episode start", input.Pattern, item.Code, index+1, alert.Status)
+				}
+				id := alert.Labels["oscar_test_event_id"]
+				if alert.Status != "resolved" {
+					firingOffset[id] = *alert.EpisodeOffset
+				} else if want, ok := firingOffset[id]; !ok || *alert.EpisodeOffset != want {
+					t.Fatalf("%s %s resolve offset=%s, firing offset=%s", input.Pattern, item.Code, *alert.EpisodeOffset, want)
+				}
+			}
+		}
+	}
+}
+
 func TestAllBuiltinsCompilePositiveAndNegativeCases(t *testing.T) {
 	run := domain.Run{ID: "crt_0123456789ABCDEFGHJKMNPQRS", ShortToken: "7Q9K2M4A"}
 	builtins := scenario.AllBuiltins()
