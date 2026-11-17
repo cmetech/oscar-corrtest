@@ -100,6 +100,32 @@ func TestRunnerCleanupIsDirtyWhenHistoryStillFiringAfterResolve(t *testing.T) {
 	}
 }
 
+// OSCAR can apply one resolve of a cleanup burst ~15 s late (correlation members, 2026-11-17);
+// read-back must cover the campaign History latency budget, not only ~15 s.
+func TestRunnerCleanupWaitsForALateHistoryResolve(t *testing.T) {
+	database := openDatabase(t)
+	run := newRun()
+	if err := database.CreateRun(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := compiler.Compile(run, scenario.Builtin("flood"), compiler.Capabilities{PipelineMode: "phase_b_dispatch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := &fakeAPI{lateReads: 20}
+	engine := runner.New(database, api, runner.Options{PollInterval: time.Millisecond, ObservationWindow: 3 * time.Millisecond, Stabilization: time.Millisecond})
+	if err := engine.Execute(context.Background(), run, plan, runner.CapabilitySnapshot{PipelineMode: "phase_b_dispatch", Ready: true, LabelsSurvived: true}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := database.GetRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.CleanupStatus != domain.CleanupClean || api.lateSeen != 20 {
+		t.Fatalf("cleanup=%s terminal=%q lateSeen=%d", stored.CleanupStatus, stored.TerminalError, api.lateSeen)
+	}
+}
+
 // Repeated occurrences share an OSCAR fingerprint but differ by startsAt;
 // cleanup must resolve and verify each one, not only the latest.
 func TestRunnerCleanupResolvesEveryOccurrenceOfARunAlert(t *testing.T) {
@@ -465,6 +491,8 @@ type fakeAPI struct {
 	resolved                 []oscar.HistoryRecord
 	ignoreResolve            bool
 	priorOccurrence          bool // History also holds an older still-firing occurrence per source event
+	lateReads                int  // the first resolved record still reads firing for this many History reads
+	lateSeen                 int
 }
 
 // withResolved reports History rows the harness resolved, as OSCAR would
@@ -476,6 +504,10 @@ func (f *fakeAPI) withResolved(records []oscar.HistoryRecord) []oscar.HistoryRec
 	for index := range records {
 		for _, done := range f.resolved {
 			if done.ID == records[index].ID {
+				if f.lateReads > 0 && done.ID == f.resolved[0].ID && f.lateSeen < f.lateReads {
+					f.lateSeen++
+					continue
+				}
 				records[index].Status = "resolved"
 			}
 		}

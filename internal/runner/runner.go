@@ -500,14 +500,17 @@ func (r *Runner) cleanup(ctx context.Context, runID string, resources []domain.R
 	return domain.CleanupClean, resolutions, nil
 }
 
-// resolveReadBackPolls bounds History read-back after resolves: at the default
-// 1s PollInterval this is ~15s, inside the 30s default CleanupTimeout that
-// also bounds ctx.
-const resolveReadBackPolls = 15
+// resolveReadBackPolls bounds History read-back after resolves: ~45 s at the
+// default 1 s PollInterval, covering the campaign History p95 limit (40 s).
+// OSCAR applied one resolve per cleanup burst ~15 s late (2026-11-17).
+const resolveReadBackPolls = 45
 
 // awaitResolvedHistory polls History until every record reads back resolved
-// and returns evidence for the occurrences that did not.
+// and returns evidence for the occurrences that did not. It has its own
+// deadline: the 30 s cleanup context would cut a 45 s read-back short.
 func (r *Runner) awaitResolvedHistory(ctx context.Context, records []oscar.HistoryRecord) []string {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(resolveReadBackPolls+5)*r.opts.PollInterval)
+	defer cancel()
 	pending := records
 	for poll := 1; len(pending) != 0; poll++ {
 		var still []oscar.HistoryRecord
