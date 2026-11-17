@@ -497,3 +497,19 @@ func TestLabelProbeFlagsUnconfirmedCleanup(t *testing.T) {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
 }
+
+// FastAPI validation errors carry a list detail; the reason must reach the operator
+// instead of a misleading "Bad Gateway" placeholder.
+func TestValidationErrorListDetailIsReported(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"detail":[{"type":"value_error","loc":["body","alerts",0],"msg":"Value error, resolved alerts require the original startsAt","input":{"status":"resolved"}}]}`))
+	}))
+	defer server.Close()
+
+	err := newClient(t, server.URL).DoJSON(context.Background(), http.MethodPost, "/api/v1/alerts", nil, map[string]string{}, nil)
+	if err == nil || !strings.Contains(err.Error(), "HTTP status 422: body.alerts.0: Value error, resolved alerts require the original startsAt") {
+		t.Fatalf("err=%v", err)
+	}
+}
