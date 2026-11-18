@@ -102,7 +102,7 @@ func TestAdvancedExamplesDemonstrateCookbookVariants(t *testing.T) {
 		t.Fatalf("advanced absence cadence=%+v", absence.Cases[1].Events)
 	}
 	parentChild := lookup("parent_child")
-	if len(parentChild.Cases[0].SuppressForNotifiers) < 2 || len(parentChild.Cases[0].TagForNotifiers) < 2 {
+	if len(parentChild.Cases[0].SuppressForNotifiers) != 0 || len(parentChild.Cases[0].TagForNotifiers) < 2 {
 		t.Fatalf("advanced parent-child notifier policy=%+v", parentChild.Cases[0])
 	}
 }

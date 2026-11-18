@@ -465,8 +465,9 @@ func TestRunnerExecutesEveryBuiltinPatternThroughOneCoordinator(t *testing.T) {
 			if stored.Verdict != domain.VerdictPass || stored.CleanupStatus != domain.CleanupClean {
 				t.Fatalf("run=%+v report=%s", stored, stored.CanonicalReportJSON)
 			}
-			if input.Pattern == "parent_child" && !strings.Contains(string(stored.CanonicalReportJSON), `"notificationStatuses":["suppressed"]`) {
-				t.Fatalf("parent-child notification evidence missing: %s", stored.CanonicalReportJSON)
+			// Tag-only parent_child (OSCAR refuses suppression since 2026-10-19): the child is linked, not suppressed.
+			if input.Pattern == "parent_child" && !strings.Contains(string(stored.CanonicalReportJSON), `"auditOutcomes":["no_trigger","enriched"]`) {
+				t.Fatalf("parent-child link evidence missing: %s", stored.CanonicalReportJSON)
 			}
 		})
 	}

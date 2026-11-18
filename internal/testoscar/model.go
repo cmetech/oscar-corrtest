@@ -58,10 +58,35 @@ func (m *Model) ValidateRule(_ context.Context, rule compiler.RulePlan) error {
 	if rule.Name == "" || rule.Pattern == "" || len(rule.MatchCriteria) == 0 {
 		return fmt.Errorf("invalid rule")
 	}
+	return refusedSuppression(rule)
+}
+
+// refusedSuppression mirrors OSCAR rule validation since 2026-10-19: an enabled
+// parent_child rule may not suppress children for notifiers (no retained
+// callback owner can enforce it); tag-only rules are accepted.
+func refusedSuppression(rule compiler.RulePlan) error {
+	if rule.Pattern == "parent_child" && len(suppressFor(rule)) > 0 {
+		return fmt.Errorf("match_criteria.suppress_children_for_notifiers capability unavailable: retained callback delivery owner for source suppression")
+	}
 	return nil
 }
 
+func suppressFor(rule compiler.RulePlan) []string {
+	values, _ := rule.MatchCriteria["suppress_children_for_notifiers"].([]string)
+	if len(values) == 0 {
+		if raw, ok := rule.MatchCriteria["suppress_children_for_notifiers"].([]any); ok {
+			for _, value := range raw {
+				values = append(values, fmt.Sprint(value))
+			}
+		}
+	}
+	return values
+}
+
 func (m *Model) CreateRule(_ context.Context, rule compiler.RulePlan) (oscar.Rule, error) {
+	if err := refusedSuppression(rule); err != nil {
+		return oscar.Rule{}, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.nextID++
@@ -190,7 +215,10 @@ func (m *Model) CorrelationAudit(_ context.Context, fingerprint string) ([]oscar
 	if rule.Pattern == "parent_child" {
 		if m.matchesAny(event, childMatches(rule)) {
 			if m.hasPriorParent(rule, index) {
-				outcome = "suppressed_per_notifier"
+				outcome = "enriched" // tag-only: OSCAR links the child to its parent
+				if len(suppressFor(rule)) > 0 {
+					outcome = "suppressed_per_notifier"
+				}
 				parentFingerprint = "semantic-parent-" + fmt.Sprint(id)
 			} else {
 				outcome = "released_no_trigger"
@@ -218,14 +246,7 @@ func (m *Model) NotificationAudit(_ context.Context, fingerprint string, _, _ ti
 	if !ok || rule.Pattern != "parent_child" || !m.matchesAny(event, childMatches(rule)) || !m.hasPriorParent(rule, index) {
 		return nil, nil
 	}
-	values, _ := rule.MatchCriteria["suppress_children_for_notifiers"].([]string)
-	if len(values) == 0 {
-		if raw, ok := rule.MatchCriteria["suppress_children_for_notifiers"].([]any); ok {
-			for _, value := range raw {
-				values = append(values, fmt.Sprint(value))
-			}
-		}
-	}
+	values := suppressFor(rule)
 	result := make([]oscar.NotificationRecord, 0, len(values))
 	for index, notifier := range values {
 		result = append(result, oscar.NotificationRecord{ID: fmt.Sprintf("notification-%d", index+1), AlertFingerprint: fingerprint,
