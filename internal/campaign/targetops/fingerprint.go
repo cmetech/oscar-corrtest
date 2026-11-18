@@ -97,20 +97,38 @@ type PublicationStatus struct {
 	State     string `json:"state"`
 	Consumers struct {
 		Parents []struct {
-			Slot     string `json:"slot"`
-			Children []struct {
-				Instance    string `json:"instance"`
-				ServingMode string `json:"serving_mode"`
-				Loaded      *struct {
-					PublicationID string `json:"publication_id"`
-				} `json:"loaded"`
-			} `json:"children"`
+			Slot     string          `json:"slot"`
+			Children []consumerChild `json:"children"`
 		} `json:"parents"`
 	} `json:"consumers"`
 }
 
+type consumerChild struct {
+	Instance    string `json:"instance"`
+	Membership  string `json:"membership"` // pending, live, draining, exited_clean, lost
+	ServingMode string `json:"serving_mode"`
+	Freshness   string `json:"freshness"`
+	Loaded      *struct {
+		PublicationID string `json:"publication_id"`
+	} `json:"loaded"`
+}
+
+// reporting is false for a child that has exited, or has not reported yet
+// (a worker Celery autoscale just spawned); such a child neither
+// disqualifies nor counts as a consumer.
+func (c consumerChild) reporting() bool {
+	switch {
+	case c.Membership == "exited_clean", c.Membership == "lost":
+		return false
+	case c.Freshness == "missing", c.ServingMode == "unknown", c.ServingMode == "":
+		return false
+	}
+	return true
+}
+
 // NotCommissioned says why policies cannot take effect, "" when they can:
-// a desired publication exists and every consumer serves managed.
+// a desired publication exists, at least one consumer reports and every
+// reporting consumer serves managed.
 func (s PublicationStatus) NotCommissioned() string {
 	if s.State == "unpublished" || s.Desired == nil || s.Desired.PublicationID == "" {
 		return "fingerprint policies unpublished (no desired publication)"
@@ -118,6 +136,9 @@ func (s PublicationStatus) NotCommissioned() string {
 	n := 0
 	for _, p := range s.Consumers.Parents {
 		for _, c := range p.Children {
+			if !c.reporting() {
+				continue
+			}
 			n++
 			if c.ServingMode != "managed" {
 				return fmt.Sprintf("consumer %s/%s serves %s, not managed", p.Slot, c.Instance, c.ServingMode)
@@ -130,14 +151,14 @@ func (s PublicationStatus) NotCommissioned() string {
 	return ""
 }
 
-// ServedBy reports whether pub is desired, converged and loaded by every consumer.
+// ServedBy reports whether pub is desired, converged and loaded by every reporting consumer.
 func (s PublicationStatus) ServedBy(pub string) bool {
 	if s.NotCommissioned() != "" || !s.Converged || s.Desired.PublicationID != pub {
 		return false
 	}
 	for _, p := range s.Consumers.Parents {
 		for _, c := range p.Children {
-			if c.Loaded == nil || c.Loaded.PublicationID != pub {
+			if c.reporting() && (c.Loaded == nil || c.Loaded.PublicationID != pub) {
 				return false
 			}
 		}
