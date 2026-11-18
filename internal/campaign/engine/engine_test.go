@@ -803,3 +803,33 @@ func TestMissingSetBTicketIsAMiss(t *testing.T) {
 		t.Fatalf("verdict %s tickets %+v reasons %v", c.Verdict, card.Tickets, card.Reasons)
 	}
 }
+
+// TestSlowIncidentPassRelistsAndVisitsSetB: camp_3b45fed18acaacee closed 540
+// incidents in one pass (03:22:47-03:29), longer than commentWait. The pass's
+// only listing predated OSCAR's resolution comments, so the cohort incidents
+// were scored failed and left open, and the deadline skipped every set B
+// listing (unknown). A pass that starts before the deadline must finish, and
+// one that runs past it must be followed by a fresh listing.
+func TestSlowIncidentPassRelistsAndVisitsSetB(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.oscar.resolveDelay = commentWait / 2
+	h.oscar.staleListings = 1
+	if err := h.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	c, card := h.scorecard()
+	if c.Cleanup != domain.CleanupClean {
+		t.Fatalf("cleanup %s reasons %v", c.Cleanup, card.Reasons)
+	}
+	if card.Tickets.Failed != 0 || card.Tickets.Unknown != 0 {
+		t.Fatalf("tickets %+v, want every incident judged on a fresh read", card.Tickets)
+	}
+	h.oscar.mu.Lock()
+	defer h.oscar.mu.Unlock()
+	for _, inc := range h.oscar.corrInc {
+		if inc.State != "6" {
+			t.Errorf("set B incident %s left open", inc.Number)
+		}
+	}
+}

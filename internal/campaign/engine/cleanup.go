@@ -219,6 +219,11 @@ func (r *run) closeIncidents(ctx context.Context) []targetops.Incident {
 	deadline := r.now().Add(commentWait)
 	backoff := time.Second
 	for retry := 0; ; retry++ {
+		// A pass that starts before the deadline finishes, and the deadline
+		// ends the loop only at a pass start: closing hundreds of incidents
+		// can outlast commentWait, and its copies are then older than the
+		// resolution comments that landed meanwhile.
+		last := !r.now().Before(deadline)
 		var pending []string
 		var listErr error // a failed listing is never "nothing pending" (ruling C35)
 		visit := func(inc targetops.Incident) {
@@ -250,10 +255,6 @@ func (r *run) closeIncidents(ctx context.Context) []targetops.Incident {
 			visit(inc)
 		}
 		for _, c := range corr {
-			if !r.now().Before(deadline) { // unvisited runs stay unknown; the wait is bounded
-				corrErr[c.token] = true
-				continue
-			}
 			incs, err := r.e.d.SNOW.OpenCorrTestIncidents(ctx, c.pattern, c.token)
 			corrErr[c.token] = err != nil
 			if err != nil {
@@ -271,7 +272,7 @@ func (r *run) closeIncidents(ctx context.Context) []targetops.Incident {
 		if listErr == nil {
 			backoff = time.Second
 		}
-		if len(pending) == 0 && listErr == nil || !r.now().Before(deadline) {
+		if len(pending) == 0 && listErr == nil || last {
 			r.mu.Lock()
 			r.openIncidents = pending
 			if listErr != nil {

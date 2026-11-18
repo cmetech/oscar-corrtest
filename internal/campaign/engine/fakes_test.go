@@ -165,11 +165,13 @@ type fakeOSCAR struct {
 	failResolves     bool // cohort resolve posts get HTTP 500
 	ignoreResolves   bool // middleware resolve posts get HTTP 200 but match nothing
 	resolvePosts     []oscar.AlertRequest
-	onSetNotifier    func() // called before each notifier change
-	corrNoTicket     bool   // ticketed set B runs never open their incident
-	sinkErr          bool   // Receipts fails
-	failEnable       int    // next N notifier enables fail
-	draftErr         error  // CreateDraft fails with this
+	onSetNotifier    func()        // called before each notifier change
+	corrNoTicket     bool          // ticketed set B runs never open their incident
+	resolveDelay     time.Duration // campaign-clock time each incident close takes
+	staleListings    int           // next N campaign listings predate OSCAR's resolution comments
+	sinkErr          bool          // Receipts fails
+	failEnable       int           // next N notifier enables fail
+	draftErr         error         // CreateDraft fails with this
 	db               *storage.Database
 	correlates       atomic.Int32
 	slow             time.Duration
@@ -626,12 +628,19 @@ func (f *fakeOSCAR) OpenCampaignIncidents(context.Context, string) ([]targetops.
 		}
 		return nil, errors.New("snow: 503 instance hibernating")
 	}
+	stale := f.staleListings > 0
+	if stale {
+		f.staleListings--
+	}
 	var out []targetops.Incident
 	for name, inc := range f.incidents {
 		if inc.State == "6" || inc.State == "7" {
 			continue
 		}
 		c := *inc
+		if stale {
+			c.Comments = nil
+		}
 		if ds := f.cohort[name]; len(ds) > 0 { // R4 resends land as incident comments, before any resolution
 			_, origin, exp := f.expected(name)
 			var resends []targetops.Comment
@@ -677,7 +686,10 @@ func (f *fakeOSCAR) ListPolicies(_ context.Context, nid, action, name string) ([
 	return out, nil
 }
 
-func (f *fakeOSCAR) Resolve(_ context.Context, number, _ string) (targetops.Incident, error) {
+func (f *fakeOSCAR) Resolve(ctx context.Context, number, _ string) (targetops.Incident, error) {
+	if f.resolveDelay > 0 {
+		f.clock.SleepUntil(ctx, f.clock.Now().Add(f.resolveDelay))
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, inc := range f.corrInc {
