@@ -297,8 +297,7 @@ func (r *run) resendCases(ctx context.Context, receipts []targetops.Receipt, inc
 	exhausted := map[*policyState]bool{}
 	for _, p := range r.policies {
 		if st, err := r.e.d.Target.PolicyStatus(ctx, p.notifierID, p.spec.Action, p.id); err == nil {
-			// ponytail: status is per policy, so exhaustion is "every member exhausted"; per-identity episodes need an identity-keyed status.
-			exhausted[p] = st.Episodes.Exhausted >= p.spec.Cohort
+			exhausted[p] = policyExhausted(st, p.spec.Cohort)
 		}
 	}
 	var out []score.ResendCase
@@ -406,4 +405,22 @@ func (r *run) crossCheckLedger(ctx context.Context, ledger []domain.LaneRow) {
 	if accepted != st.Sent+st.Resolved {
 		r.noteMissing(fmt.Sprintf("ledger has %d accepted rows, worker reports %d", accepted, st.Sent+st.Resolved))
 	}
+}
+
+// policyExhausted: every member of the policy's cohort is sticky-exhausted.
+// Episodes.Exhausted cannot say this: OSCAR counts it across every policy on
+// the notifier/action, so R1/R3 exhaustion made the uncapped R2 look exhausted.
+// ponytail: OSCAR returns at most 10 of the policy's episodes; a larger cohort
+// is judged on those 10 until the status is identity-keyed.
+func policyExhausted(st targetops.PolicyStatus, cohort int) bool {
+	need := min(cohort, 10)
+	if need == 0 || len(st.RecentPolicyEpisodes) < need {
+		return false
+	}
+	for _, e := range st.RecentPolicyEpisodes {
+		if !e.StickyExhausted {
+			return false
+		}
+	}
+	return true
 }
