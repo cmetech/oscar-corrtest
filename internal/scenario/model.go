@@ -31,6 +31,9 @@ type Case struct {
 	Assertions           []Assertion       `json:"assertions" yaml:"assertions"`
 	Checkpoints          []Checkpoint      `json:"checkpoints,omitempty" yaml:"checkpoints,omitempty"`
 	Events               []Event           `json:"events,omitempty" yaml:"events,omitempty"`
+	// ObservationWindow is a campaign-only minimum observation (not part of the
+	// document schema): ticketed set B cases wait out OSCAR's ticket hold.
+	ObservationWindow time.Duration `json:"-" yaml:"-"`
 }
 
 // Event is one deterministic alert occurrence. Varying labels are explicit
