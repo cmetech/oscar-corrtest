@@ -471,7 +471,7 @@ func (f *fakeOSCAR) PolicyStatus(_ context.Context, nid, action, policyID string
 			if exp.Exhausted && owner != nil && owner.def.NotifierID == nid && owner.def.Action == action {
 				st.Episodes.Exhausted++
 			}
-			if owner == p {
+			if owner == p && f.episodeOpen(name) { // as OSCAR: only open episodes (closed_at IS NULL)
 				if len(st.RecentPolicyEpisodes) == 10 {
 					st.MorePolicyEpisodes = true
 					continue
@@ -481,6 +481,16 @@ func (f *fakeOSCAR) PolicyStatus(_ context.Context, nid, action, policyID string
 		}
 	}
 	return st, nil
+}
+
+// episodeOpen: the member still has a firing History row (f.mu held).
+func (f *fakeOSCAR) episodeOpen(name string) bool {
+	for _, h := range f.history {
+		if h.AlertName == name && h.Status == "firing" {
+			return true
+		}
+	}
+	return false
 }
 
 // policyFor is the policy whose name ends in -<key> (f.mu held). Deleted

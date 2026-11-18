@@ -88,6 +88,19 @@ func (r *run) resendPhase(ctx context.Context) {
 			r.deliver(ctx, m, tick)
 		}
 	}
+	// OSCAR's status lists only open episodes, and a scenario may resolve the
+	// cohorts (drain) before scoring: read exhaustion now, after the last
+	// resends had until the phase end to land.
+	if !r.e.clock.SleepUntil(ctx, r.at("resend", true)) {
+		return
+	}
+	for _, p := range r.policies {
+		if st, err := r.e.d.Target.PolicyStatus(ctx, p.notifierID, p.spec.Action, p.id); err == nil {
+			r.mu.Lock()
+			p.status = &st
+			r.mu.Unlock()
+		}
+	}
 }
 
 func (r *run) members() []*cohortMember {

@@ -218,6 +218,7 @@ type policyState struct {
 	rev        int
 	active     bool
 	activeAt   time.Time
+	status     *targetops.PolicyStatus // read at the resend phase end, episodes still open (r.mu)
 }
 
 type cohortMember struct {

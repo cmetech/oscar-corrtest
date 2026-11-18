@@ -310,8 +310,16 @@ func (r *run) resendCases(ctx context.Context, receipts []targetops.Receipt, inc
 	r.mu.Unlock()
 	exhausted := map[*policyState]bool{}
 	for _, p := range r.policies {
-		if st, err := r.e.d.Target.PolicyStatus(ctx, p.notifierID, p.spec.Action, p.id); err == nil {
-			exhausted[p] = policyExhausted(st, p.spec.Cohort)
+		r.mu.Lock()
+		st := p.status
+		r.mu.Unlock()
+		if st == nil { // no phase-end snapshot (stopped early): read what is left
+			if live, err := r.e.d.Target.PolicyStatus(ctx, p.notifierID, p.spec.Action, p.id); err == nil {
+				st = &live
+			}
+		}
+		if st != nil {
+			exhausted[p] = policyExhausted(*st, p.spec.Cohort)
 		}
 	}
 	var out []score.ResendCase
