@@ -258,24 +258,14 @@ func (r *run) breakerWindow(ctx context.Context, members []standingMember) {
 
 // restoreQueueOverride puts the overrides read before the window back.
 func (r *run) restoreQueueOverride(ctx context.Context, id int64) {
-	open, err := r.store().OpenMutations(ctx, r.id)
-	if err != nil {
-		return // cleanup retries every open mutation
+	if err := r.restoreNow(ctx, id); err != nil { // cleanup retries every open mutation
+		r.event(ctx, "campaign.breaker", "error", "restore queue thresholds: "+err.Error(), nil)
+		return
 	}
-	for _, m := range open {
-		if m.ID != id {
-			continue
-		}
-		if err := r.restoreWithRetry(ctx, m); err != nil {
-			r.event(ctx, "campaign.breaker", "error", "restore queue thresholds: "+err.Error(), nil)
-			return
-		}
-		_ = r.restored(ctx, id)
-		r.mu.Lock()
-		r.breaker.Restored = true
-		r.mu.Unlock()
-		r.event(ctx, "campaign.breaker", "info", "queue thresholds restored", nil)
-	}
+	r.mu.Lock()
+	r.breaker.Restored = true
+	r.mu.Unlock()
+	r.event(ctx, "campaign.breaker", "info", "queue thresholds restored", nil)
 }
 
 // restoreAlertLimits is the queue_override restore: put the recorded overrides

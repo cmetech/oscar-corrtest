@@ -22,6 +22,7 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/campaign/precheck"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/resend"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
+	"github.com/cmetech/oscar-corrtest/internal/campaign/score"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/worker"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/workerapi"
@@ -189,6 +190,13 @@ type fakeOSCAR struct {
 	// row's open pair; only a resolve with that pair's startsAt closes the row.
 	mergePairs bool
 	openPair   map[*oscar.HistoryRecord]time.Time
+	// fingerprint policies: while fpOn, alerts named fingerprintAlert leave
+	// volatileLabel out of their identity (unless fpNoMerge) and carry fpPub.
+	fpSkip                string
+	fpOn, fpNoMerge       bool
+	fpPub                 string
+	fpEnables, fpDisables int
+	fpDisableErr          error
 }
 
 func newFakeOSCAR(t *testing.T, clock *scaledClock, s scenario.Scenario) *fakeOSCAR {
@@ -262,6 +270,19 @@ func (f *fakeOSCAR) ingest(labels map[string]string, startsAt time.Time, resolve
 	fp := amFingerprint(labels)
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	var annotations map[string]string
+	if f.fpOn && name == fingerprintAlert && !resolved {
+		annotations = map[string]string{score.RevisionAnnotation: f.fpPub}
+		if !f.fpNoMerge {
+			rest := map[string]string{}
+			for k, v := range labels {
+				if k != volatileLabel {
+					rest[k] = v
+				}
+			}
+			fp = amFingerprint(rest)
+		}
+	}
 	if resolved {
 		for _, h := range f.history {
 			if h.Labels["am_fingerprint"] == fp && h.Status == "firing" && (lane || h.StartsAt.Equal(startsAt)) {
@@ -304,7 +325,7 @@ func (f *fakeOSCAR) ingest(labels map[string]string, startsAt time.Time, resolve
 		row[k] = v
 	}
 	f.history = append(f.history, &oscar.HistoryRecord{ID: fmt.Sprintf("h%d", len(f.history)+1), AlertName: name, Fingerprint: fp[:12], Status: "firing",
-		StartsAt: startsAt.Truncate(time.Millisecond), CreatedAt: stamp.Add(50 * time.Millisecond), Labels: row})
+		StartsAt: startsAt.Truncate(time.Millisecond), CreatedAt: stamp.Add(50 * time.Millisecond), Labels: row, Annotations: annotations})
 	if seen {
 		return
 	}
@@ -522,7 +543,7 @@ func (f *fakeOSCAR) PostAlert(_ context.Context, a Alert) (int, error) {
 	}
 	f.posts[a.Name]++
 	amb := a.Name == f.ambiguous && f.posts[a.Name] == 1
-	if !amb && a.Labels["campaign_lane"] != standingLane { // standing posts are not resend cohorts
+	if !amb && a.Labels["campaign_lane"] != standingLane && a.Labels["campaign_lane"] != fingerprintLane { // not resend cohorts
 		f.cohort[a.Name] = append(f.cohort[a.Name], delivery{at: f.clock.Now().UTC(), labels: a.Labels})
 	}
 	f.mu.Unlock()
@@ -889,7 +910,7 @@ func newHarness(t *testing.T) *harness {
 	t.Cleanup(m.Shutdown)
 	w := &fakeWorker{m: m}
 	h := &harness{t: t, clock: clock, db: db, oscar: f, worker: w, s: s, id: "camp_" + strings.ReplaceAll(t.Name(), "/", "_")}
-	h.deps = Deps{Store: db, Worker: w, Target: f, SNOW: f, Sink: f, Metrics: f, Probe: f.probe,
+	h.deps = Deps{Store: db, Worker: w, Target: f, SNOW: f, Sink: f, Metrics: f, Probe: f.probe, Fingerprint: f,
 		Precheck: func(context.Context, scenario.Scenario) []precheck.Result {
 			return []precheck.Result{{ID: "B1", Tier: precheck.Blocking, Status: precheck.Pass}}
 		},
@@ -1011,5 +1032,32 @@ func (f *fakeOSCAR) DeleteNotifier(_ context.Context, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	delete(f.notifiers, id)
+	return nil
+}
+
+// --- Fingerprint policies ---
+
+func (f *fakeOSCAR) Preflight(context.Context) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.fpSkip, nil
+}
+
+func (f *fakeOSCAR) Enable(_ context.Context, def targetops.FingerprintDefinition, _ string, _ time.Duration) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fpEnables++
+	f.fpOn, f.fpPub = true, fmt.Sprintf("pub-%d", f.fpEnables)
+	return f.fpPub, nil
+}
+
+func (f *fakeOSCAR) Disable(context.Context, targetops.FingerprintDefinition, string, time.Duration) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fpDisables++
+	if f.fpDisableErr != nil {
+		return f.fpDisableErr
+	}
+	f.fpOn = false
 	return nil
 }

@@ -149,6 +149,8 @@ type Deps struct {
 	ReportDir        string // ledger files; default os.TempDir()
 	// ExportRun writes a correlation run's standard bundle (Runtime.ExportRun).
 	ExportRun func(ctx context.Context, runID, destination string) (evidence.Result, error)
+	// Fingerprint manages fingerprint policies; nil skips the fingerprint lane.
+	Fingerprint FingerprintPolicies
 }
 
 // Engine implements runtime.CampaignEngine.
@@ -206,6 +208,7 @@ type run struct {
 	foDone        chan struct{}       // closed when the front office has stopped
 	standing      score.StandingStats // v2 standing pool
 	breaker       score.BreakerStats  // v2 forced breaker window
+	fp            score.FingerprintStats
 }
 
 type policyState struct {
@@ -423,10 +426,11 @@ func (r *run) execute(ctx context.Context) error {
 	go func() { defer bg.Done(); r.guards(phaseCtx, func() { stopPhases(); stopFO() }) }()
 
 	var work sync.WaitGroup
-	work.Add(3)
+	work.Add(4)
 	go func() { defer work.Done(); r.correlation(phaseCtx) }()
 	go func() { defer work.Done(); r.resendPhase(phaseCtx) }()
-	go func() { defer work.Done(); r.standingPhase(phaseCtx) }() // v2 only
+	go func() { defer work.Done(); r.standingPhase(phaseCtx) }()    // v2 only
+	go func() { defer work.Done(); r.fingerprintPhase(phaseCtx) }() // facet only
 	work.Wait()
 	// Firings end at the drain phase start (or earlier on a trip/stop).
 	if r.e.clock.SleepUntil(phaseCtx, r.at("drain", false)) {

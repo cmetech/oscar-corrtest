@@ -132,6 +132,19 @@ type DeadTargetSpec struct {
 	MinQueueAge time.Duration `json:"minQueueAge"`
 }
 
+// FingerprintSpec is the fingerprint-policy lane: at T0+At a scoped policy
+// that ignores one label is published and served (waiting up to Converge),
+// Repeats variants of one alert differing only in that label must read back
+// from History, Verify later, as one row and fingerprint, and a variant
+// differing in device as a second one; then the policy is reverted. When
+// OSCAR's fingerprint policies are not commissioned the lane is skipped.
+type FingerprintSpec struct {
+	At       time.Duration `json:"at"`
+	Repeats  int           `json:"repeats"`
+	Converge time.Duration `json:"converge"`
+	Verify   time.Duration `json:"verify"`
+}
+
 type Scenario struct {
 	ID          string          `json:"id"`
 	Version     string          `json:"version"`
@@ -148,9 +161,11 @@ type Scenario struct {
 	Breaker  *BreakerSpec  `json:"breaker,omitempty"`
 	// DeadTarget is the delivery-retry isolation facet.
 	DeadTarget *DeadTargetSpec `json:"deadTarget,omitempty"`
-	Limits     Limits          `json:"limits"`
-	Precheck   PrecheckLimits  `json:"precheck"`
-	Seed       int64           `json:"seed"`
+	// Fingerprint is the fingerprint-policy lane facet; nil runs no lane.
+	Fingerprint *FingerprintSpec `json:"fingerprint,omitempty"`
+	Limits      Limits           `json:"limits"`
+	Precheck    PrecheckLimits   `json:"precheck"`
+	Seed        int64            `json:"seed"`
 }
 
 // TransportDedupWindow is OSCAR's JetStream duplicate window for ordinary alerts

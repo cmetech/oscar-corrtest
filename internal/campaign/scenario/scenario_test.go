@@ -235,3 +235,18 @@ func TestResendOnlyV1IsolatesResendAtFivePerSecond(t *testing.T) {
 		t.Fatalf("resend %+v drain %+v until %s", r, d, s.ResendUntil)
 	}
 }
+
+// The fingerprint lane is opt-in: no built-in carries it (hashes, and so
+// comparability, are unchanged), and a scenario that adds it hashes apart.
+func TestFingerprintFacetIsOptional(t *testing.T) {
+	for _, s := range Builtins() {
+		if s.Fingerprint != nil {
+			t.Errorf("%s@%s carries the fingerprint lane", s.ID, s.Version)
+		}
+	}
+	s := AlertingDayV1()
+	s.Fingerprint = &FingerprintSpec{At: time.Minute, Repeats: 3, Converge: 2 * time.Minute, Verify: time.Minute}
+	if s.Hash() == goldenHash || AlertingDayV1().Hash() != goldenHash {
+		t.Fatal("the fingerprint facet must change the hash only of a scenario that sets it")
+	}
+}

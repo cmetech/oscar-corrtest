@@ -63,7 +63,7 @@ func TestMigration0006AppliesOnTopOf0005(t *testing.T) {
 		t.Fatal(err)
 	}
 	var n, runs int
-	if err := db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 9 {
+	if err := db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 10 {
 		t.Fatalf("n=%d err=%v", n, err)
 	}
 	if err := db.QueryRow(`SELECT count(*) FROM runs`).Scan(&runs); err != nil || runs != 1 {
@@ -473,6 +473,45 @@ func TestMigration0009AcceptsDeadNotifier(t *testing.T) {
 	}
 	var ids string
 	if err := db.QueryRow(`SELECT group_concat(id || ':' || kind) FROM campaign_mutations ORDER BY id`).Scan(&ids); err != nil || ids != "1:queue_override,2:dead_notifier_create" {
+		t.Fatalf("rows %q err %v", ids, err)
+	}
+}
+
+// Migration 0010: campaign_mutations accepts the fingerprint lane's fingerprint_policy_enable and keeps every row.
+func TestMigration0010AcceptsFingerprintPolicy(t *testing.T) {
+	ctx := context.Background()
+	db := openTestSQL(t)
+	old := fstest.MapFS{}
+	entries, _ := fs.ReadDir(embeddedMigrations, "migrations")
+	for _, e := range entries {
+		if e.Name() < "0010" {
+			data, _ := embeddedMigrations.ReadFile("migrations/" + e.Name())
+			old["migrations/"+e.Name()] = &fstest.MapFile{Data: data}
+		}
+	}
+	if err := migrate(ctx, db, old); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO campaigns(id, scenario_id, scenario_hash, custom, trigger, run_by, trigger_identity, status, started_at) VALUES('c1','s','h',0,'cli','agent','me','COMPLETED','2026-01-01T00:00:00Z')`,
+		`INSERT INTO campaign_mutations(campaign_id, kind, object_id, prior_json, recorded_at) VALUES('c1','dead_notifier_create','CAMPAIGN_DEAD_x','{"name":"CAMPAIGN_DEAD_x"}','2026-01-01T00:00:00Z')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insert := `INSERT INTO campaign_mutations(campaign_id, kind, object_id, prior_json, recorded_at) VALUES('c1','fingerprint_policy_enable','corrtest-fp-ignore-volatile','{"name":"corrtest-fp-ignore-volatile"}','2026-01-01T00:00:00Z')`
+	if _, err := db.Exec(insert); err == nil {
+		t.Fatal("0009 should refuse fingerprint_policy_enable")
+	}
+	if err := migrate(ctx, db, embeddedMigrations); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(insert); err != nil {
+		t.Fatalf("fingerprint_policy_enable after 0010: %v", err)
+	}
+	var ids string
+	if err := db.QueryRow(`SELECT group_concat(id || ':' || kind) FROM campaign_mutations ORDER BY id`).Scan(&ids); err != nil || ids != "1:dead_notifier_create,2:fingerprint_policy_enable" {
 		t.Fatalf("rows %q err %v", ids, err)
 	}
 }
