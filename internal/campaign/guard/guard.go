@@ -20,13 +20,24 @@ const (
 	// GuardHistoryStalled: History create commits fell to zero while the
 	// baseline lane keeps firing (camp_681887ad6d96c6ff ran 29 min that way).
 	GuardHistoryStalled = "history_stalled"
+	// GuardTicketBacklog: OSCAR's oldest overdue ticket create has waited
+	// longer than ticketBacklogLimit (its SQL due backlog, not a queue).
+	GuardTicketBacklog = "ticket_backlog"
 )
 
 const (
 	growthWindow      = 20 // samples: 5 min at 15 s
 	stallWindow       = 3 * time.Minute
 	unknownMinOffered = 500
+	// ticketBacklogLimit: camp_777464e33b811944 (control 6/12) peaked at
+	// 155 s; camp_19782e09e46265eb (control 2/4) reached 940 s.
+	ticketBacklogLimit = 10 * time.Minute
 )
+
+// windowedQueues are capped by OSCAR's claim windows (TM_TICKET_CONTROL_WINDOW,
+// twice the provider concurrency, one pump tick): their depth rises to the cap
+// while the backlog waits in SQL, so ticket_backlog guards them instead.
+var windowedQueues = map[string]bool{"tm_ticket_control": true, "tm_ticket_provider": true, "tm_ticket_pump": true}
 
 type Sample struct {
 	At                         time.Time
@@ -38,6 +49,9 @@ type Sample struct {
 	// series was present in the sample.
 	HistoryCreates   float64
 	HistoryCreatesOK bool
+	// TicketDueAge is the oldest overdue ticket create (s); OK when present.
+	TicketDueAge   float64
+	TicketDueAgeOK bool
 }
 
 type Counters struct {
@@ -104,6 +118,9 @@ func Evaluate(now time.Time, window []Sample, c Counters, baseline Sample) []Tri
 	if last.RedisDenied > baseline.RedisDenied {
 		add(GuardRedisDenied, "redis write denials increased")
 	}
+	if last.TicketDueAgeOK && last.TicketDueAge > ticketBacklogLimit.Seconds() && !c.quiet(now) {
+		add(GuardTicketBacklog, "oldest due ticket waited %.0fs (limit %s)", last.TicketDueAge, ticketBacklogLimit)
+	}
 	if len(window) >= growthWindow && !c.quiet(now) {
 		w := window[len(window)-growthWindow:]
 		for _, kind := range []struct {
@@ -112,7 +129,7 @@ func Evaluate(now time.Time, window []Sample, c Counters, baseline Sample) []Tri
 		}{{"depth", func(s Sample) map[string]float64 { return s.QueueDepth }},
 			{"age", func(s Sample) map[string]float64 { return s.QueueAge }}} {
 			for q := range kind.get(w[0]) {
-				if rising(w, baseline, kind.get, q) {
+				if !windowedQueues[q] && rising(w, baseline, kind.get, q) {
 					add(GuardQueueGrowth, "queue %s %s rising for 5m", q, kind.name)
 				}
 			}
