@@ -101,8 +101,8 @@ func advancedExample(pattern string) Scenario {
 			event("heartbeat", 30*time.Second, nil), event("heartbeat", 40*time.Second, nil), event("heartbeat", 50*time.Second, nil),
 		)
 	case "parent_child":
+		// Tag-only: OSCAR refuses child suppression without a callback owner (2026-10-19).
 		for index := range document.Cases {
-			document.Cases[index].SuppressForNotifiers = []string{"email", "slack"}
 			document.Cases[index].TagForNotifiers = []string{"pagerduty", "sms"}
 		}
 		caseWithEvents("P01", event("parent", 0, nil), event("child", 3*time.Second, nil))
