@@ -324,7 +324,8 @@ func (r *run) resolveIncident(ctx context.Context, number string) error {
 
 // cleanup walks the open mutations in reverse and restores each one.
 func (r *run) cleanup(ctx context.Context) domain.CleanupStatus {
-	r.restoreKinds(ctx) // all kinds
+	r.restoreKinds(ctx) // all kinds; the fingerprint policy resolves its alerts first
+	r.reresolveFingerprint(ctx)
 	r.verifyHistoryResolved(ctx)
 	open, err := r.store().OpenMutations(ctx, r.id)
 	r.mu.Lock()

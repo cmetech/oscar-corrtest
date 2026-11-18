@@ -132,3 +132,65 @@ func TestFingerprintRevertFailureIsDirty(t *testing.T) {
 		t.Fatalf("cleanup re-run: %s %v", st, err)
 	}
 }
+
+// TestFingerprintCleanupResolvesRevertedRows: the live state of
+// camp_19782e09e46265eb, where the policy was reverted while its merged rows
+// still fired. A resolve then no longer matches them, so a cleanup re-run
+// re-enables the policy, resolves under it and reverts again; when the rows
+// still cannot be resolved it stays DIRTY and says why.
+func TestFingerprintCleanupResolvesRevertedRows(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		ignore bool
+		want   domain.CleanupStatus
+	}{{name: "re-enabled and resolved", want: domain.CleanupClean}, {name: "resolve refused", ignore: true, want: domain.CleanupDirty}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := fingerprintHarness(t)
+			if err := h.run(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if c := h.campaign(); c.Cleanup != domain.CleanupClean {
+				t.Fatalf("first cleanup %s", c.Cleanup)
+			}
+			h.oscar.mu.Lock()
+			reopened := 0
+			for row := range h.oscar.fpScoped {
+				row.Status = "firing"
+				reopened++
+			}
+			h.oscar.ignoreResolves = tc.ignore
+			h.oscar.mu.Unlock()
+			if reopened != 2 {
+				t.Fatalf("policy-scoped rows %d, want 2", reopened)
+			}
+			st, err := New(h.deps, h.clock).Cleanup(context.Background(), h.id)
+			if err != nil || st != tc.want {
+				t.Fatalf("cleanup re-run: %s %v", st, err)
+			}
+			h.oscar.mu.Lock()
+			on, enables, disables := h.oscar.fpOn, h.oscar.fpEnables, h.oscar.fpDisables
+			h.oscar.mu.Unlock()
+			if tc.want == domain.CleanupClean {
+				if on || enables != 2 || disables != 2 {
+					t.Fatalf("policy on=%t enables %d disables %d", on, enables, disables)
+				}
+				h.assertRestored()
+				return
+			}
+			// Unresolved rows keep the policy on (the only state they resolve
+			// in) with its mutation open for the next cleanup.
+			open, err := h.db.OpenMutations(context.Background(), h.id)
+			if !on || enables != 2 || disables != 1 || err != nil || len(open) != 1 || open[0].Kind != kindFingerprintPolicy {
+				t.Fatalf("policy on=%t enables %d disables %d open %v %+v", on, enables, disables, err, open)
+			}
+			evs, _ := h.db.RecentCampaignEvents(context.Background(), h.id, 50)
+			for _, e := range evs {
+				if strings.Contains(e.Summary, fingerprintAlert+" alerts fired under the fingerprint policy") && strings.Contains(e.Summary, "history ") {
+					return
+				}
+			}
+			t.Fatalf("no precise fingerprint DIRTY reason in %+v", evs)
+		})
+	}
+}
