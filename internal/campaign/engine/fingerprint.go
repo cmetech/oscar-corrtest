@@ -9,6 +9,7 @@ import (
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/score"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
+	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/oscar"
 )
 
@@ -123,8 +124,7 @@ func (r *run) fingerprintPhase(ctx context.Context) {
 	startsAt := r.now().Truncate(time.Second)
 	sent := 0
 	post := func(device, volatile string) {
-		labels := map[string]string{"alertname": fingerprintAlert, "campaign_run": r.id, "campaign_lane": fingerprintLane,
-			"device": device, volatileLabel: volatile, "severity": "warning", "create_ticket": "false"}
+		labels := r.fpLabels(device, volatile)
 		if status, err := r.e.d.Target.PostAlert(ctx, Alert{Name: fingerprintAlert, Labels: labels, StartsAt: startsAt}); err == nil && status/100 == 2 {
 			sent++
 		}
@@ -205,7 +205,7 @@ func (r *run) resolveFingerprintRows(ctx context.Context) error {
 			return fmt.Errorf("%d alerts still firing in History after resolve: %s", len(firing), historyNames(firing))
 		}
 		for _, row := range firing {
-			if req, err := oscar.BuildHistoryResolve(row, r.id); err == nil {
+			for _, req := range r.pairResolves(row) {
 				_, _ = r.e.d.Target.PostAlertGroup(ctx, req)
 			}
 		}
@@ -213,6 +213,39 @@ func (r *run) resolveFingerprintRows(ctx context.Context) error {
 			return fmt.Errorf("stopped with %d alerts firing: %s", len(firing), historyNames(firing))
 		}
 	}
+}
+
+// fpLabels is the label set of one lane alert.
+func (r *run) fpLabels(device, volatile string) map[string]string {
+	return map[string]string{"alertname": fingerprintAlert, "campaign_run": r.id, "campaign_lane": fingerprintLane,
+		"device": device, volatileLabel: volatile, "severity": "warning", "create_ticket": "false"}
+}
+
+// pairResolves resolves every Alertmanager alert the lane sent into row. Each
+// merged repeat stays its own (am_fingerprint, startsAt) pair on the row and
+// History's am_fingerprint names only the latest; OSCAR closes the row only
+// once every pair resolves (camp_19782e09e46265eb kept 4 of 5 open). The split
+// control is the single alert v1.
+func (r *run) pairResolves(row oscar.HistoryRecord) []oscar.AlertGroupRequest {
+	repeats := 1
+	if row.Labels["device"] == mergeDevice && r.s.Fingerprint != nil {
+		repeats = r.s.Fingerprint.Repeats
+	}
+	var out []oscar.AlertGroupRequest
+	for i := 1; i <= repeats; i++ {
+		labels := r.fpLabels(row.Labels["device"], fmt.Sprintf("v%d", i))
+		sent, err := oscar.BuildAlertRequest(compiler.AlertPlan{Name: fingerprintAlert, Status: "firing", Labels: labels})
+		if err != nil {
+			continue
+		}
+		pair := row
+		pair.Labels = labels
+		pair.Labels["am_fingerprint"] = sent.Alerts[0].Fingerprint
+		if req, err := oscar.BuildHistoryResolve(pair, r.id); err == nil {
+			out = append(out, req)
+		}
+	}
+	return out
 }
 
 // reresolveFingerprint recovers rows left firing after the policy was already
