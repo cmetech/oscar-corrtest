@@ -62,6 +62,7 @@ type fakeFP struct {
 	lag, polls  int
 	neverLoad   bool
 	mode        string
+	extraChild  string // appended to the consumer children when set
 	perms       []string
 	policies    map[string]*fpPolicy
 	revs        int
@@ -115,8 +116,8 @@ func (f *fakeFP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !f.neverLoad && f.loaded != f.pub && f.polls > f.lag {
 			f.loaded = f.pub
 		}
-		fmt.Fprintf(w, `{"desired":{"publication_id":%q,"generation":%d,"digest":"d"},"converged":%t,"consumers":{"state":"managed","parents":[{"slot":"alertmanager","children":[{"instance":"a1","serving_mode":%q,"loaded":{"publication_id":%q}},{"instance":"a2","serving_mode":"managed","loaded":{"publication_id":%q}}]}]}}`,
-			pubID(f.pub), f.pub, f.loaded == f.pub, f.mode, pubID(f.loaded), pubID(f.loaded))
+		fmt.Fprintf(w, `{"desired":{"publication_id":%q,"generation":%d,"digest":"d"},"converged":%t,"consumers":{"state":"managed","parents":[{"slot":"alertmanager","children":[{"instance":"a1","serving_mode":%q,"loaded":{"publication_id":%q}},{"instance":"a2","serving_mode":"managed","loaded":{"publication_id":%q}}%s]}]}}`,
+			pubID(f.pub), f.pub, f.loaded == f.pub, f.mode, pubID(f.loaded), pubID(f.loaded), f.extraChild)
 	case r.Method == "GET" && path == "/capabilities":
 		json.NewEncoder(w).Encode(map[string]any{"permissions": f.perms})
 	case r.Method == "GET" && path == "":
@@ -307,6 +308,20 @@ func TestFingerprintPreflightSkipsUnlessCommissioned(t *testing.T) {
 	}{
 		{"unpublished", func(f *fakeFP) { f.published = false }, "unpublished"},
 		{"compatibility consumer", func(f *fakeFP) { f.mode = "compatibility" }, "compatibility"},
+		// A worker Celery autoscale just spawned is listed before its first observation.
+		{"unobserved child", func(f *fakeFP) { f.extraChild = unobservedChild }, ""},
+		{"exited child", func(f *fakeFP) {
+			f.extraChild = `,{"instance":"w/9","membership":"exited_clean","serving_mode":"compatibility","freshness":"stale","loaded":null}`
+		}, ""},
+		{"lost child", func(f *fakeFP) {
+			f.extraChild = `,{"instance":"w/9","membership":"lost","serving_mode":"compatibility","freshness":"stale","loaded":null}`
+		}, ""},
+		{"reporting compatibility child", func(f *fakeFP) {
+			f.extraChild = `,{"instance":"w/9","membership":"live","serving_mode":"compatibility","freshness":"fresh","loaded":null}`
+		}, "w/9 serves compatibility"},
+		{"reporting shadow child", func(f *fakeFP) {
+			f.extraChild = `,{"instance":"w/9","membership":"live","serving_mode":"shadow","freshness":"fresh","loaded":null}`
+		}, "w/9 serves shadow"},
 		{"no scoped grant", func(f *fakeFP) { f.perms = []string{"read:fingerprint-policies"} }, "manage:fingerprint-policies:scoped"},
 		{"commissioned", func(*fakeFP) {}, ""},
 	} {
@@ -323,6 +338,33 @@ func TestFingerprintPreflightSkipsUnlessCommissioned(t *testing.T) {
 	var st PublicationStatus
 	if err := json.Unmarshal([]byte(`{"desired": null, "converged": false, "state": "unpublished"}`), &st); err != nil || st.NotCommissioned() == "" {
 		t.Fatalf("unpublished status read as commissioned: %v", err)
+	}
+}
+
+const unobservedChild = `,{"instance":"w/1625","membership":"pending","serving_mode":"unknown","freshness":"missing","loaded":null}`
+
+func fpStatus(t *testing.T, children string) PublicationStatus {
+	t.Helper()
+	var st PublicationStatus
+	doc := `{"desired":{"publication_id":"pub-2"},"converged":true,"consumers":{"parents":[{"slot":"taskmanager-worker-1","children":[` + children + `]}]}}`
+	if err := json.Unmarshal([]byte(doc), &st); err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
+
+func TestFingerprintUnobservedChildrenDoNotCount(t *testing.T) {
+	const managed = `{"instance":"w/1","membership":"live","serving_mode":"managed","freshness":"fresh","loaded":{"publication_id":"pub-2"}}`
+	const managedOld = `{"instance":"w/1","membership":"live","serving_mode":"managed","freshness":"fresh","loaded":{"publication_id":"pub-1"}}`
+	const unobserved = `{"instance":"w/1625","membership":"pending","serving_mode":"unknown","freshness":"missing","loaded":null}`
+	if st := fpStatus(t, managed+","+unobserved); st.NotCommissioned() != "" || !st.ServedBy("pub-2") {
+		t.Fatalf("unobserved child blocks: %q served %t", st.NotCommissioned(), st.ServedBy("pub-2"))
+	}
+	if st := fpStatus(t, unobserved+","+unobserved); !strings.Contains(st.NotCommissioned(), "no fingerprint policy consumers reported") || st.ServedBy("pub-2") {
+		t.Fatalf("all-unobserved status commissioned: %q", st.NotCommissioned())
+	}
+	if st := fpStatus(t, managedOld+","+unobserved); st.NotCommissioned() != "" || st.ServedBy("pub-2") {
+		t.Fatalf("reporting child on pub-1 read as serving pub-2")
 	}
 }
 
@@ -437,4 +479,21 @@ func onlyPolicy(f *fakeFP) *fpPolicy {
 		return p
 	}
 	return nil
+}
+
+// camp_19782e09e46265eb: the revert was refused because a freshly spawned
+// worker had not reported yet.
+func TestFingerprintRevertWithUnobservedChild(t *testing.T) {
+	f := newFakeFP(t)
+	fp := testFP(t, f)
+	if _, err := fp.Enable(context.Background(), testFPDef, "on", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	f.extraChild, f.lag = unobservedChild, 2
+	if err := fp.Disable(context.Background(), testFPDef, "off", time.Second); err != nil {
+		t.Fatalf("disable with an unobserved child: %v", err)
+	}
+	if p := onlyPolicy(f); p.desiredEnabled || f.loaded != f.pub {
+		t.Fatalf("not reverted: %+v loaded %d pub %d", p, f.loaded, f.pub)
+	}
 }
