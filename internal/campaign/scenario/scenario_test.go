@@ -235,3 +235,47 @@ func TestResendOnlyV1IsolatesResendAtFivePerSecond(t *testing.T) {
 		t.Fatalf("resend %+v drain %+v until %s", r, d, s.ResendUntil)
 	}
 }
+
+// The fingerprint lane is opt-in: no comparable built-in carries it (hashes,
+// and so comparability, are unchanged; custom functional@v1 does), and a
+// scenario that adds it hashes apart.
+func TestFingerprintFacetIsOptional(t *testing.T) {
+	for _, s := range Builtins() {
+		if s.Fingerprint != nil && !s.Custom {
+			t.Errorf("%s@%s carries the fingerprint lane", s.ID, s.Version)
+		}
+	}
+	s := AlertingDayV1()
+	s.Fingerprint = &FingerprintSpec{At: time.Minute, Repeats: 3, Converge: 2 * time.Minute, Verify: time.Minute}
+	if s.Hash() == goldenHash || AlertingDayV1().Hash() != goldenHash {
+		t.Fatal("the fingerprint facet must change the hash only of a scenario that sets it")
+	}
+}
+
+// functional@v1 overlaps every functional lane under a 5/s base load and keeps
+// v1's policies and limits.
+func TestFunctionalV1OverlapsEveryLaneAtFivePerSecond(t *testing.T) {
+	s, ok := Lookup("functional@v1")
+	if !ok || !s.Custom || s.Baseline.Rate != 5 || s.Baseline.TicketEveryNth == 0 {
+		t.Fatalf("functional %v %+v", ok, s.Baseline)
+	}
+	v1 := AlertingDayV1()
+	if !reflect.DeepEqual(s.Resend, v1.Resend) || !reflect.DeepEqual(s.Correlation, v1.Correlation) || !reflect.DeepEqual(s.Limits, v1.Limits) {
+		t.Fatal("functional must reuse v1's resend policies, correlation sets and limits")
+	}
+	if s.Standing != nil || s.Breaker != nil || s.DeadTarget != nil || s.Fingerprint == nil {
+		t.Fatal("functional runs the functional lanes only, fingerprint included")
+	}
+	drain := s.Phase("drain").Start
+	for _, name := range []string{"correlation", "ticketing", "resend"} {
+		if p := s.Phase(name); p.Start != 5*time.Minute || p.End > drain {
+			t.Fatalf("%s %+v must start at T+5 and end by the drain %s", name, p, drain)
+		}
+	}
+	if s.Baseline.TicketFrom >= s.Phase("resend").End || s.Baseline.TicketTo > drain || s.ResendUntil > s.Phase("resend").End {
+		t.Fatalf("tickets %s-%s, resend until %s", s.Baseline.TicketFrom, s.Baseline.TicketTo, s.ResendUntil)
+	}
+	if f := s.Fingerprint; f.At+f.Converge*4+f.Verify > drain {
+		t.Fatalf("fingerprint lane %+v cannot finish before the drain %s", f, drain)
+	}
+}

@@ -514,6 +514,20 @@ func TestValidationErrorListDetailIsReported(t *testing.T) {
 	}
 }
 
+// Fingerprint-policy errors carry {"detail":{"code":...}}; the code is the reason.
+func TestCodedObjectDetailIsReported(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"detail":{"code":"fingerprint_publication_stale_base","blockers":["x"]}}`))
+	}))
+	defer server.Close()
+
+	err := newClient(t, server.URL).DoJSON(context.Background(), http.MethodPost, "/api/v1/fingerprint-policies/activate", nil, map[string]string{}, nil)
+	if err == nil || !strings.HasSuffix(err.Error(), "HTTP status 409: fingerprint_publication_stale_base") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 // OSCAR refuses to delete a rolling Threshold rule until it is retired and
 // drained (409); cleanup retires it and deletes again instead of leaking it.
 func TestDeleteRuleRetiresRollingThresholdBeforeDelete(t *testing.T) {

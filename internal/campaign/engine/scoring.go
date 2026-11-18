@@ -85,12 +85,16 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 		card.ATT = r.deliveryStats(ctx, end)
 		report["att"] = card.ATT
 		fails, incon := score.JudgeDeliveryRetry(card.ATT.Budgets, d.MaxCopies, d.MinQueueAge.Seconds())
-		if len(fails) > 0 {
-			card.Verdict = domain.VerdictFail
-		} else if len(incon) > 0 && card.Verdict == domain.VerdictPass {
-			card.Verdict = domain.VerdictInconclusive
-		}
-		card.Reasons = append(append(card.Reasons, fails...), incon...)
+		judge(&card, fails, incon)
+	}
+	if f := r.s.Fingerprint; f != nil { // gated; a skipped lane is report-only
+		r.mu.Lock()
+		fp := r.fp
+		r.mu.Unlock()
+		card.Fingerprint = &fp
+		report["fingerprint"] = fp
+		fails, incon := score.JudgeFingerprint(fp, f.Repeats)
+		judge(&card, fails, incon)
 	}
 	r.mu.Lock()
 	missing, stopped, open, corrT := append([]string{}, r.missing...), r.stopped, r.openIncidents, r.corrTickets
@@ -122,6 +126,16 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 	}
 	report["reasons"] = card.Reasons
 	return card, mustJSON(report)
+}
+
+// judge applies a facet's verdict: any failure FAILs, missing evidence keeps a PASS from passing.
+func judge(card *score.Scorecard, fails, incon []string) {
+	if len(fails) > 0 {
+		card.Verdict = domain.VerdictFail
+	} else if len(incon) > 0 && card.Verdict == domain.VerdictPass {
+		card.Verdict = domain.VerdictInconclusive
+	}
+	card.Reasons = append(append(card.Reasons, fails...), incon...)
 }
 
 // taskRuns reads the homelab pack's runs for the campaign window and for the

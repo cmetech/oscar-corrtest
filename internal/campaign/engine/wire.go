@@ -107,7 +107,7 @@ func NewFromConfig(ctx context.Context, cfg campaign.Config, host Host) (*Engine
 	}
 	d := Deps{ReportDir: reportDir, Store: db, Worker: wc, Target: oscarTarget{oc}, SNOW: snow, Sink: sink, Metrics: metrics, Probe: probe,
 		Correlate: host.ExecuteScenarioForCampaign, ExportRun: host.ExportRun, TargetID: target.ID, IngestURL: root, CampaignNotifier: notifier,
-		FrontOfficeURL: root, FrontOfficeHTTP: targetHTTP, FrontOfficeUsers: users}
+		FrontOfficeURL: root, FrontOfficeHTTP: targetHTTP, FrontOfficeUsers: users, Fingerprint: targetops.FingerprintPolicies{C: oc}}
 	d.TaskRuns = func(ctx context.Context, start, end time.Time) ([]targetops.TaskRun, error) {
 		return targetops.TaskRuns(ctx, oc, precheck.HomelabJobs, start, end)
 	}

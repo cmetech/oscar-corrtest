@@ -563,7 +563,12 @@ func safeDetail(raw []byte) string {
 		return http.StatusText(http.StatusBadGateway)
 	}
 	var detail string
-	if json.Unmarshal(value.Detail, &detail) != nil {
+	var coded struct {
+		Code string `json:"code"`
+	}
+	if json.Unmarshal(value.Detail, &coded) == nil && coded.Code != "" {
+		detail = coded.Code // {"detail":{"code":...}} (fingerprint policies); other keys are not echoed
+	} else if json.Unmarshal(value.Detail, &detail) != nil {
 		// FastAPI validation errors: [{"loc": [...], "msg": "..."}]. Never echo "input".
 		var items []struct {
 			Loc []any  `json:"loc"`

@@ -377,6 +377,24 @@ func (r *run) restoreWithRetry(ctx context.Context, m domain.CampaignMutation) e
 	return err
 }
 
+// restoreNow restores one open mutation at once; one already restored is
+// done. On failure it stays open and cleanup retries it.
+func (r *run) restoreNow(ctx context.Context, id int64) error {
+	open, err := r.store().OpenMutations(ctx, r.id)
+	if err != nil {
+		return err
+	}
+	for _, m := range open {
+		if m.ID == id {
+			if err := r.restoreWithRetry(ctx, m); err != nil {
+				return err
+			}
+			return r.restored(ctx, id)
+		}
+	}
+	return nil
+}
+
 // notifierID finds a notifier's id by exact (case-insensitive) name.
 func (r *run) notifierID(ctx context.Context, name string) (string, error) {
 	all, err := r.e.d.Target.Notifiers(ctx)
@@ -395,6 +413,8 @@ func (r *run) restore(ctx context.Context, m domain.CampaignMutation) (err error
 	switch m.Kind {
 	case kindQueueOverride:
 		return r.restoreAlertLimits(ctx, m.Prior)
+	case kindFingerprintPolicy:
+		return r.disableFingerprint(ctx)
 	case kindIncident:
 		return r.resolveIncident(ctx, m.ObjectID)
 	case kindPolicyCreate, kindPolicyActivate:

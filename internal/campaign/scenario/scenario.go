@@ -132,6 +132,19 @@ type DeadTargetSpec struct {
 	MinQueueAge time.Duration `json:"minQueueAge"`
 }
 
+// FingerprintSpec is the fingerprint-policy lane: at T0+At a scoped policy
+// that ignores one label is published and served (waiting up to Converge),
+// Repeats variants of one alert differing only in that label must read back
+// from History, Verify later, as one row and fingerprint, and a variant
+// differing in device as a second one; then the policy is reverted. When
+// OSCAR's fingerprint policies are not commissioned the lane is skipped.
+type FingerprintSpec struct {
+	At       time.Duration `json:"at"`
+	Repeats  int           `json:"repeats"`
+	Converge time.Duration `json:"converge"`
+	Verify   time.Duration `json:"verify"`
+}
+
 type Scenario struct {
 	ID          string          `json:"id"`
 	Version     string          `json:"version"`
@@ -148,9 +161,11 @@ type Scenario struct {
 	Breaker  *BreakerSpec  `json:"breaker,omitempty"`
 	// DeadTarget is the delivery-retry isolation facet.
 	DeadTarget *DeadTargetSpec `json:"deadTarget,omitempty"`
-	Limits     Limits          `json:"limits"`
-	Precheck   PrecheckLimits  `json:"precheck"`
-	Seed       int64           `json:"seed"`
+	// Fingerprint is the fingerprint-policy lane facet; nil runs no lane.
+	Fingerprint *FingerprintSpec `json:"fingerprint,omitempty"`
+	Limits      Limits           `json:"limits"`
+	Precheck    PrecheckLimits   `json:"precheck"`
+	Seed        int64            `json:"seed"`
 }
 
 // TransportDedupWindow is OSCAR's JetStream duplicate window for ordinary alerts
@@ -288,9 +303,29 @@ func ResendOnlyV1() Scenario {
 	return s
 }
 
+// FunctionalV1 checks every functional lane at once under a moderate 5/s
+// base load (Corey, 2026-11-17: overlapping, not sequential): the baseline
+// with planned tickets (T+5-45), correlation set A (T+5-35) then the ticketed
+// set B loop until drain, the four v1 resend policies (T+5-35) and the
+// fingerprint-policy lane (T+10; SKIPPED where fingerprint policies are not
+// enabled). No standing pool or forced breaker: those deliberately disrupt
+// the other lanes. Limits are v1's. Custom: never comparable.
+func FunctionalV1() Scenario {
+	min := time.Minute
+	s := AlertingDayV1()
+	s.ID, s.Version, s.Custom = "functional", "v1", true
+	s.Phases = []Phase{{"preflight", -2 * min, 0}, {"baseline", 0, 50 * min}, {"correlation", 5 * min, 35 * min},
+		{"ticketing", 5 * min, 50 * min}, {"resend", 5 * min, 35 * min}, {"drain", 50 * min, 65 * min}}
+	s.Baseline.Rate = 5
+	s.Baseline.TicketFrom, s.Baseline.TicketTo = 5*min, 45*min
+	s.ResendUntil = 33 * min // as v1: cohorts stop 2 minutes before the resend phase ends
+	s.Fingerprint = &FingerprintSpec{At: 10 * min, Repeats: 5, Converge: 2 * min, Verify: time.Minute}
+	return s
+}
+
 // Builtins are the built-in campaign scenarios.
 func Builtins() []Scenario {
-	return []Scenario{AlertingDayV1(), AlertingDayV2(), AlertingDaySmokeV1(), AlertingDaySmokeV2(), DeliveryRetryV1(), ResendOnlyV1()}
+	return []Scenario{AlertingDayV1(), AlertingDayV2(), AlertingDaySmokeV1(), AlertingDaySmokeV2(), DeliveryRetryV1(), ResendOnlyV1(), FunctionalV1()}
 }
 
 // Lookup returns the built-in scenario named "id@version".
