@@ -216,6 +216,14 @@ const historyResolveBudget = 2 * time.Minute
 // verifyHistoryResolved is cleanup's verdict input: CLEAN needs every campaign
 // occurrence to read back resolved. Firing ones are resolved each round; any
 // still firing at the budget are named as a cleanup failure.
+func historyNames(rows []oscar.HistoryRecord) string {
+	names := make([]string, 0, len(rows))
+	for _, row := range rows {
+		names = append(names, fmt.Sprintf("%s (history %s, startsAt %s)", row.AlertName, row.ID, row.StartsAt.UTC().Format(time.RFC3339Nano)))
+	}
+	return strings.Join(names, ", ")
+}
+
 func (r *run) verifyHistoryResolved(ctx context.Context) {
 	deadline := r.now().Add(historyResolveBudget)
 	for {
@@ -228,11 +236,7 @@ func (r *run) verifyHistoryResolved(ctx context.Context) {
 				r.addDirty("History read-back failed (alerts not verified resolved): " + err.Error())
 				return
 			}
-			names := make([]string, 0, len(firing))
-			for _, row := range firing {
-				names = append(names, fmt.Sprintf("%s (history %s, startsAt %s)", row.AlertName, row.ID, row.StartsAt.UTC().Format(time.RFC3339Nano)))
-			}
-			r.addDirty(fmt.Sprintf("%d alerts still firing in History after resolve: %s", len(firing), strings.Join(names, ", ")))
+			r.addDirty(fmt.Sprintf("%d alerts still firing in History after resolve: %s", len(firing), historyNames(firing)))
 			return
 		}
 	}

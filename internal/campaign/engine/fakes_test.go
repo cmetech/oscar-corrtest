@@ -194,6 +194,10 @@ type fakeOSCAR struct {
 	openPair   map[*oscar.HistoryRecord]time.Time
 	// fingerprint policies: while fpOn, alerts named fingerprintAlert leave
 	// volatileLabel out of their identity (unless fpNoMerge) and carry fpPub.
+	// A row whose identity the policy shaped (fpScoped) matches a resolve only
+	// while the policy is still on: once reverted, OSCAR computes the legacy
+	// identity for the resolve, which is not the row's.
+	fpScoped              map[*oscar.HistoryRecord]bool
 	fpSkip                string
 	fpOn, fpNoMerge       bool
 	fpPub                 string
@@ -273,7 +277,9 @@ func (f *fakeOSCAR) ingest(labels map[string]string, startsAt time.Time, resolve
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var annotations map[string]string
+	scoped := false
 	if f.fpOn && name == fingerprintAlert && !resolved {
+		scoped = !f.fpNoMerge
 		annotations = map[string]string{score.RevisionAnnotation: f.fpPub}
 		if !f.fpNoMerge {
 			rest := map[string]string{}
@@ -328,6 +334,12 @@ func (f *fakeOSCAR) ingest(labels map[string]string, startsAt time.Time, resolve
 	}
 	f.history = append(f.history, &oscar.HistoryRecord{ID: fmt.Sprintf("h%d", len(f.history)+1), AlertName: name, Fingerprint: fp[:12], Status: "firing",
 		StartsAt: startsAt.Truncate(time.Millisecond), CreatedAt: stamp.Add(50 * time.Millisecond), Labels: row, Annotations: annotations})
+	if scoped {
+		if f.fpScoped == nil {
+			f.fpScoped = map[*oscar.HistoryRecord]bool{}
+		}
+		f.fpScoped[f.history[len(f.history)-1]] = true
+	}
 	if seen {
 		return
 	}
@@ -593,7 +605,7 @@ func (f *fakeOSCAR) PostAlertGroup(_ context.Context, req oscar.AlertGroupReques
 			if p, ok := f.openPair[h]; ok {
 				want = p
 			}
-			if h.Labels["am_fingerprint"] == a.Fingerprint && want.Equal(starts) && h.Status == "firing" {
+			if h.Labels["am_fingerprint"] == a.Fingerprint && want.Equal(starts) && h.Status == "firing" && (f.fpOn || !f.fpScoped[h]) {
 				h.Status = "resolved"
 				if inc := f.incidents[h.AlertName]; inc != nil && !f.withholdComments {
 					inc.Comments = append(inc.Comments, targetops.Comment{Value: "[OSCAR AUTO-UPDATE 1] Alert has been resolved"})

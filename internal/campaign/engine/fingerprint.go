@@ -4,18 +4,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/score"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
+	"github.com/cmetech/oscar-corrtest/internal/oscar"
 )
 
 // Fingerprint-policy lane (scenario facet Fingerprint). OSCAR has no DELETE
 // for fingerprint policies, so every run reuses one fixed policy name; it is
 // published enabled for the lane and published disabled again (forward-only)
-// by the lane or, failing that, by cleanup. The lane's alerts carry
-// campaign_run, so the drain and cleanup resolve them from History by their
-// exact OSCAR fingerprint, whatever the policy state by then.
+// by the lane or, failing that, by cleanup. The lane's History rows have an
+// identity only the policy produces: once it is reverted, OSCAR computes the
+// legacy identity for a resolve, which matches nothing. So the policy restore
+// resolves the lane's alerts, and reads them back resolved, before it reverts
+// (camp_19782e09e46265eb left a merged row firing for good).
 
 const (
 	// kindFingerprintPolicy: ObjectID is the policy name; restore publishes it disabled.
@@ -154,10 +158,89 @@ func (r *run) revertFingerprint(ctx context.Context, id int64) {
 	r.event(ctx, "campaign.fingerprint", "info", "fingerprint policy reverted", nil)
 }
 
-// disableFingerprint is the kindFingerprintPolicy restore.
+// disableFingerprint is the kindFingerprintPolicy restore: resolve the lane's
+// alerts while the policy still serves their identity, then revert it. When
+// they do not resolve the policy stays on and the mutation open.
 func (r *run) disableFingerprint(ctx context.Context) error {
 	if r.e.d.Fingerprint == nil {
 		return errors.New("no fingerprint policy client")
 	}
+	if err := r.resolveFingerprintRows(ctx); err != nil {
+		return fmt.Errorf("fingerprint policy kept on until its alerts resolve: %w", err)
+	}
 	return r.e.d.Fingerprint.Disable(ctx, fingerprintPolicy, r.fpOp("off"), r.fpConverge())
+}
+
+// fingerprintFiring is the lane's History rows still firing.
+func (r *run) fingerprintFiring(ctx context.Context) ([]oscar.HistoryRecord, error) {
+	if r.t0.IsZero() { // no traffic was sent
+		return nil, nil
+	}
+	rows, err := r.e.d.Target.History(ctx, r.id, r.t0.Add(-time.Minute), r.now().Add(time.Minute))
+	if err != nil {
+		return nil, err
+	}
+	var firing []oscar.HistoryRecord
+	for _, row := range rows {
+		if row.AlertName == fingerprintAlert && row.Labels["campaign_run"] == r.id && !strings.EqualFold(row.Status, "resolved") {
+			firing = append(firing, row)
+		}
+	}
+	return firing, nil
+}
+
+// resolveFingerprintRows resolves the lane's firing rows and repeats until
+// History reads them back resolved, within historyResolveBudget.
+func (r *run) resolveFingerprintRows(ctx context.Context) error {
+	deadline := r.now().Add(historyResolveBudget)
+	for {
+		firing, err := r.fingerprintFiring(ctx)
+		if err != nil {
+			return fmt.Errorf("History read-back: %w", err)
+		}
+		if len(firing) == 0 {
+			return nil
+		}
+		if !r.now().Before(deadline) {
+			return fmt.Errorf("%d alerts still firing in History after resolve: %s", len(firing), historyNames(firing))
+		}
+		for _, row := range firing {
+			if req, err := oscar.BuildHistoryResolve(row, r.id); err == nil {
+				_, _ = r.e.d.Target.PostAlertGroup(ctx, req)
+			}
+		}
+		if !r.e.clock.SleepUntil(ctx, r.now().Add(heartbeatEvery)) {
+			return fmt.Errorf("stopped with %d alerts firing: %s", len(firing), historyNames(firing))
+		}
+	}
+}
+
+// reresolveFingerprint recovers rows left firing after the policy was already
+// reverted (a revert before the resolve, or a crash between them): it
+// re-enables the policy, which restores their identity, and restores it again,
+// which resolves them first. Failing that, cleanup is DIRTY saying why.
+func (r *run) reresolveFingerprint(ctx context.Context) {
+	firing, err := r.fingerprintFiring(ctx)
+	if err != nil || len(firing) == 0 || r.e.d.Fingerprint == nil {
+		return // verifyHistoryResolved reports a failed read or a missing client
+	}
+	open, err := r.store().OpenMutations(ctx, r.id)
+	if err != nil {
+		return
+	}
+	for _, m := range open {
+		if m.Kind == kindFingerprintPolicy {
+			return // still on: its failed restore is already DIRTY
+		}
+	}
+	r.event(ctx, "campaign.cleanup", "warn", fmt.Sprintf("%d %s alerts firing with the fingerprint policy reverted; re-enabling it to resolve them", len(firing), fingerprintAlert), nil)
+	mid, err := r.record(ctx, kindFingerprintPolicy, fingerprintPolicyName, map[string]string{"name": fingerprintPolicyName})
+	if err == nil {
+		if _, err = r.e.d.Fingerprint.Enable(ctx, fingerprintPolicy, r.fpOp("reon"), r.fpConverge()); err == nil {
+			err = r.restoreNow(ctx, mid)
+		}
+	}
+	if err != nil {
+		r.addDirty(fmt.Sprintf("%s alerts fired under the fingerprint policy and resolve only while it is on; re-enable, resolve, revert failed: %v", fingerprintAlert, err))
+	}
 }
