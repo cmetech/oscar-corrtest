@@ -48,18 +48,23 @@ type PolicyStatus struct {
 	Enrollment string `json:"enrollment"` // never_enrolled | preparing | enrolled | dormant | authority_unavailable
 	Revision   int    `json:"revision"`
 	Enabled    bool   `json:"enabled"`
-	Episodes   struct {
+	// Episodes counts every policy's open episodes on this notifier/action, not
+	// the selected policy's; RecentPolicyEpisodes is the policy's own (at most 10).
+	Episodes struct {
 		Open            int `json:"open"`
 		Exhausted       int `json:"exhausted"`
 		Orphaned        int `json:"orphaned"`
 		CoveragePending int `json:"coverage_pending"`
 	} `json:"episodes"`
-	RecentPolicyEpisodes []struct {
-		EpisodeNumber   int     `json:"episode_number"`
-		UsedResends     int     `json:"used_resends"`
-		StickyExhausted bool    `json:"sticky_exhausted"`
-		LastAttemptAt   *string `json:"last_attempt_at"`
-	} `json:"recent_policy_episodes"`
+	RecentPolicyEpisodes []PolicyEpisode `json:"recent_policy_episodes"`
+	MorePolicyEpisodes   bool            `json:"more_policy_episodes"`
+}
+
+type PolicyEpisode struct {
+	EpisodeNumber   int     `json:"episode_number"`
+	UsedResends     int     `json:"used_resends"`
+	StickyExhausted bool    `json:"sticky_exhausted"`
+	LastAttemptAt   *string `json:"last_attempt_at"`
 }
 
 func mapResendErr(err error) error {

@@ -439,13 +439,38 @@ func (f *fakeOSCAR) PolicyStatus(_ context.Context, nid, action, policyID string
 	st := targetops.PolicyStatus{Revision: f.revs[nid+"/"+action], Enrollment: "enrolled"}
 	if p := f.policies[policyID]; p != nil {
 		st.Enabled = p.enabled && !p.deleted
+		// As OSCAR: episodes.* counts every policy on this notifier/action;
+		// only recent_policy_episodes (at most 10) is the selected policy's own.
 		for name := range f.cohort {
-			if spec, _, exp := f.expected(name); spec.Key != "" && strings.HasSuffix(p.def.Name, "-"+spec.Key) && exp.Exhausted {
+			spec, _, exp := f.expected(name)
+			if spec.Key == "" {
+				continue
+			}
+			owner := f.policyFor(spec.Key)
+			if exp.Exhausted && owner != nil && owner.def.NotifierID == nid && owner.def.Action == action {
 				st.Episodes.Exhausted++
+			}
+			if owner == p {
+				if len(st.RecentPolicyEpisodes) == 10 {
+					st.MorePolicyEpisodes = true
+					continue
+				}
+				st.RecentPolicyEpisodes = append(st.RecentPolicyEpisodes, targetops.PolicyEpisode{StickyExhausted: exp.Exhausted})
 			}
 		}
 	}
 	return st, nil
+}
+
+// policyFor is the policy whose name ends in -<key> (f.mu held). Deleted
+// policies count: OSCAR keeps an episode's selected_rule_id after deletion.
+func (f *fakeOSCAR) policyFor(key string) *fakePolicy {
+	for _, p := range f.policies {
+		if strings.HasSuffix(p.def.Name, "-"+key) {
+			return p
+		}
+	}
+	return nil
 }
 
 // PostAlert is the middleware route for cohort firings.
