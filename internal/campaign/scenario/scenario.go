@@ -28,6 +28,16 @@ type BaselineSpec struct {
 	TicketEveryNth int                `json:"ticketEveryNth"`
 	TicketFrom     time.Duration      `json:"ticketFrom"`
 	TicketTo       time.Duration      `json:"ticketTo"`
+	// Burst raises the firing rate to Burst.Rate for [At, At+For); nil keeps
+	// the uniform plan (and the scenario hash) unchanged.
+	Burst *BurstSpec `json:"burst,omitempty"`
+}
+
+// BurstSpec is a timed spike of the baseline firing rate.
+type BurstSpec struct {
+	At   time.Duration `json:"at"`
+	For  time.Duration `json:"for"`
+	Rate float64       `json:"rate"`
 }
 
 // CaseRef points at a built-in or example scenario by pattern and level
@@ -323,9 +333,29 @@ func FunctionalV1() Scenario {
 	return s
 }
 
+// FunctionalBurstV1 is functional@v1 with a 5-minute spike at T+25-30 (all
+// lanes running) at half the 32-core target (10/s with 25/s spikes), sized
+// for the 20-core homelab: 5/s base, 12.5/s spike. Custom: never comparable.
+func FunctionalBurstV1() Scenario {
+	s := FunctionalV1()
+	s.ID = "functional-burst"
+	s.Baseline.Burst = &BurstSpec{At: 25 * time.Minute, For: 5 * time.Minute, Rate: 12.5}
+	return s
+}
+
+// FunctionalBurstFullV1 is the 32-core target profile: 10/s base with a
+// 5-minute 25/s spike at T+25-30, functional@v1's lanes and spread.
+func FunctionalBurstFullV1() Scenario {
+	s := FunctionalBurstV1()
+	s.ID = "functional-burst-full"
+	s.Baseline.Rate = 10
+	s.Baseline.Burst.Rate = 25
+	return s
+}
+
 // Builtins are the built-in campaign scenarios.
 func Builtins() []Scenario {
-	return []Scenario{AlertingDayV1(), AlertingDayV2(), AlertingDaySmokeV1(), AlertingDaySmokeV2(), DeliveryRetryV1(), ResendOnlyV1(), FunctionalV1()}
+	return []Scenario{AlertingDayV1(), AlertingDayV2(), AlertingDaySmokeV1(), AlertingDaySmokeV2(), DeliveryRetryV1(), ResendOnlyV1(), FunctionalV1(), FunctionalBurstV1(), FunctionalBurstFullV1()}
 }
 
 // Lookup returns the built-in scenario named "id@version".

@@ -204,3 +204,29 @@ func TestPoolIdentityLabelsStable(t *testing.T) {
 		t.Fatal("no pool events")
 	}
 }
+
+// TestBurstWindowRaisesTheFiringRate: inside Burst the lane fires at
+// Burst.Rate, elsewhere at Rate (functional-burst: a 2-5 minute spike).
+func TestBurstWindowRaisesTheFiringRate(t *testing.T) {
+	spec := scenario.BaselineSpec{Rate: 5, UniqueRatio: 1, PoolSize: 10, Instances: 5, Severity: map[string]float64{"minor": 1},
+		ResolveAfter: time.Hour, Burst: &scenario.BurstSpec{At: 10 * time.Minute, For: 5 * time.Minute, Rate: 25}}
+	p := Compile("r", 1, spec, 20*time.Minute)
+	in, out := 0, 0
+	for _, e := range p.Events {
+		if e.Kind != Firing {
+			continue
+		}
+		if e.At >= 10*time.Minute && e.At < 15*time.Minute {
+			in++
+		} else {
+			out++
+		}
+	}
+	if in != 25*300 || out != 5*900 || p.Firings != in+out {
+		t.Fatalf("burst firings %d (want 7500), outside %d (want 4500), total %d", in, out, p.Firings)
+	}
+	spec.Burst = nil
+	if q := Compile("r", 1, spec, 20*time.Minute); q.Firings != 5*1200 {
+		t.Fatalf("no burst: %d firings, want 6000", q.Firings)
+	}
+}
