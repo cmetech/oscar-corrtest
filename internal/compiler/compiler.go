@@ -170,6 +170,7 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 		if input.Pattern == "absence" {
 			observationWindow = 55 * time.Second
 		}
+		observationWindow = max(observationWindow, source.ObservationWindow)
 		item := CasePlan{Control: source.Control, Name: source.Name, Code: caseCode, Polarity: source.Polarity, Checkpoints: source.Checkpoints, Assertions: source.Assertions, ObservationWindow: observationWindow}
 		item.Rule = RulePlan{Name: ruleName, Pattern: input.Pattern, WindowSeconds: int(source.Window / time.Second), GroupBy: source.GroupBy, MatchCriteria: matchCriteria(input.Pattern, names, source), EmitAlertName: syntheticName, EmitLabels: identityLabels(run, input, source, ruleName, "synthetic", "synthetic_parent"), Description: fmt.Sprintf("Temporary OSCAR correlation test rule; run=%s scenario=%s case=%s", run.ID, input.Name, source.Name)}
 		if syntheticName != "" {

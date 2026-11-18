@@ -501,6 +501,18 @@ func TestTicketFirstTriggerCompiles(t *testing.T) {
 			if n != want {
 				t.Errorf("%s case %s: %d ticketed alerts, want %d", pattern, c.Name, n, want)
 			}
+			// OSCAR holds ticketed alerts (anti-flap): History shows the ticketed
+			// source 49-79 s after start under 5/s (camp_3b45fed18acaacee), after
+			// the 45 s default window. Only the ticketed cases wait longer.
+			if want == 1 && c.ObservationWindow < setBTicketObservation {
+				t.Errorf("%s case %s: observation %s, want at least %s", pattern, c.Name, c.ObservationWindow, setBTicketObservation)
+			}
+			if want == 0 && c.ObservationWindow >= setBTicketObservation {
+				t.Errorf("%s case %s: untickted case observes %s", pattern, c.Name, c.ObservationWindow)
+			}
+		}
+		if plan.MaxDuration < corr.Builtin(pattern).MaxDuration+setBTicketObservation {
+			t.Errorf("%s: plan budget %s does not cover the longer observation", pattern, plan.MaxDuration)
 		}
 	}
 }

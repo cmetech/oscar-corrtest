@@ -429,14 +429,22 @@ func (r *run) correlate(ctx context.Context, ref scenario.CaseRef, kind string, 
 	return started
 }
 
+// setBTicketObservation is how long a ticketed set B case observes: OSCAR
+// holds ticketed alerts (anti-flap), so their History rows land well after the
+// 45 s default (49-79 s at 5/s, max 91 s; Corey, 2026-11-18).
+const setBTicketObservation = 150 * time.Second
+
 // ticketFirstTrigger labels the first firing event of each trigger
-// (positive) case with create_ticket=snow.
+// (positive) case with create_ticket=snow, lets that case observe for
+// setBTicketObservation and grows the run budget to match.
 func ticketFirstTrigger(doc *corr.Scenario) {
 	for i := range doc.Cases {
 		c := &doc.Cases[i]
 		if c.Polarity != "positive" {
 			continue
 		}
+		c.ObservationWindow = setBTicketObservation
+		doc.MaxDuration += setBTicketObservation
 		if len(c.Events) == 0 { // Repeat cases: expand exactly as the compiler does
 			for range c.Repeat {
 				c.Events = append(c.Events, corr.Event{Role: c.Role, Status: "firing"})
