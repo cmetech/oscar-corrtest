@@ -198,3 +198,33 @@ func TestQuietWindowSilencesTheStallGuardOnlyInsideIt(t *testing.T) {
 		t.Fatal("after the quiet window the stall guard is live again")
 	}
 }
+
+// TestWindowedTicketQueuesDoNotTripQueueGrowth: OSCAR's claim windows cap the
+// ticket queues (camp_777464e33b811944 stopped on tm_ticket_control at <=12
+// while its SQL backlog was already falling); ticket_backlog guards them.
+func TestWindowedTicketQueuesDoNotTripQueueGrowth(t *testing.T) {
+	for _, q := range []string{"tm_ticket_control", "tm_ticket_provider", "tm_ticket_pump"} {
+		base := Sample{QueueDepth: map[string]float64{q: 0}}
+		w := series(20, func(i int) float64 { return 1 + float64(i)/2 })
+		for i := range w {
+			w[i].QueueDepth = map[string]float64{q: w[i].QueueDepth["q"]}
+		}
+		if has(Evaluate(w[19].At, w, Counters{WorkerHeartbeat: w[19].At}, base), GuardQueueGrowth) {
+			t.Fatalf("%s growth must not trip queue_growth", q)
+		}
+	}
+}
+
+func TestTicketBacklogTripsOnTheOldestDueTicket(t *testing.T) {
+	for _, tc := range []struct {
+		age  float64
+		ok   bool
+		trip bool
+	}{{ticketBacklogLimit.Seconds() + 1, true, true}, {ticketBacklogLimit.Seconds(), true, false}, {5000, false, false}} {
+		w := series(1, func(int) float64 { return 0 })
+		w[0].TicketDueAge, w[0].TicketDueAgeOK = tc.age, tc.ok
+		if got := has(Evaluate(w[0].At, w, Counters{WorkerHeartbeat: w[0].At}, Sample{}), GuardTicketBacklog); got != tc.trip {
+			t.Fatalf("age %.0f ok %t: tripped %t, want %t", tc.age, tc.ok, got, tc.trip)
+		}
+	}
+}
