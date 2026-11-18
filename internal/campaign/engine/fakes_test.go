@@ -26,6 +26,7 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/worker"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/workerapi"
+	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/oscar"
 	storage "github.com/cmetech/oscar-corrtest/internal/persistence/sqlite"
@@ -196,8 +197,12 @@ type fakeOSCAR struct {
 	// volatileLabel out of their identity (unless fpNoMerge) and carry fpPub.
 	// A row whose identity the policy shaped (fpScoped) matches a resolve only
 	// while the policy is still on: once reverted, OSCAR computes the legacy
-	// identity for the resolve, which is not the row's.
+	// identity for the resolve, which is not the row's. As in OSCAR, every
+	// Alertmanager alert merged into a scoped row stays its own open pair
+	// (fpPairs: transport fingerprint -> open); History's am_fingerprint names only
+	// the latest, and the row resolves once every pair has resolved.
 	fpScoped              map[*oscar.HistoryRecord]bool
+	fpPairs               map[*oscar.HistoryRecord]map[string]bool
 	fpSkip                string
 	fpOn, fpNoMerge       bool
 	fpPub                 string
@@ -257,6 +262,15 @@ func amFingerprint(labels map[string]string) string {
 	return fmt.Sprintf("%016x", h.Sum64())
 }
 
+// transportFingerprint is the Alertmanager fingerprint CorrTest sends for labels.
+func transportFingerprint(labels map[string]string) string {
+	req, err := oscar.BuildAlertRequest(compiler.AlertPlan{Name: labels["alertname"], Status: "firing", Labels: labels})
+	if err != nil {
+		panic(err)
+	}
+	return req.Alerts[0].Fingerprint
+}
+
 // ingest applies one alert to the model. Native Alertmanager (lane) keeps one
 // active occurrence per fingerprint and resolves it by labels; the middleware
 // route records each startsAt as its own occurrence and resolves only the
@@ -277,18 +291,29 @@ func (f *fakeOSCAR) ingest(labels map[string]string, startsAt time.Time, resolve
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var annotations map[string]string
-	scoped := false
+	scoped, identity := false, ""
+	if name == fingerprintAlert { // History keeps OSCAR's am_fingerprint: the transport fingerprint
+		fp = transportFingerprint(labels)
+	}
 	if f.fpOn && name == fingerprintAlert && !resolved {
 		scoped = !f.fpNoMerge
 		annotations = map[string]string{score.RevisionAnnotation: f.fpPub}
-		if !f.fpNoMerge {
+		if scoped {
 			rest := map[string]string{}
 			for k, v := range labels {
 				if k != volatileLabel {
 					rest[k] = v
 				}
 			}
-			fp = amFingerprint(rest)
+			identity = amFingerprint(rest)[:12]
+			for _, h := range f.history {
+				if f.fpScoped[h] && h.Fingerprint == identity && h.Status == "firing" {
+					f.allFirings++
+					f.fpPairs[h][fp] = true
+					h.Labels["am_fingerprint"] = fp
+					return
+				}
+			}
 		}
 	}
 	if resolved {
@@ -328,17 +353,21 @@ func (f *fakeOSCAR) ingest(labels map[string]string, startsAt time.Time, resolve
 	if lane || startsAt.IsZero() {
 		startsAt = now
 	}
-	row := map[string]string{"am_fingerprint": fp, "oscar_fingerprint": fp[:12]}
+	if identity == "" {
+		identity = fp[:12]
+	}
+	row := map[string]string{"am_fingerprint": fp, "oscar_fingerprint": identity}
 	for k, v := range labels {
 		row[k] = v
 	}
-	f.history = append(f.history, &oscar.HistoryRecord{ID: fmt.Sprintf("h%d", len(f.history)+1), AlertName: name, Fingerprint: fp[:12], Status: "firing",
+	f.history = append(f.history, &oscar.HistoryRecord{ID: fmt.Sprintf("h%d", len(f.history)+1), AlertName: name, Fingerprint: identity, Status: "firing",
 		StartsAt: startsAt.Truncate(time.Millisecond), CreatedAt: stamp.Add(50 * time.Millisecond), Labels: row, Annotations: annotations})
 	if scoped {
 		if f.fpScoped == nil {
-			f.fpScoped = map[*oscar.HistoryRecord]bool{}
+			f.fpScoped, f.fpPairs = map[*oscar.HistoryRecord]bool{}, map[*oscar.HistoryRecord]map[string]bool{}
 		}
 		f.fpScoped[f.history[len(f.history)-1]] = true
+		f.fpPairs[f.history[len(f.history)-1]] = map[string]bool{fp: true}
 	}
 	if seen {
 		return
@@ -605,7 +634,20 @@ func (f *fakeOSCAR) PostAlertGroup(_ context.Context, req oscar.AlertGroupReques
 			if p, ok := f.openPair[h]; ok {
 				want = p
 			}
-			if h.Labels["am_fingerprint"] == a.Fingerprint && want.Equal(starts) && h.Status == "firing" && (f.fpOn || !f.fpScoped[h]) {
+			if pairs := f.fpPairs[h]; f.fpScoped[h] {
+				if f.fpOn && pairs[a.Fingerprint] && want.Equal(starts) && h.Status == "firing" {
+					pairs[a.Fingerprint] = false
+					open := false
+					for _, o := range pairs {
+						open = open || o
+					}
+					if !open {
+						h.Status = "resolved"
+					}
+				}
+				continue
+			}
+			if h.Labels["am_fingerprint"] == a.Fingerprint && want.Equal(starts) && h.Status == "firing" {
 				h.Status = "resolved"
 				if inc := f.incidents[h.AlertName]; inc != nil && !f.withholdComments {
 					inc.Comments = append(inc.Comments, targetops.Comment{Value: "[OSCAR AUTO-UPDATE 1] Alert has been resolved"})

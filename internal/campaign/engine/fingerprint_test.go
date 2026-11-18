@@ -157,6 +157,9 @@ func TestFingerprintCleanupResolvesRevertedRows(t *testing.T) {
 			reopened := 0
 			for row := range h.oscar.fpScoped {
 				row.Status = "firing"
+				for pair := range h.oscar.fpPairs[row] {
+					h.oscar.fpPairs[row][pair] = true
+				}
 				reopened++
 			}
 			h.oscar.ignoreResolves = tc.ignore
