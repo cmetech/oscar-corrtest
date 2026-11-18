@@ -38,6 +38,25 @@ type Plan struct {
 	Firings, Resolves, Tickets int
 }
 
+// firingTimes is every 1/Rate seconds, and every 1/Burst.Rate seconds inside
+// the burst window.
+func firingTimes(spec scenario.BaselineSpec, duration time.Duration) []time.Duration {
+	uniform := func(from, to time.Duration, rate float64) []time.Duration {
+		var out []time.Duration
+		n := int((to - from).Seconds() * rate)
+		for i := 0; i < n; i++ {
+			out = append(out, from+time.Duration(float64(i)*float64(time.Second)/rate))
+		}
+		return out
+	}
+	b := spec.Burst
+	if b == nil || b.Rate <= 0 || b.At >= duration {
+		return uniform(0, duration, spec.Rate)
+	}
+	end := min(b.At+b.For, duration)
+	return append(append(uniform(0, b.At, spec.Rate), uniform(b.At, end, b.Rate)...), uniform(end, duration, spec.Rate)...)
+}
+
 // Compile builds the baseline plan: firings every 1/Rate seconds for duration.
 // Resolves follow the episode rule: an episode is a run of firings of one
 // identity whose gaps are each < ResolveAfter, and it gets exactly one resolve
@@ -54,13 +73,13 @@ func Compile(runID string, seed int64, spec scenario.BaselineSpec, duration time
 	}
 	sort.Strings(keys)
 
-	n := int(duration.Seconds() * spec.Rate)
+	times := firingTimes(spec, duration)
 	p := Plan{RunID: runID, Seed: seed}
 	var fires []Event
 	newCount := 0
 	poolLabels := map[string][2]string{}
-	for i := 0; i < n; i++ {
-		e := Event{Kind: Firing, At: time.Duration(float64(i) * float64(time.Second) / spec.Rate)}
+	for _, at := range times {
+		e := Event{Kind: Firing, At: at}
 		if rng.Float64() < spec.UniqueRatio {
 			newCount++
 			e.Identity = fmt.Sprintf("Campaign-%s-%d", runID, newCount)
@@ -114,6 +133,7 @@ func Compile(runID string, seed int64, spec scenario.BaselineSpec, duration time
 		}
 		return x.Kind == Resolve && y.Kind == Firing // tie: resolve first so an old episode's resolve cannot close a new one
 	})
+	n := len(times)
 	seqOf := make([]int, n) // firing index -> final Seq
 	for s, o := range idx {
 		if o < n {
