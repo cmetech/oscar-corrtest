@@ -7,9 +7,8 @@
 
 name: CI
 
+# GitLab runners are the default; Depot execution is opt-in.
 on:
-  push:
-  pull_request:
   workflow_dispatch:
 
 permissions:

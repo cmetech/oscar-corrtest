@@ -7,10 +7,9 @@
 
 name: Release
 
+# GitLab runners are the default; Depot execution is opt-in.
 on:
-  push:
-    tags:
-      - "v*.*.*"
+  workflow_dispatch:
 
 permissions:
   contents: read
