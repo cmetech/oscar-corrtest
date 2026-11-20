@@ -24,7 +24,7 @@ tools:
 	GOBIN="$(TOOLS_DIR)" go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 
 fmt-check:
-	@files="$$(find . -type f -name '*.go' -not -path './.tools/*')"; \
+	@files="$$(find . -type f -name '*.go' -not -path './.tools/*' -not -path './.cache/*')"; \
 	unformatted="$$(gofmt -l $$files)"; \
 	test -z "$$unformatted" || { printf '%s\n' "$$unformatted"; exit 1; }
 
