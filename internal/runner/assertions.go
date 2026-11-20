@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/cmetech/oscar-corrtest/internal/domain"
+	"github.com/cmetech/oscar-corrtest/internal/oscar"
 	"github.com/cmetech/oscar-corrtest/internal/scenario"
 )
 
@@ -50,9 +51,15 @@ func evaluateAssertions(assertions []scenario.Assertion, snapshot observationSna
 			}
 		case "synthetic-alert-count":
 			observed = len(snapshot.Parents)
-		case "audit-count", "parent-link-count":
+		case "audit-count":
 			for _, audit := range snapshot.Audits {
 				if audit.Outcome == assertion.Outcome {
+					observed++
+				}
+			}
+		case "parent-link-count":
+			for _, audit := range snapshot.Audits {
+				if audit.Outcome == assertion.Outcome && childLink(audit) {
 					observed++
 				}
 			}
@@ -69,6 +76,20 @@ func evaluateAssertions(assertions []scenario.Assertion, snapshot observationSna
 		})
 	}
 	return results, nil
+}
+
+// childLink reports whether an audit row is a child's link to its parent. OSCAR
+// writes a second row with the same outcome for the parent itself
+// (reason=parent_registered, role=parent, parent fingerprint = its own), which
+// is not a link. Rows without a role label fall back to the fingerprints.
+func childLink(audit oscar.AuditRecord) bool {
+	switch audit.AddedLabels["oscar_correlation_role"] {
+	case "child":
+		return true
+	case "parent":
+		return false
+	}
+	return audit.ParentFingerprint != "" && audit.ParentFingerprint != audit.AlertFingerprint
 }
 
 func assertionsPass(results []assertionResult) bool {

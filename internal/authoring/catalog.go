@@ -87,7 +87,7 @@ func DefaultCatalog() Catalog {
 		AssertionNotes: []Note{
 			{ID: "synthetic-alert-count", Title: "Synthetic alert count", Content: "Counts matching synthetic parents read from history; outcome is omitted."},
 			{ID: "audit-count", Title: "Audit count", Content: "Counts correlation audit rows with the required exact outcome."},
-			{ID: "parent-link-count", Title: "Parent-link count", Content: "Counts parent-child audit rows with the required exact outcome."},
+			{ID: "parent-link-count", Title: "Parent-link count", Content: "Counts child-to-parent link audit rows with the required exact outcome; the parent's own parent_registered row is not a link."},
 			{ID: "zero-count-final-window", Title: "Exact zero needs the final window", Content: "An equals: 0 assertion requires a mandatory final snapshot at or after the absolute case deadline. Absence alone is not proof."},
 			{ID: "phase-limitations", Title: "Phase A and Phase B", Content: "Phase B dispatch is required for synthetic-parent assertions. Phase A is audit-only and cannot prove dispatched synthetic parents."},
 			{ID: "parent_emitted", Title: "parent_emitted", Content: "OSCAR emitted the expected synthetic parent."},

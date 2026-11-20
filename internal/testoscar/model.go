@@ -211,18 +211,26 @@ func (m *Model) CorrelationAudit(_ context.Context, fingerprint string) ([]oscar
 		return nil, nil
 	}
 	outcome := "no_trigger"
-	parentFingerprint := ""
+	parentFingerprint, reason := "", ""
+	var added map[string]string
 	if rule.Pattern == "parent_child" {
 		if m.matchesAny(event, childMatches(rule)) {
-			if m.hasPriorParent(rule, index) {
+			added = map[string]string{"oscar_correlation_pattern": "parent_child", "oscar_correlation_role": "child"}
+			if parent := m.priorParent(rule, index); parent >= 0 {
 				outcome = "enriched" // tag-only: OSCAR links the child to its parent
 				if len(suppressFor(rule)) > 0 {
 					outcome = "suppressed_per_notifier"
 				}
-				parentFingerprint = "semantic-parent-" + fmt.Sprint(id)
+				parentFingerprint = m.alerts[parent].fingerprint
+				added["oscar_correlation_parent_fingerprint"] = parentFingerprint
+				reason = "parent_child_active_parent_present tag_only parent_fp=" + parentFingerprint
 			} else {
-				outcome = "released_no_trigger"
+				outcome, reason = "released_no_trigger", "parent_child_no_active_parent"
 			}
+		} else if m.matches(event, stringMap(rule.MatchCriteria["parent_match"])) && event.plan.Status != "resolved" {
+			// As real OSCAR: a firing parent registers itself with its own row.
+			outcome, reason, parentFingerprint = "enriched", "parent_registered", fingerprint
+			added = map[string]string{"oscar_correlation_pattern": "parent_child", "oscar_correlation_role": "parent"}
 		}
 	} else if m.triggerIndex(rule) == index {
 		outcome = "parent_emitted"
@@ -231,7 +239,7 @@ func (m *Model) CorrelationAudit(_ context.Context, fingerprint string) ([]oscar
 		parentFingerprint = labelFingerprint(labels)
 	}
 	return []oscar.AuditRecord{{ID: id*1000 + index + 1, CreatedAt: m.now, AlertFingerprint: fingerprint, RuleID: id,
-		RuleName: rule.Name, Pattern: rule.Pattern, Outcome: outcome, ParentFingerprint: parentFingerprint}}, nil
+		RuleName: rule.Name, Pattern: rule.Pattern, Outcome: outcome, ParentFingerprint: parentFingerprint, AddedLabels: added, Reason: reason}}, nil
 }
 
 func (m *Model) NotificationAudit(_ context.Context, fingerprint string, _, _ time.Time) ([]oscar.NotificationRecord, error) {
@@ -583,13 +591,18 @@ func (m *Model) ruleByName(name string) (int, compiler.RulePlan, bool) {
 }
 
 func (m *Model) hasPriorParent(rule compiler.RulePlan, childIndex int) bool {
+	return m.priorParent(rule, childIndex) >= 0
+}
+
+// priorParent returns the index of the active parent event before childIndex, or -1.
+func (m *Model) priorParent(rule compiler.RulePlan, childIndex int) int {
 	parent := stringMap(rule.MatchCriteria["parent_match"])
 	for _, index := range m.ruleEvents(rule.Name) {
 		if index < childIndex && m.matches(m.alerts[index], parent) && m.alerts[index].plan.Status != "resolved" {
-			return true
+			return index
 		}
 	}
-	return false
+	return -1
 }
 
 func childMatches(rule compiler.RulePlan) []map[string]string {
