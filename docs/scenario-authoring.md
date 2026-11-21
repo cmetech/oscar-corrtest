@@ -145,9 +145,13 @@ for the complete applicable observation window and checks exact counts:
   it has no `outcome`.
 - `downstream-no-match-count` requires exact current History plus a positive `released_no_trigger` / `no_matching_rules` audit with explicit null rule identity. It is available only with `control: downstream-unmatched` in Flood N01 and has no `outcome`. It proves a downstream decision, not receiver health, delivery or selected-table isolation.
 - `source-episode-state-count` counts named sources whose latest sent episode has exact `startsAt`, matching input labels and unambiguous History status (`firing` or `resolved`). All events in its case must name their source. Incomplete or conflicting episode evidence is INCONCLUSIVE. It proves downstream History visibility only, never physical clear. See [reliability testing](reliability-e2e.md).
-- `audit-count` reads correlation audit rows with the stated exact `outcome`.
-- `parent-link-count` reads parent-child audit rows with the stated exact
-  `outcome`.
+- `audit-count` reads correlation audit rows with the stated exact `outcome`,
+  every row: a parent_child link counts twice for `enriched`, since the parent
+  writes its own `parent_registered` row.
+- `parent-link-count` counts child links only: audit rows with the stated exact
+  `outcome` and `oscar_correlation_role=child` (or, without a role label, a
+  parent fingerprint other than the row's own). The parent's own
+  `parent_registered` row is not a link.
 
 An `equals: 0` assertion needs a final read at or after the absolute case
 deadline. An early empty response, or the absence of a synthetic alert alone,

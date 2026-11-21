@@ -8,7 +8,10 @@ import (
 	corr "github.com/cmetech/oscar-corrtest/internal/scenario"
 )
 
-const goldenHash = "5cf7f1a0ff4d6dd43567fa440c7dc80183368ba9b6662dc79b8ab4004f8ff54e"
+// goldenHash pins alerting-day@v1. Re-baselined 2026-11-20 when the OSCAR owner
+// raised the memory slope to 512 MiB/h and front-office p95 to 5s; runs before
+// that carry 5cf7f1a0ff4d6dd43567fa440c7dc80183368ba9b6662dc79b8ab4004f8ff54e.
+const goldenHash = "c37c420dcef4f6d3f5c72e77d3fca9536e1dbb711a7fe7819b8d696f4063a212"
 
 func TestAlertingDayV1Values(t *testing.T) {
 	s := AlertingDayV1()
@@ -65,8 +68,8 @@ func TestAlertingDayV1Values(t *testing.T) {
 		t.Errorf("R4 %+v", r4)
 	}
 	l := s.Limits
-	if l.HistoryP95 != 40*time.Second || l.Drain != 15*time.Minute || l.ContainerSlopeMiBPerHour != 100 ||
-		l.FrontOfficeP95 != 2*time.Second || l.FrontOfficeP99 != 5*time.Second || l.CorrelationSuccess != 1 || l.TicketSuccess != 1 || l.ResendSuccess != 1 ||
+	if l.HistoryP95 != 40*time.Second || l.Drain != 15*time.Minute || l.ContainerSlopeMiBPerHour != 512 ||
+		l.FrontOfficeP95 != 5*time.Second || l.FrontOfficeP99 != 5*time.Second || l.CorrelationSuccess != 1 || l.TicketSuccess != 1 || l.ResendSuccess != 1 ||
 		l.RegressionPct != 20 || l.QuerySetVersion != "q1" {
 		t.Errorf("limits %+v", l)
 	}

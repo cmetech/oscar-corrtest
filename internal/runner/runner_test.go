@@ -466,7 +466,10 @@ func TestRunnerExecutesEveryBuiltinPatternThroughOneCoordinator(t *testing.T) {
 				t.Fatalf("run=%+v report=%s", stored, stored.CanonicalReportJSON)
 			}
 			// Tag-only parent_child (OSCAR refuses suppression since 2026-10-19): the child is linked, not suppressed.
-			if input.Pattern == "parent_child" && !strings.Contains(string(stored.CanonicalReportJSON), `"auditOutcomes":["no_trigger","enriched"]`) {
+			// As real OSCAR, the parent registers with its own enriched row; the N01 child is released.
+			if input.Pattern == "parent_child" && (!strings.Contains(string(stored.CanonicalReportJSON), `"auditOutcomes":["enriched","enriched"]`) ||
+				!strings.Contains(string(stored.CanonicalReportJSON), `{"kind":"parent-link-count","outcome":"enriched","expected":1,"observed":1,"verdict":"PASS"`) ||
+				!strings.Contains(string(stored.CanonicalReportJSON), `{"kind":"audit-count","outcome":"released_no_trigger","expected":1,"observed":1,"verdict":"PASS"`)) {
 				t.Fatalf("parent-child link evidence missing: %s", stored.CanonicalReportJSON)
 			}
 		})

@@ -210,8 +210,10 @@ func AlertingDayV1() Scenario {
 		},
 		Redelivery: 130 * time.Second, ResendUntil: 118 * min, // clear of TransportDedupWindow
 		FrontOffice: FrontOfficeSpec{Users: 4, Interval: 15 * time.Second, Jitter: 3 * time.Second, SearchEvery: 2 * min},
-		Limits: Limits{HistoryP95: 40 * time.Second, Drain: 15 * min, ContainerSlopeMiBPerHour: 100,
-			FrontOfficeP95: 2 * time.Second, FrontOfficeP99: 5 * time.Second, CorrelationSuccess: 1, TicketSuccess: 1, ResendSuccess: 1,
+		// Slope 512 MiB/h (was 100) and front-office p95 5s (was 2s): raised by
+		// the OSCAR owner on 2026-11-20; runs before that carry the old hash.
+		Limits: Limits{HistoryP95: 40 * time.Second, Drain: 15 * min, ContainerSlopeMiBPerHour: 512,
+			FrontOfficeP95: 5 * time.Second, FrontOfficeP99: 5 * time.Second, CorrelationSuccess: 1, TicketSuccess: 1, ResendSuccess: 1,
 			RegressionPct: 20, QuerySetVersion: "q1"},
 		Precheck: PrecheckLimits{IdleQueueDepth: 50, IdleQueueAge: 30 * time.Second, ClockSkew: 250 * time.Millisecond,
 			TargetDiskFreePct: 20, TargetMemAvailPct: 25, RunnerDiskFreeGiB: 10, MetricsFreshness: 60 * time.Second, RestartWindow: 30 * min, HistoryRowsAdvisory: 5_000_000},
