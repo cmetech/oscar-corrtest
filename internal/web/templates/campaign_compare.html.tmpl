@@ -1,14 +1,31 @@
 {{define "campaign-compare"}}
-<section class="page-heading"><p class="eyebrow">Alerting day</p><h1>Compare campaigns</h1></section>
+<section class="page-heading"><h1>Compare campaigns</h1></section>
 {{if .Error}}<div class="notice notice--error" role="alert">{{.Error}}</div>{{end}}
 {{with .Campaign}}
-<form method="get" action="/campaigns/compare" class="filter-bar"><label>Campaign ids (comma separated)<input name="ids" value="{{.IDs}}"></label><button class="primary-button" type="submit">Compare</button></form>
-{{if .Compare.Items}}
-{{range .Compare.Items}}
-<section><h2><code>{{.ID}}</code> <span class="status-pill">{{.RunBy}}</span>{{range .Flags}} <span class="status-pill" data-status="warn">{{.}}</span>{{end}}</h2>
-<div class="data-table-wrapper"><table><caption>Headlines against reference median</caption><thead><tr><th>Headline</th><th>Value</th><th>Reference</th><th>Worse by</th><th></th></tr></thead><tbody>
+<form method="get" action="/campaigns/compare" class="filter-bar">
+<label>Candidate run IDs (comma separated)<input name="ids" value="{{.IDs}}" required></label>
+<label>Reference run IDs (up to three, comma separated)<input name="referenceIds" value="{{.ReferenceIDs}}" required></label>
+<label>Workload hash<input name="scenarioHash" value="{{.ScenarioHash}}" required></label>
+<label>Comparison mode<select name="mode" required>
+<option value="">Select a mode</option>
+<option value="control_before_after"{{if eq .Mode "control_before_after"}} selected{{end}}>Before and after control</option>
+<option value="configured_policy"{{if eq .Mode "configured_policy"}} selected{{end}}>Configured policy</option>
+</select></label>
+<button class="primary-button" type="submit">Compare</button></form>
+{{with .Compare}}{{if .Items}}
+<section><h2>Reference runs</h2>
+<p>{{.ReferenceCount}} reference runs for <code>{{.Mode}}</code> and workload <code>{{.ScenarioHash}}</code>.{{if .Provisional}} A single reference is provisional.{{end}}</p>
+<ul>{{range .References}}<li><code>{{.RunID}}</code> ({{.RunBy}}), OSCAR build <code>{{.TargetBuild}}</code></li>{{end}}</ul>
+<p>CorrTest binary <code>{{(index .References 0).CorrTestBuild}}</code> and workload configuration <code>{{(index .References 0).WorkloadConfig}}</code></p>
+<div class="data-table-wrapper"><table><caption>Reference variation</caption><thead><tr><th>Headline</th><th>Minimum</th><th>Maximum</th><th>Unit</th></tr></thead><tbody>
+{{range .Variation}}<tr><td>{{.Name}}</td><td>{{.Min}}</td><td>{{.Max}}</td><td>{{.Unit}}</td></tr>{{end}}
+</tbody></table></div></section>
+{{range .Items}}
+<section><h2><code>{{.RunID}}</code> <span class="status-pill">{{.RunBy}}</span></h2>
+<p>OSCAR build <code>{{.TargetBuild}}</code></p>
+<div class="data-table-wrapper"><table><caption>Headlines against reference median</caption><thead><tr><th>Headline</th><th>Value</th><th>Reference</th><th>Worse by</th><th>Result</th></tr></thead><tbody>
 {{range .Deltas}}<tr><td>{{.Name}}</td><td>{{.Value}}</td><td>{{.Ref}}</td><td>{{printf "%.1f" .WorsePct}}%</td><td>{{if .Regressed}}worse{{else if lt .WorsePct 0.0}}better{{else}}ok{{end}}</td></tr>{{end}}
 </tbody></table></div></section>
-{{end}}{{end}}
+{{end}}{{end}}{{end}}
 {{end}}
 {{end}}

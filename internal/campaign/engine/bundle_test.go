@@ -38,6 +38,11 @@ func exportedBundle(t *testing.T) (map[string][]byte, string) {
 	t.Helper()
 	h := newHarness(t)
 	h.deps.FrontOfficeUsers = []frontoffice.User{{Name: "fo-01", APIKey: secretFO}, {Name: "fo-02", APIKey: secretFO2}}
+	if err := h.db.AppendCampaignEvent(context.Background(), h.id, domain.CampaignOptionsEvent, "info", "fixture options",
+		json.RawMessage(`{"provenance":{"role":"pre_change_control","targetBuild":"oscar-before","corrTestBuild":"corrtest-binary","workloadConfig":"fixture-digest"}}`),
+		time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	if err := h.run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -112,6 +117,13 @@ func TestBundleContainsAllAttachmentsAndVerifies(t *testing.T) {
 	}
 	if !bytes.Contains(files["prechecks.json"], []byte("B1")) {
 		t.Errorf("prechecks: %s", files["prechecks.json"])
+	}
+	var metadata struct {
+		Provenance domain.CampaignProvenance `json:"provenance"`
+	}
+	if err := json.Unmarshal(files["campaign.json"], &metadata); err != nil || metadata.Provenance.Role != domain.CampaignPreChangeControl ||
+		metadata.Provenance.TargetBuild != "oscar-before" || metadata.Provenance.CorrTestBuild != "corrtest-binary" || metadata.Provenance.WorkloadConfig != "fixture-digest" {
+		t.Fatalf("bundle provenance %+v: %v", metadata, err)
 	}
 }
 

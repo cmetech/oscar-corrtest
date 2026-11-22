@@ -86,6 +86,61 @@ Windows amd64 and version-pinned installation are also supported. See the
 [installation guide](docs/install.md) for Windows PowerShell, upgrades,
 configuration, backup, and uninstall.
 
+## Native alert qualification campaigns
+
+| Selector | Workload |
+|---|---|
+| `alerting-day-control@v1` | 150 minutes of identical ordinary load on pre-change and post-change builds, then up to 30 minutes of drain observation. Includes direct no-policy and canonical no-policy paths, with first identity enrollment measured separately from recurring delivery. |
+| `alerting-day@v3` | 150 minutes of baseline traffic, standing repeats, correlation and tickets, with ordinary resend coverage and additional managed TL1 and configured-policy cohorts. Drain observation follows load. |
+| `alerting-day-smoke@v3` | Short mixed-workload smoke. |
+| `managed-alerts-smoke@v1` | Dedicated managed TL1 functional smoke for lifecycle, resend, escalation, acknowledgement and ticket flows. |
+
+These selectors are registered and CorrTest currently refuses their pre-checks
+and runs pending real native ingress and evidence support. The smoke plans are
+non-comparable. Existing campaign selectors retain their original definitions.
+
+A full qualification run records an operator-declared OSCAR build manifest ID,
+CorrTest binary ID and frozen workload configuration digest at start. The
+manifest must identify the actual deployed builds, including the native provider.
+Keep the same CorrTest binary and exact workload configuration across reference
+and candidate runs. Save the manifest and configuration with the exported run
+bundles. Include ingress and routes, labels and expected outcomes, ordinary and
+configured policies, traffic rates and the managed traffic share where used.
+The declaration identifies those artifacts. The comparison checks stored
+metadata and does not verify deployments or discover hashes from OSCAR.
+
+- `control_before_after` compares a `pre_change_control` reference on the
+  pre-change build with a later `post_change_control` candidate on the changed
+  build. Both use `alerting-day-control@v1`. Keep timed-policy semantic changes
+  in the configured campaign.
+- `configured_policy` compares explicitly recorded
+  `configured_policy_reference` runs with later `configured_policy_candidate`
+  runs on the same `alerting-day@v3` workload. Track added configured sends and
+  managed source cost separately from the ordinary before/after control.
+
+Once native qualification support is available, declare full-run provenance with
+`--comparison-role`, `--target-build`, `--corrtest-build` and
+`--workload-config`. The API accepts these as `provenance.role`,
+`provenance.targetBuild`, `provenance.corrTestBuild` and
+`provenance.workloadConfig` on `POST /api/v1/campaign/runs`. Campaign status
+returns the start declaration in `options.provenance` and the frozen hash in
+`campaign.ScenarioHash`.
+
+```bash
+oscar-corrtest campaign compare "$CANDIDATE_ID" \
+  --reference-run "$REFERENCE_ID" --mode control_before_after \
+  --scenario-hash "$SCENARIO_HASH" --server "$CORRTEST_SERVER" \
+  --token-file "$CORRTEST_TOKEN_FILE" --output json
+```
+
+Use one to three explicit references. The comparison page accepts the same
+inputs. `GET /api/v1/campaign/compare` takes comma-separated `ids` and
+`referenceIds` plus `mode` and `scenarioHash`. All selected runs must have
+complete, clean, comparable evidence. References must also pass. A missing
+reference is reported as a missing baseline. The result shows run IDs, build
+provenance, the reference median and its minimum and maximum per headline. A
+single reference is provisional.
+
 ## What is tested
 
 Built-in positive and negative cases cover:

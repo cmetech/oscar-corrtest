@@ -33,6 +33,34 @@ type Campaign struct {
 	Scorecard, Report            json.RawMessage
 }
 
+// CampaignRole declares how an operator intends a run to be used.
+type CampaignRole string
+
+const (
+	CampaignPreChangeControl          CampaignRole = "pre_change_control"
+	CampaignPostChangeControl         CampaignRole = "post_change_control"
+	CampaignConfiguredPolicyReference CampaignRole = "configured_policy_reference"
+	CampaignConfiguredPolicyCandidate CampaignRole = "configured_policy_candidate"
+)
+
+// CampaignProvenance records the operator's immutable build and configuration identifiers.
+type CampaignProvenance struct {
+	Role           CampaignRole `json:"role"`
+	TargetBuild    string       `json:"targetBuild"`
+	CorrTestBuild  string       `json:"corrTestBuild"`
+	WorkloadConfig string       `json:"workloadConfig"`
+}
+
+// CampaignOptionsEvent stores the run-start declaration independently of its outcome.
+const CampaignOptionsEvent = "campaign.options"
+
+type CampaignRecordedOptions struct {
+	Acknowledged []string            `json:"acknowledged"`
+	PrecheckOnly bool                `json:"precheckOnly"`
+	RunBy        string              `json:"runBy"`
+	Provenance   *CampaignProvenance `json:"provenance,omitempty"`
+}
+
 type CampaignFilter struct {
 	Status CampaignStatus // empty = any
 	Limit  int            // 0 = no limit

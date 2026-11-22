@@ -5,6 +5,9 @@
 {{end}}
 {{if .Error}}<div class="notice notice--error" role="alert">{{.Error}}</div>{{end}}
 {{with .Campaign}}
+{{with .Provenance}}<dl><dt>Workload hash</dt><dd><code>{{$.Campaign.Campaign.ScenarioHash}}</code></dd>
+<dt>Comparison role</dt><dd>{{.Role}}</dd><dt>OSCAR build</dt><dd><code>{{.TargetBuild}}</code></dd>
+<dt>CorrTest binary</dt><dd><code>{{.CorrTestBuild}}</code></dd><dt>Workload configuration</dt><dd><code>{{.WorkloadConfig}}</code></dd></dl>{{end}}
 {{if not .Terminal}}<form method="post" action="/campaigns/{{.Campaign.ID}}/stop"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}"><button class="danger-button" type="submit">Stop campaign</button></form>{{end}}
 <h2>Timeline <span data-stream-state></span></h2>
 <ol data-campaign-timeline data-campaign-id="{{.Campaign.ID}}"{{if .Terminal}} data-terminal="true"{{end}}>

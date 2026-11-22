@@ -68,6 +68,50 @@ func TestStartCampaignWithoutEngine(t *testing.T) {
 	}
 }
 
+func TestNativeCampaignSelectorsRefuseBeforeStarting(t *testing.T) {
+	for _, scenario := range []campaignscenario.Scenario{campaignscenario.AlertingDayControlV1(),
+		campaignscenario.AlertingDayV3(), campaignscenario.AlertingDaySmokeV3(), campaignscenario.ManagedAlertsSmokeV1()} {
+		r := &Runtime{} // refusal precedes database access and engine dispatch
+		for _, precheck := range []bool{true, false} {
+			if _, err := r.StartCampaign(context.Background(), CampaignOptions{Scenario: scenario, PrecheckOnly: precheck}); !errors.Is(err, ErrNativeCampaignPending) {
+				t.Fatalf("%s@%s precheck=%t: %v", scenario.ID, scenario.Version, precheck, err)
+			}
+		}
+	}
+}
+
+func TestCampaignStatusReadsOriginalRunOptions(t *testing.T) {
+	r := openCampaignRuntime(t, t.TempDir(), nil)
+	defer r.Close()
+	ctx := context.Background()
+	at := time.Now()
+	c := domain.Campaign{ID: "camp_provenance", ScenarioID: "alerting-day-control", ScenarioHash: campaignscenario.AlertingDayControlV1().Hash(),
+		Trigger: "cli", RunBy: "human", Status: domain.CampaignPrecheck, StartedAt: at}
+	if err := r.database.CreateCampaign(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(`{"runBy":"human","acknowledged":["A1"],"provenance":{
+		"role":"pre_change_control","targetBuild":"before","corrTestBuild":"runner","workloadConfig":"pack"}}`)
+	if err := r.database.AppendCampaignEvent(ctx, c.ID, domain.CampaignOptionsEvent, "info", "options", raw, at); err != nil {
+		t.Fatal(err)
+	}
+	for range campaignViewEvents {
+		if err := r.database.AppendCampaignEvent(ctx, c.ID, "fixture", "info", "later event", nil, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	v, err := r.CampaignStatus(ctx, c.ID)
+	if err != nil || v.Options == nil || v.Options.Provenance == nil || v.Options.Provenance.Role != domain.CampaignPreChangeControl ||
+		v.Options.Provenance.TargetBuild != "before" || len(v.Options.Acknowledged) != 1 {
+		t.Fatalf("stored options lost from status: %+v, %v", v, err)
+	}
+	for _, event := range v.Events {
+		if event.Type == domain.CampaignOptionsEvent {
+			t.Fatal("fixture options unexpectedly in the recent event window")
+		}
+	}
+}
+
 func TestCampaignGateBlocksOtherRuns(t *testing.T) {
 	e := newFakeEngine()
 	r := openCampaignRuntime(t, t.TempDir(), e)

@@ -1,6 +1,7 @@
 package score
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -188,18 +189,99 @@ func TestRegressionTwentyPercent(t *testing.T) {
 	}
 }
 
-func TestNotComparableExcludedFromReference(t *testing.T) {
-	bad := cardWith(1000)
-	bad.Comparable = false
-	dirty := cardWith(2000)
-	dirty.CleanupClean = false
-	other := cardWith(3000)
-	other.ScenarioHash = "x"
-	fail := cardWith(4000)
-	fail.Verdict = domain.VerdictFail
-	ref := Reference([]Scorecard{bad, dirty, fail, cardWith(10), other, cardWith(20), cardWith(30), cardWith(9999)})
-	if got := ref.Headlines[0].Value; got != 20 {
-		t.Fatal(got)
+func identifiedScorecard(id string, role domain.CampaignRole, quality scenario.Scenario, p95 float64, at time.Time) IdentifiedScorecard {
+	card := cardWith(p95)
+	card.ScenarioHash, card.RegressionPct = quality.Hash(), quality.Limits.RegressionPct
+	build := "oscar-after"
+	if role == domain.CampaignPreChangeControl {
+		build = "oscar-before"
+	}
+	return IdentifiedScorecard{
+		RunID: id, ScenarioHash: card.ScenarioHash,
+		Provenance: domain.CampaignProvenance{Role: role, TargetBuild: build, CorrTestBuild: "corrtest-sha", WorkloadConfig: "test-pack-digest"},
+		Status:     domain.CampaignCompleted, Cleanup: domain.CleanupClean, Comparable: true, FullLoadCompleted: true,
+		StartedAt: at, EndedAt: at.Add(3 * time.Hour), Scorecard: card,
+	}
+}
+
+func controlScorecards() (IdentifiedScorecard, IdentifiedScorecard) {
+	s := scenario.AlertingDayControlV1()
+	return identifiedScorecard("before", domain.CampaignPreChangeControl, s, 100, t0),
+		identifiedScorecard("after", domain.CampaignPostChangeControl, s, 108, t0.Add(4*time.Hour))
+}
+
+func TestCompareRejectsMixedScenarioHashes(t *testing.T) {
+	ref, candidate := controlScorecards()
+	candidate.Scorecard.ScenarioHash = scenario.AlertingDayV3().Hash()
+	if _, err := CompareCompatible([]IdentifiedScorecard{ref}, []IdentifiedScorecard{candidate}, ref.ScenarioHash, ControlBeforeAfter); !errors.Is(err, ErrIncompatibleComparison) {
+		t.Fatalf("mixed scorecard hash: %v", err)
+	}
+	candidate.ScenarioHash = candidate.Scorecard.ScenarioHash
+	if _, err := CompareCompatible([]IdentifiedScorecard{ref}, []IdentifiedScorecard{candidate}, ref.ScenarioHash, ControlBeforeAfter); !errors.Is(err, ErrIncompatibleComparison) {
+		t.Fatalf("mixed stored hashes: %v", err)
+	}
+}
+
+func TestCompareReportsMissingBaseline(t *testing.T) {
+	_, candidate := controlScorecards()
+	candidate.Provenance.Role = "" // an untagged after-only run
+	if _, err := CompareCompatible(nil, []IdentifiedScorecard{candidate}, candidate.ScenarioHash, ControlBeforeAfter); !errors.Is(err, ErrMissingBaseline) {
+		t.Fatalf("missing comparison baseline: %v", err)
+	}
+}
+
+func TestCandidateExcludedFromReference(t *testing.T) {
+	ref, candidate := controlScorecards()
+	res, err := CompareCompatible([]IdentifiedScorecard{ref}, []IdentifiedScorecard{candidate}, ref.ScenarioHash, ControlBeforeAfter)
+	if err != nil || res.ReferenceCount != 1 || !res.Provisional || len(res.Items) != 1 ||
+		len(res.Items[0].Deltas) != 1 || res.Items[0].Deltas[0].WorsePct != 8 || !res.Items[0].Deltas[0].Regressed {
+		t.Fatalf("expected provisional 8%% regression: %+v, %v", res, err)
+	}
+	if _, err := CompareCompatible([]IdentifiedScorecard{ref, candidate}, []IdentifiedScorecard{candidate}, ref.ScenarioHash, ControlBeforeAfter); !errors.Is(err, ErrIncompatibleComparison) {
+		t.Fatalf("candidate included in reference: %v", err)
+	}
+}
+
+func TestCompareConfiguredPolicyHistoricalReferences(t *testing.T) {
+	s := scenario.AlertingDayV3()
+	var refs []IdentifiedScorecard
+	for i, value := range []float64{93, 102, 100} {
+		refs = append(refs, identifiedScorecard(fmt.Sprintf("ref-%d", i), domain.CampaignConfiguredPolicyReference, s, value, t0.Add(time.Duration(i)*4*time.Hour)))
+	}
+	candidate := identifiedScorecard("candidate", domain.CampaignConfiguredPolicyCandidate, s, 108, t0.Add(12*time.Hour))
+	res, err := CompareCompatible(refs, []IdentifiedScorecard{candidate}, s.Hash(), ConfiguredPolicy)
+	if err != nil || res.Mode != ConfiguredPolicy || res.ScenarioHash != s.Hash() || res.ReferenceCount != 3 || res.Provisional ||
+		len(res.Variation) != 1 || res.Variation[0].Min != 93 || res.Variation[0].Max != 102 ||
+		len(res.Items) != 1 || len(res.Items[0].Deltas) != 1 || res.Items[0].Deltas[0].WorsePct != 8 || res.Items[0].Deltas[0].Regressed {
+		t.Fatalf("configured comparison: %+v, %v", res, err)
+	}
+	if _, err := CompareCompatible(refs, []IdentifiedScorecard{candidate}, s.Hash(), ControlBeforeAfter); !errors.Is(err, ErrIncompatibleComparison) {
+		t.Fatalf("V3 accepted as control: %v", err)
+	}
+}
+
+func TestCompareRejectsIneligibleReferences(t *testing.T) {
+	for name, mutate := range map[string]func(*IdentifiedScorecard){
+		"untagged":                func(x *IdentifiedScorecard) { x.Provenance.Role = "" },
+		"after-only":              func(x *IdentifiedScorecard) { x.Provenance.Role = domain.CampaignPostChangeControl },
+		"unrecorded build":        func(x *IdentifiedScorecard) { x.Provenance.TargetBuild = "" },
+		"custom":                  func(x *IdentifiedScorecard) { x.Custom = true },
+		"acknowledged":            func(x *IdentifiedScorecard) { x.Acknowledged = []string{"A1"} },
+		"dirty":                   func(x *IdentifiedScorecard) { x.Cleanup = domain.CleanupDirty },
+		"non-comparable":          func(x *IdentifiedScorecard) { x.Scorecard.Comparable = false },
+		"incomplete":              func(x *IdentifiedScorecard) { x.FullLoadCompleted = false },
+		"unrelated configuration": func(x *IdentifiedScorecard) { x.Provenance.WorkloadConfig = "other-pack" },
+		"different harness":       func(x *IdentifiedScorecard) { x.Provenance.CorrTestBuild = "other-corrtest-build" },
+		"later":                   func(x *IdentifiedScorecard) { x.EndedAt = t0.Add(5 * time.Hour) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			ref, candidate := controlScorecards()
+			ref.Scorecard.Headlines[0].Value = 1
+			mutate(&ref)
+			if _, err := CompareCompatible([]IdentifiedScorecard{ref}, []IdentifiedScorecard{candidate}, candidate.ScenarioHash, ControlBeforeAfter); !errors.Is(err, ErrIncompatibleComparison) {
+				t.Fatalf("ineligible reference accepted: %v", err)
+			}
+		})
 	}
 }
 

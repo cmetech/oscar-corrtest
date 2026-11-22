@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/campaign/score"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 )
 
@@ -167,10 +168,20 @@ func (a *App) campaignStart(ctx context.Context, name string, args []string, pre
 	flags := flag.NewFlagSet(name, flag.ContinueOnError)
 	flags.SetOutput(a.stderr)
 	cf := addCampaignFlags(flags)
-	scenario := flags.String("scenario", "alerting-day@v1", "scenario id@version: alerting-day@v1 or alerting-day-smoke@v1")
+	scenario := flags.String("scenario", "alerting-day@v1", "built-in scenario id@version (see campaign help)")
 	ack := flags.String("ack", "", "comma-separated acknowledged warnings, e.g. A1,A3")
 	runBy := flags.String("run-by", "human", "agent or human")
 	wait := flags.Bool("wait", false, "follow status until the campaign finishes")
+	var provenance domain.CampaignProvenance
+	if !precheck {
+		flags.Func("comparison-role", "role for a full qualification run", func(value string) error {
+			provenance.Role = domain.CampaignRole(value)
+			return nil
+		})
+		flags.StringVar(&provenance.TargetBuild, "target-build", "", "immutable OSCAR target build manifest identifier")
+		flags.StringVar(&provenance.CorrTestBuild, "corrtest-build", "", "immutable CorrTest binary identifier")
+		flags.StringVar(&provenance.WorkloadConfig, "workload-config", "", "frozen workload configuration digest")
+	}
 	if flags.Parse(args) != nil {
 		return 2
 	}
@@ -182,6 +193,9 @@ func (a *App) campaignStart(ctx context.Context, name string, args []string, pre
 		return a.commandUsageError(name, err.Error())
 	}
 	body := map[string]any{"scenario": *scenario, "acknowledged": []string{}, "runBy": *runBy}
+	if provenance != (domain.CampaignProvenance{}) {
+		body["provenance"] = provenance
+	}
 	if *ack != "" {
 		body["acknowledged"] = strings.Split(*ack, ",")
 	}
@@ -342,19 +356,36 @@ func (a *App) campaignCompare(ctx context.Context, args []string) int {
 	flags := flag.NewFlagSet("campaign compare", flag.ContinueOnError)
 	flags.SetOutput(a.stderr)
 	cf := addCampaignFlags(flags)
+	mode := flags.String("mode", "", "control_before_after or configured_policy")
+	hash := flags.String("scenario-hash", "", "expected common workload hash")
+	var refs []string
+	flags.Func("reference-run", "explicit reference campaign ID (repeatable, up to three)", func(id string) error {
+		if id == "" || strings.TrimSpace(id) != id || strings.Contains(id, ",") {
+			return errors.New("expected one reference run ID")
+		}
+		refs = append(refs, id)
+		return nil
+	})
 	pos, perr := parseLeading(flags, args)
 	if perr != nil {
 		return 2
 	}
-	if len(pos) < 2 {
-		return a.commandUsageError("campaign compare", "expected two or more campaign ids")
+	if len(refs) == 0 {
+		return a.commandUsageError("campaign compare", score.ErrMissingBaseline.Error()+" with --reference-run")
+	}
+	if len(pos) == 0 || len(refs) > score.MaxComparisonReferences {
+		return a.commandUsageError("campaign compare", "select one to three references and at least one candidate")
+	}
+	if (*mode != string(score.ControlBeforeAfter) && *mode != string(score.ConfiguredPolicy)) || *hash == "" {
+		return a.commandUsageError("campaign compare", "--mode and --scenario-hash are required")
 	}
 	c, err := a.newCampaignClient(cf)
 	if err != nil {
 		return a.commandUsageError("campaign compare", err.Error())
 	}
+	query := url.Values{"ids": {strings.Join(pos, ",")}, "referenceIds": {strings.Join(refs, ",")}, "mode": {*mode}, "scenarioHash": {*hash}}
 	var out json.RawMessage
-	if err := c.call(ctx, http.MethodGet, "/api/v1/campaign/compare?ids="+url.QueryEscape(strings.Join(pos, ",")), nil, &out); err != nil {
+	if err := c.call(ctx, http.MethodGet, "/api/v1/campaign/compare?"+query.Encode(), nil, &out); err != nil {
 		var f *apiFailure
 		if errors.As(err, &f) && f.status == http.StatusNotImplemented {
 			fmt.Fprintln(a.stderr, "campaign compare: not implemented by this server yet")

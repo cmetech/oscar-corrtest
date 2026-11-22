@@ -21,25 +21,33 @@ import (
 type pageData2 struct {
 	fakeDataSourceForCampaign
 	campaigns map[string]domain.Campaign
+	options   map[string]*domain.CampaignRecordedOptions
+	statusIDs []string
+	listed    bool
 	checks    []precheck.Result
 }
 
 func (f *pageData2) CampaignStatus(_ context.Context, id string) (appruntime.CampaignView, error) {
-	if id == "pc" || id == "pc-smoke" {
+	f.statusIDs = append(f.statusIDs, id)
+	if id == "pc" || id == "pc-smoke" || id == "pc-control" {
 		d, _ := json.Marshal(map[string]any{"results": f.checks})
 		s := campaignscenario.AlertingDayV1()
-		if id == "pc-smoke" {
+		switch id {
+		case "pc-smoke":
 			s = campaignscenario.AlertingDaySmokeV1()
+		case "pc-control":
+			s = campaignscenario.AlertingDayControlV1()
 		}
 		return appruntime.CampaignView{Campaign: domain.Campaign{ID: id, Status: domain.CampaignCompleted, ScenarioID: s.ID, ScenarioHash: s.Hash()},
 			Events: []domain.CampaignEvent{{Sequence: 1, Type: precheckEventType, Detail: d}}}, nil
 	}
 	if c, ok := f.campaigns[id]; ok {
-		return appruntime.CampaignView{Campaign: c}, nil
+		return appruntime.CampaignView{Campaign: c, Options: f.options[id]}, nil
 	}
 	return appruntime.CampaignView{}, appruntime.ErrCampaignNotFound
 }
 func (f *pageData2) ListCampaigns(context.Context, domain.CampaignFilter) ([]domain.Campaign, error) {
+	f.listed = true
 	out := []domain.Campaign{{ID: "pc", StartedAt: time.Now()}}
 	for _, c := range f.campaigns {
 		out = append(out, c)
@@ -130,25 +138,59 @@ func cardJSON(hash, runBy string, comparable bool, v float64) json.RawMessage {
 	return b
 }
 
-func TestCompareMarksNonComparableRuns(t *testing.T) {
-	t0 := time.Now()
-	f := &pageData2{campaigns: map[string]domain.Campaign{
-		"a": {ID: "a", Status: domain.CampaignCompleted, RunBy: "agent", Comparable: true, StartedAt: t0, Scorecard: cardJSON("h1", "agent", true, 10)},
-		"b": {ID: "b", Status: domain.CampaignCompleted, RunBy: "human", Comparable: false, StartedAt: t0.Add(time.Second), Scorecard: cardJSON("h1", "human", false, 15)},
-		"c": {ID: "c", Status: domain.CampaignCompleted, RunBy: "agent", Custom: true, Comparable: true, StartedAt: t0.Add(2 * time.Second), Scorecard: cardJSON("h2", "agent", true, 10)},
-	}}
-	h := newPagesHandler(f)
+func comparisonPageFixture() (*pageData2, url.Values) {
+	hash := campaignscenario.AlertingDayControlV1().Hash()
+	t0 := time.Unix(1_800_000_000, 0)
+	campaign := func(id, by string, at time.Time, value float64) domain.Campaign {
+		return domain.Campaign{ID: id, ScenarioHash: hash, Status: domain.CampaignCompleted,
+			RunBy: by, Comparable: true, Verdict: domain.VerdictPass, Cleanup: domain.CleanupClean, StartedAt: at, EndedAt: at.Add(3 * time.Hour),
+			Scorecard: cardJSON(hash, by, true, value), Report: json.RawMessage(`{"fullLoadCompleted":true}`)}
+	}
+	opts := func(role domain.CampaignRole, build string) *domain.CampaignRecordedOptions {
+		return &domain.CampaignRecordedOptions{
+			Provenance: &domain.CampaignProvenance{Role: role, TargetBuild: build, CorrTestBuild: "same-runner", WorkloadConfig: "same-pack"},
+		}
+	}
+	return &pageData2{
+		campaigns: map[string]domain.Campaign{
+			"unrelated": campaign("unrelated", "agent", t0.Add(-4*time.Hour), 10),
+			"before":    campaign("before", "agent", t0, 100),
+			"after":     campaign("after", "human", t0.Add(4*time.Hour), 108),
+		},
+		options: map[string]*domain.CampaignRecordedOptions{
+			"unrelated": opts(domain.CampaignPreChangeControl, "older-build"),
+			"before":    opts(domain.CampaignPreChangeControl, "old-build"),
+			"after":     opts(domain.CampaignPostChangeControl, "new-build"),
+		},
+	}, url.Values{"ids": {"after"}, "referenceIds": {"before"}, "scenarioHash": {hash}, "mode": {"control_before_after"}}
+}
+
+func TestComparePageRendersReferenceProvenance(t *testing.T) {
+	f, query := comparisonPageFixture()
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/campaigns/compare?ids=a,b,c", nil))
-	body := w.Body.String()
-	for _, want := range []string{"not comparable", "custom scenario", "other scenario version", "human"} {
-		if !strings.Contains(body, want) {
+	newPagesHandler(f).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/campaigns/compare?"+query.Encode(), nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("compare page status=%d %s", w.Code, w.Body)
+	}
+	for _, want := range []string{"before", "after", "old-build", "new-build", "human", "provisional", "8.0%"} {
+		if !strings.Contains(w.Body.String(), want) {
 			t.Errorf("compare page missing %q", want)
 		}
 	}
-	api := apiDo(NewHandlerWithData(version.Info{}, f), http.MethodGet, "/api/v1/campaign/compare?ids=a,b", "", false, nil)
-	if api.Code != http.StatusOK {
-		t.Fatalf("api status=%d %s", api.Code, api.Body.String())
+}
+
+func TestCampaignStartFormForwardsComparisonProvenance(t *testing.T) {
+	f := &pageData2{checks: []precheck.Result{{ID: "B1", Tier: precheck.Blocking, Status: precheck.Pass}}}
+	form := url.Values{
+		"precheck": {"pc-control"}, "role": {"pre_change_control"}, "target_build": {"before-id"},
+		"corrtest_build": {"corrtest-id"}, "workload_config": {"same-pack"},
+	}
+	w := csrfPost(t, newPagesHandler(f), "/campaigns/start", form, true)
+	if w.Code != http.StatusSeeOther || len(f.started) != 1 || f.started[0].Provenance == nil ||
+		*f.started[0].Provenance != (domain.CampaignProvenance{
+			Role: domain.CampaignPreChangeControl, TargetBuild: "before-id", CorrTestBuild: "corrtest-id", WorkloadConfig: "same-pack",
+		}) {
+		t.Fatalf("start status=%d started=%v", w.Code, f.started)
 	}
 }
 

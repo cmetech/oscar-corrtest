@@ -94,6 +94,7 @@ type eventExport struct {
 	scenario, prechecks json.RawMessage
 	guards              []json.RawMessage
 	count               int
+	options             json.RawMessage
 }
 
 // exportEvents pages every campaign event by sequence into gzipped ndjson
@@ -127,6 +128,10 @@ func (e *Engine) exportEvents(ctx context.Context, id string, chunk int) ([]evid
 			switch ev.Type {
 			case scenarioEvent:
 				ex.scenario = ev.Detail
+			case domain.CampaignOptionsEvent:
+				if ex.options == nil {
+					ex.options = ev.Detail
+				}
 			case precheckEvent:
 				ex.prechecks = ev.Detail
 			case "campaign.guard":
@@ -253,8 +258,9 @@ func (e *Engine) ExportCampaign(ctx context.Context, id, destination string) (ev
 	put(ndjsonAtt("frontoffice.ndjson", foRows))
 
 	var tr struct {
-		LaneID string
-		T0     time.Time
+		LaneID            string
+		T0                time.Time
+		FullLoadCompleted bool `json:"fullLoadCompleted"`
 	}
 	_ = json.Unmarshal(c.Report, &tr)
 	if tr.LaneID != "" && !tr.T0.IsZero() { // traffic ran, so the ledger must exist
@@ -269,15 +275,25 @@ func (e *Engine) ExportCampaign(ctx context.Context, id, destination string) (ev
 	if len(c.Scorecard) > 0 {
 		note("scorecard", json.Unmarshal(c.Scorecard, &sc))
 	}
-	put(jsonAtt("campaign.json", map[string]any{"campaign": c.ID, "scenario": c.ScenarioID, "scenarioHash": c.ScenarioHash, "plan": scenarioDoc,
+	var recorded domain.CampaignRecordedOptions
+	if len(ex.options) != 0 {
+		note("campaign options", json.Unmarshal(ex.options, &recorded))
+	}
+	metadata := map[string]any{"campaign": c.ID, "scenario": c.ScenarioID, "scenarioHash": c.ScenarioHash, "plan": scenarioDoc,
 		"seed": seedOf(scenarioDoc), "trigger": c.Trigger, "runBy": c.RunBy, "status": c.Status, "verdict": c.Verdict, "cleanup": c.Cleanup,
 		"comparable": c.Comparable, "startedAt": c.StartedAt, "endedAt": c.EndedAt, "correlationRuns": children, "events": ex.count,
-		"complete": len(missing) == 0, "missing": append([]string{}, missing...)}))
+		"complete": len(missing) == 0, "missing": append([]string{}, missing...)}
+	if recorded.Provenance != nil {
+		metadata["provenance"] = recorded.Provenance
+		metadata["fullLoadCompleted"] = tr.FullLoadCompleted
+	}
+	put(jsonAtt("campaign.json", metadata))
 	var html bytes.Buffer
 	cardPretty, _ := json.MarshalIndent(json.RawMessage(card), "", "  ")
 	guardsPretty, _ := json.MarshalIndent(guards, "", "  ")
 	if err := campaignReport.Execute(&html, map[string]any{"ID": c.ID, "Scenario": c.ScenarioID, "Hash": c.ScenarioHash, "Status": c.Status,
 		"Verdict": c.Verdict, "Cleanup": c.Cleanup, "Comparable": c.Comparable, "RunBy": c.RunBy, "Trigger": c.Trigger, "Missing": missing,
+		"Provenance": recorded.Provenance, "FullLoadCompleted": tr.FullLoadCompleted,
 		"Reasons": sc.Reasons, "Headlines": sc.Headlines, "Guards": string(guardsPretty), "Scorecard": string(cardPretty), "Runs": children}); err != nil {
 		return evidence.Result{}, err
 	}

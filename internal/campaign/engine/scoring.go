@@ -97,7 +97,7 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 		judge(&card, fails, incon)
 	}
 	r.mu.Lock()
-	missing, stopped, open, corrT := append([]string{}, r.missing...), r.stopped, r.openIncidents, r.corrTickets
+	missing, stopped, open, corrT, normalEnd := append([]string{}, r.missing...), r.stopped, r.openIncidents, r.corrTickets, r.normalEnd
 	r.mu.Unlock()
 	report["correlationTickets"] = corrT
 	if len(open) > 0 {
@@ -124,6 +124,9 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 	case resendIncon != "" && card.Verdict == domain.VerdictPass:
 		card.Verdict, card.Reasons = domain.VerdictInconclusive, []string{resendIncon}
 	}
+	report["fullLoadCompleted"] = normalEnd && !stopped && trip == "" && !lost && forced == "" && resendIncon == "" &&
+		len(missing) == 0 && len(in.NotRun) == 0 && len(open) == 0 &&
+		end.Sub(r.t0) >= r.s.Phase("drain").Start && !card.EvidenceIncomplete && card.Verdict != domain.VerdictInconclusive
 	report["reasons"] = card.Reasons
 	return card, mustJSON(report)
 }

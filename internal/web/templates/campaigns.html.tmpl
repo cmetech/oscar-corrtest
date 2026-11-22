@@ -13,6 +13,14 @@
   {{range .Checks}}<tr><td>{{.ID}}</td><td>{{.Tier}}</td><td><span class="status-pill" data-status="{{.Status}}">{{.Status}}</span></td><td>{{.Measured}}</td><td>{{.Detail}}</td>
   <td>{{if and (eq .Tier "advisory") (ne .Status "pass")}}<label>Type {{.ID}}<input name="ack_{{.ID}}" autocomplete="off" aria-label="Type {{.ID}} to acknowledge"></label>{{end}}</td></tr>{{end}}
   </tbody></table></div>
+  {{if .ProvenanceRoles}}
+  <fieldset><legend>Qualification run provenance</legend>
+    <label>Comparison role <select name="role" required><option value="">Select a role</option>{{range .ProvenanceRoles}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
+    <label>OSCAR build manifest ID <input name="target_build" required></label>
+    <label>CorrTest binary ID <input name="corrtest_build" required></label>
+    <label>Workload configuration digest <input name="workload_config" required></label>
+  </fieldset>
+  {{end}}
   <button class="primary-button" type="submit"{{if .Blocked}} disabled{{end}}>Start campaign</button>
   {{if .Blocked}}<p>A blocking check is not passing; fix it and run pre-checks again.</p>{{end}}
 </form>

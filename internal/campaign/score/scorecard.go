@@ -123,6 +123,7 @@ type Scorecard struct {
 	ATT                          *ATT              // v2 only: the AT&T-shape measurements (report-only)
 	Fingerprint                  *FingerprintStats // fingerprint-policy lane facet only
 	Verdict                      domain.Verdict
+	EvidenceIncomplete           bool `json:",omitempty"`
 	Reasons                      []string
 }
 
@@ -416,6 +417,7 @@ func Compute(in Inputs, lim scenario.Limits) Scorecard {
 		incon = append(incon, "not run: "+n)
 	}
 
+	c.EvidenceIncomplete = len(incon) != 0
 	switch {
 	case len(fails) > 0:
 		c.Verdict, c.Reasons = domain.VerdictFail, fails
