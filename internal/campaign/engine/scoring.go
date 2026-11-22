@@ -39,6 +39,25 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 		report["reasons"] = card.Reasons
 		return card, mustJSON(report)
 	}
+	if r.managedOnly() {
+		ev, ok, err := r.store().FirstCampaignEvent(ctx, r.id, "native.managed.functional")
+		card := score.Scorecard{ScenarioHash: r.s.Hash(), Trigger: r.opts.Trigger, RunBy: r.opts.RunBy, CleanupClean: clean, Verdict: domain.VerdictInconclusive}
+		card.Reasons = append(card.Reasons, r.missing...)
+		if err != nil || !ok {
+			card.Reasons = append(card.Reasons, "managed functional evidence incomplete")
+		} else {
+			report["managedLifecycle"] = ev.Detail
+		}
+		// D3 also gates full physical provider reconciliation, exact cleanup and drain.
+		card.EvidenceIncomplete = true
+		card.Reasons = append(card.Reasons, "managed reconciliation gate pending")
+		if forced != "" {
+			card.Verdict = forced
+			card.Reasons = append(card.Reasons, why)
+		}
+		report["reasons"] = card.Reasons
+		return card, mustJSON(report)
+	}
 	ledger, ledgerErr := r.fetchLedger(ctx)
 	if ledgerErr != nil {
 		r.noteMissing("ledger: " + ledgerErr.Error())

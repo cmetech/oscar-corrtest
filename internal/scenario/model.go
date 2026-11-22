@@ -34,6 +34,8 @@ type Case struct {
 	// ObservationWindow is a campaign-only minimum observation (not part of the
 	// document schema): ticketed set B cases wait out OSCAR's ticket hold.
 	ObservationWindow time.Duration `json:"-" yaml:"-"`
+	// Campaign-only controlled PDI ticket on the synthetic parent.
+	ParentTicket bool `json:"-" yaml:"-"`
 }
 
 // Event is one deterministic alert occurrence. Varying labels are explicit

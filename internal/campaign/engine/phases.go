@@ -175,6 +175,12 @@ func (r *run) createDrafts(ctx context.Context) error {
 		def := targetops.PolicyDefinition{NotifierID: nid, Name: name, Action: p.Action, Mode: p.Mode, MaxResends: p.MaxResends,
 			Priority: i + 1, Enabled: false,
 			Condition: fmt.Sprintf(`campaign_run == %q and campaign_lane == %q`, r.id, laneFor(p))}
+		if p.Escalation != nil {
+			if p.Escalation.After < time.Second || p.Escalation.After%time.Second != 0 {
+				return fmt.Errorf("policy %s escalation must use whole positive seconds", p.Key)
+			}
+			def.Escalation = &targetops.Escalation{AfterSeconds: int(p.Escalation.After / time.Second), TargetSeverity: p.Escalation.TargetSeverity}
+		}
 		if p.Interval > 0 {
 			s := int(p.Interval / time.Second)
 			def.IntervalSeconds = &s
@@ -357,6 +363,11 @@ func (r *run) correlation(ctx context.Context) {
 	}
 	if len(setB) == 0 || !r.e.clock.SleepUntil(ctx, r.at("ticketing", false)) {
 		return
+	}
+	if r.s.NativeWorkload != nil && r.s.NativeWorkload.ManagedTL1 && r.s.ID == "alerting-day" {
+		if err := r.syntheticTicket(ctx); err != nil {
+			r.noteMissing("synthetic parent: " + err.Error())
+		}
 	}
 	stopAt := r.at("drain", false)
 	if r.s.Breaker != nil { // set B runs must finish before the forced breaker window

@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -63,6 +65,12 @@ func (s *amSender) Send(ctx context.Context, e Event, runID, lane string) (int, 
 		"annotations": map[string]string{"summary": e.Identity, "description": "OSCAR alerting campaign"},
 		"startsAt":    now,
 	}
+	if !e.StartsAt.IsZero() {
+		alert["startsAt"] = e.StartsAt.UTC().Format(time.RFC3339Nano)
+	}
+	if !e.ValidUntil.IsZero() {
+		alert["endsAt"] = e.ValidUntil.UTC().Format(time.RFC3339Nano)
+	}
 	if e.Kind == Resolve {
 		alert["endsAt"] = now
 	}
@@ -82,4 +90,59 @@ func (s *amSender) Send(ctx context.Context, e Event, runID, lane string) (int, 
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
 	return resp.StatusCode, nil
+}
+
+// NativeMember observes the exact native v2 stream used by the same sender.
+type NativeMember struct {
+	Status struct {
+		State                   string
+		SilencedBy, InhibitedBy []string
+	} `json:"status"`
+	Labels      map[string]string `json:"labels"`
+	Fingerprint string            `json:"fingerprint"`
+	StartsAt    time.Time         `json:"startsAt"`
+	EndsAt      time.Time         `json:"endsAt"`
+	Receivers   []struct {
+		Name string `json:"name"`
+	} `json:"receivers"`
+}
+
+func (s *amSender) Members(ctx context.Context, filters map[string]string) ([]NativeMember, error) {
+	u, err := url.Parse(s.url)
+	if err != nil {
+		return nil, err
+	}
+	q := u.Query()
+	for key, value := range filters {
+		q.Add("filter", key+"="+strconv.Quote(value))
+	}
+	u.RawQuery = q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	res, err := s.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		return nil, fmt.Errorf("native members HTTP %d", res.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(res.Body, 1<<20+1))
+	if err != nil || len(data) > 1<<20 {
+		return nil, fmt.Errorf("native members response bound")
+	}
+	var members []NativeMember
+	if json.Unmarshal(data, &members) != nil || members == nil {
+		return nil, fmt.Errorf("invalid native member response")
+	}
+	for _, member := range members {
+		for key, value := range filters {
+			if member.Labels[key] != value {
+				return nil, fmt.Errorf("native reader returned unrelated source")
+			}
+		}
+	}
+	return members, nil
 }

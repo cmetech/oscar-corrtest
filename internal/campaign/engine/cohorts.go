@@ -165,6 +165,9 @@ func (r *run) resolveFiring(ctx context.Context, includeLane bool) ([]oscar.Hist
 			continue
 		}
 		firing = append(firing, row)
+		if strings.HasPrefix(row.Labels["campaign_lane"], "native-") || row.Labels["integration"] == "tl1_probe" {
+			continue
+		} // only the actual source owns these clears
 		req, err := oscar.BuildHistoryResolve(row, r.id)
 		if err == nil {
 			// The latest re-post first: it is the pair that keeps the row open.

@@ -15,6 +15,8 @@ import (
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/frontoffice"
+	"github.com/cmetech/oscar-corrtest/internal/campaign/lane"
+	"github.com/cmetech/oscar-corrtest/internal/campaign/managed"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/precheck"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
@@ -108,6 +110,14 @@ func NewFromConfig(ctx context.Context, cfg campaign.Config, host Host) (*Engine
 	d := Deps{ReportDir: reportDir, Store: db, Worker: wc, Target: oscarTarget{oc}, SNOW: snow, Sink: sink, Metrics: metrics, Probe: probe,
 		Correlate: host.ExecuteScenarioForCampaign, ExportRun: host.ExportRun, TargetID: target.ID, IngestURL: root, CampaignNotifier: notifier,
 		FrontOfficeURL: root, FrontOfficeHTTP: targetHTTP, FrontOfficeUsers: users, Fingerprint: targetops.FingerprintPolicies{C: oc}}
+	d.nativeSender, err = lane.NewAlertmanagerSender(root+ingestPath, target.TLS.CAPath, 10*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.ManagedTL1 != nil {
+		actor, err := managed.NewActor(*cfg.ManagedTL1, root, targetHTTP)
+		d.managed = &managedDeps{setupErr: err, config: *cfg.ManagedTL1, actor: actor, oscar: oc, sink: sink, snow: snow}
+	}
 	d.TaskRuns = func(ctx context.Context, start, end time.Time) ([]targetops.TaskRun, error) {
 		return targetops.TaskRuns(ctx, oc, precheck.HomelabJobs, start, end)
 	}
@@ -116,7 +126,21 @@ func NewFromConfig(ctx context.Context, cfg campaign.Config, host Host) (*Engine
 			Store: db, Sink: sink, SinkHealthURL: cfg.SinkURL + "/healthz", SinkHTTP: sinkHTTP, SNOW: snow, Users: users,
 			FrontOfficeURL: root, HTTP: targetHTTP, CampaignNotifier: notifier, IngestURL: root + ingestPath, IngestHTTP: targetHTTP,
 			Queries: DefaultPrecheckQueries}
-		return precheck.Run(ctx, a, s, MinVersion)
+		if s.ID == "managed-alerts-smoke" && s.Version == "v1" {
+			results := []precheck.Result{d.managed.precheck(ctx)}
+			_, err := controlledNotifiers(ctx, d.Target, d.CampaignNotifier)
+			check := precheck.Result{ID: "managed-destinations", Tier: precheck.Blocking, Status: precheck.Pass, Detail: "controlled notifiers enabled"}
+			if err != nil {
+				check.Status = precheck.Fail
+				check.Detail = err.Error()
+			}
+			return append(results, check)
+		}
+		results := precheck.Run(ctx, a, s, MinVersion)
+		if s.NativeWorkload != nil && s.NativeWorkload.ManagedTL1 {
+			results = append(results, d.managed.precheck(ctx))
+		}
+		return results
 	}
 	return New(d, clock), nil
 }

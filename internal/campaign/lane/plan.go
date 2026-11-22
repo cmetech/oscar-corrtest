@@ -21,14 +21,16 @@ const (
 // Event is one scheduled send. FiringSeq is the Seq of the firing a resolve
 // closes (and equals Seq on firings).
 type Event struct {
-	Seq       int
-	At        time.Duration
-	Kind      EventKind
-	Identity  string
-	Severity  string
-	Instance  string
-	Ticket    bool
-	FiringSeq int
+	StartsAt   time.Time `json:",omitzero"`
+	ValidUntil time.Time `json:",omitzero"`
+	Seq        int
+	At         time.Duration
+	Kind       EventKind
+	Identity   string
+	Severity   string
+	Instance   string
+	Ticket     bool
+	FiringSeq  int
 }
 
 type Plan struct {

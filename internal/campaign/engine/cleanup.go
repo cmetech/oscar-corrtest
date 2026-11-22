@@ -119,7 +119,10 @@ func (r *run) finishAfterDrain(ctx context.Context, forced domain.Verdict, why s
 	if !r.t0.IsZero() {
 		r.waitQueues(ctx)
 	}
-	incidents := r.closeIncidents(ctx)
+	var incidents []targetops.Incident
+	if !r.managedOnly() {
+		incidents = r.closeIncidents(ctx)
+	}
 	end := r.now()
 	if err := r.transition(ctx, domain.CampaignCleaningUp, "cleanup"); err != nil {
 		return err
@@ -137,6 +140,12 @@ func mustJSON(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
 // waitQueues waits (<= 30 min) for every queue to return to the idle depth.
 func (r *run) waitQueues(ctx context.Context) {
 	deadline := r.now().Add(maxQueueWait)
+	if r.managedOnly() {
+		deadline = r.now().Add(r.s.Phase("drain").End - r.s.LoadEnd)
+		if stop := r.t0.Add(r.s.Phase("drain").End); stop.Before(deadline) {
+			deadline = stop
+		}
+	}
 	for next := r.now(); next.Before(deadline) && r.e.clock.SleepUntil(ctx, next); next = next.Add(guardEvery) {
 		v, err := r.e.d.Metrics.Query(ctx, queueDepthQuery, r.now())
 		if err != nil {
@@ -324,9 +333,18 @@ func (r *run) resolveIncident(ctx context.Context, number string) error {
 
 // cleanup walks the open mutations in reverse and restores each one.
 func (r *run) cleanup(ctx context.Context) domain.CleanupStatus {
+	if r.s.NativeWorkload != nil && r.s.NativeWorkload.ManagedTL1 {
+		_, started, se := r.store().FirstCampaignEvent(ctx, r.id, "native.tl1.started")
+		_, closed, ce := r.store().FirstCampaignEvent(ctx, r.id, "native.tl1.closed")
+		if se != nil || ce != nil || started && !closed {
+			r.addDirty("owned TL1 source closure unverified; reconcile original collector and receipts")
+		}
+	}
 	r.restoreKinds(ctx) // all kinds; the fingerprint policy resolves its alerts first
 	r.reresolveFingerprint(ctx)
-	r.verifyHistoryResolved(ctx)
+	if !r.managedOnly() {
+		r.verifyHistoryResolved(ctx)
+	}
 	open, err := r.store().OpenMutations(ctx, r.id)
 	r.mu.Lock()
 	incidents := append([]string{}, r.openIncidents...)

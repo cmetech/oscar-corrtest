@@ -54,16 +54,22 @@ type CorrelationSpec struct {
 	TicketedPatterns []string  `json:"ticketedPatterns"`
 }
 
+type EscalationSpec struct {
+	After          time.Duration `json:"after"`
+	TargetSeverity string        `json:"targetSeverity"`
+}
+
 type PolicySpec struct {
-	Key        string        `json:"key"`
-	Action     string        `json:"action"`
-	Mode       string        `json:"mode"`
-	Interval   time.Duration `json:"interval"`
-	Every      int           `json:"every"`
-	MaxResends *int          `json:"maxResends"`
-	Fresh      bool          `json:"fresh"`
-	Cohort     int           `json:"cohort"`
-	Notifier   string        `json:"notifier"`
+	Key        string          `json:"key"`
+	Action     string          `json:"action"`
+	Mode       string          `json:"mode"`
+	Interval   time.Duration   `json:"interval"`
+	Every      int             `json:"every"`
+	MaxResends *int            `json:"maxResends"`
+	Fresh      bool            `json:"fresh"`
+	Cohort     int             `json:"cohort"`
+	Notifier   string          `json:"notifier"`
+	Escalation *EscalationSpec `json:"escalation,omitempty"`
 }
 
 type FrontOfficeSpec struct {
@@ -170,6 +176,10 @@ type NativeWorkloadSpec struct {
 	Cohorts          []NativeCohort `json:"cohorts"`
 	ManagedTL1       bool           `json:"managedTL1,omitempty"`
 	ConfiguredPolicy bool           `json:"configuredPolicy,omitempty"`
+	ManagedPolicy    *PolicySpec    `json:"managedPolicy,omitempty"`
+	ManagedRepeat    *PolicySpec    `json:"managedRepeat,omitempty"`
+	ManagedSegment   time.Duration  `json:"managedSegment,omitempty"`
+	ManagedRate      float64        `json:"managedRate,omitempty"`
 }
 
 type Scenario struct {
@@ -222,10 +232,10 @@ func AlertingDayV1() Scenario {
 			ResolveAfter: 15 * min, TicketEveryNth: 20, TicketFrom: 60 * min, TicketTo: 120 * min},
 		Correlation: CorrelationSpec{SetA: setA, SetB: setB, TicketedPatterns: []string{"flood", "threshold"}},
 		Resend: []PolicySpec{
-			{"R1", "notification", "time", 110 * time.Second, 0, n(5), false, 10, "CAMPAIGN_SINK"},
-			{"R2", "notification", "occurrences", 0, 3, nil, true, 10, "CAMPAIGN_SINK"},
-			{"R3", "notification", "either", 300 * time.Second, 5, n(2), true, 10, "CAMPAIGN_SINK"},
-			{"R4", "ticket", "time", 590 * time.Second, 0, n(2), false, 10, "ALERTHISTORY"},
+			{"R1", "notification", "time", 110 * time.Second, 0, n(5), false, 10, "CAMPAIGN_SINK", nil},
+			{"R2", "notification", "occurrences", 0, 3, nil, true, 10, "CAMPAIGN_SINK", nil},
+			{"R3", "notification", "either", 300 * time.Second, 5, n(2), true, 10, "CAMPAIGN_SINK", nil},
+			{"R4", "ticket", "time", 590 * time.Second, 0, n(2), false, 10, "ALERTHISTORY", nil},
 		},
 		Redelivery: 130 * time.Second, ResendUntil: 118 * min, // clear of TransportDedupWindow
 		FrontOffice: FrontOfficeSpec{Users: 4, Interval: 15 * time.Second, Jitter: 3 * time.Second, SearchEvery: 2 * min},
@@ -275,7 +285,7 @@ func AlertingDaySmokeV1() Scenario {
 		Severity:     map[string]float64{"critical": 0.05, "major": 0.15, "minor": 0.40, "warning": 0.40},
 		ResolveAfter: min, TicketEveryNth: 100, TicketFrom: 4 * min, TicketTo: 8 * min} // seed 20261113: 2 tickets
 	s.Correlation = CorrelationSpec{SetA: []CaseRef{{Pattern: "flood", Level: "builtin"}}, TicketedPatterns: []string{"flood", "threshold"}}
-	s.Resend = []PolicySpec{{"R1", "notification", "time", 50 * time.Second, 0, n(2), false, 2, "CAMPAIGN_SINK"}}
+	s.Resend = []PolicySpec{{"R1", "notification", "time", 50 * time.Second, 0, n(2), false, 2, "CAMPAIGN_SINK", nil}}
 	s.ResendUntil = 9*min + 48*time.Second // v1 stops cohorts just before drain; ~3 deliveries after activation
 	return s
 }
@@ -324,6 +334,10 @@ func AlertingDayV3() Scenario {
 	s.Phases = append(s.Phases[:5], Phase{"sustained_load", 120 * time.Minute, s.LoadEnd}, s.Phase("drain"))
 	s.Resend, s.Redelivery, s.ResendUntil = v2.Resend, v2.Redelivery, v2.ResendUntil
 	s.NativeWorkload.ConfiguredPolicy, s.NativeWorkload.ManagedTL1 = true, true
+	s.NativeWorkload.ManagedPolicy = &PolicySpec{Key: "TL1", Action: "notification", Mode: "time", Interval: 60 * time.Second, Notifier: "CAMPAIGN_SINK", Escalation: &EscalationSpec{After: 3 * time.Minute, TargetSeverity: "critical"}}
+	s.NativeWorkload.ManagedRepeat = &PolicySpec{Key: "REPEAT", Action: "notification", Mode: "time", Interval: time.Minute, Notifier: "CAMPAIGN_SINK"}
+	s.NativeWorkload.ManagedSegment = 10 * time.Minute
+	s.NativeWorkload.ManagedRate = 0.2
 	s.Limits.RegressionPct = 10
 	return s
 }
@@ -351,6 +365,9 @@ func ManagedAlertsSmokeV1() Scenario {
 	s.Baseline, s.Correlation, s.Standing = BaselineSpec{}, CorrelationSpec{}, nil
 	s.Resend, s.Redelivery, s.ResendUntil = nil, 0, 0
 	s.NativeWorkload.Cohorts = nil
+	s.NativeWorkload.ManagedRate = 0
+	s.NativeWorkload.ManagedRepeat = nil
+	s.NativeWorkload.ManagedSegment = 0
 	return s
 }
 
