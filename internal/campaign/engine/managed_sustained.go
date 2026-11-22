@@ -14,7 +14,7 @@ import (
 // as well as the first, retaining missing/duplicate/late evidence separately.
 func (m *managedLane) sustained(ctx context.Context, p *policyState, span time.Duration) {
 	r := m.run
-	scope := "LOAD"
+	scope := "POL"
 	if p.spec.Escalation == nil {
 		scope = "REPEAT"
 	}
@@ -49,13 +49,30 @@ func (m *managedLane) sustained(ctx context.Context, p *policyState, span time.D
 		}
 		// Leave a bounded readback interval before the next source starts. The
 		// remaining tail is explicitly reported for D3's final closure accounting.
-		if !r.e.clock.SleepUntil(ctx, until.Add(-8*time.Second)) {
-			break
+		var timing dispatchSamples
+		cut := until.Add(-8 * time.Second)
+		for r.now().Before(cut) {
+			sample, er := m.config.RootSamples(ctx, f.History.ID)
+			if er != nil {
+				r.noteMissing("sustained dispatch observation unavailable")
+				break
+			}
+			timing.add(sample)
+			next := r.now().Add(2 * time.Second)
+			if next.After(cut) {
+				next = cut
+			}
+			if !r.e.clock.SleepUntil(ctx, next) {
+				return
+			}
 		}
 		snap, err := m.config.Snapshot(ctx, f.History.ID)
 		if err != nil {
 			r.noteMissing(fmt.Sprintf("segment %s/%d journal: %v", scope, i, err))
 			continue
+		}
+		if err = m.holdUnknown(ctx, f, snap); err != nil {
+			r.noteMissing(err.Error())
 		}
 		receipts, err := m.sink.ManagedReceipts(ctx, aid, at)
 		if err != nil {
@@ -71,88 +88,71 @@ func (m *managedLane) sustained(ctx context.Context, p *policyState, span time.D
 				}
 			}
 		}
-		err = segmentEvidence(p, f, snap, owned)
+		timing.add(snap)
+
+		err = segmentEvidence(p, f, snap, owned, timing)
 		reason := ""
 		if err != nil {
 			reason = err.Error()
 			r.noteMissing(fmt.Sprintf("segment %s/%d: %v", scope, i, err))
 		}
-		if err = m.save(ctx, "native.managed.segment", map[string]any{"index": i, "lane": scope, "start": at, "end": until, "expectedPolicy": p.id, "interval": p.spec.Interval, "escalation": p.spec.Escalation, "fixture": f, "snapshot": snap, "receipts": owned, "reason": reason}); err != nil {
+		if err = m.save(ctx, "native.managed.segment", map[string]any{"index": i, "lane": scope, "start": at, "end": until, "expectedPolicy": p.id, "interval": p.spec.Interval, "escalation": p.spec.Escalation, "fixture": f, "snapshot": snap, "dispatch": timing, "receipts": owned, "reason": reason}); err != nil {
 			r.noteMissing(err.Error())
 		}
 	}
 	// clearOwned sends the final run-owned clear in the drain, even on stop.
 }
-func segmentEvidence(p *policyState, f NativeEpisodeFixture, s managed.Snapshot, receipts []targetops.Receipt) error {
-	pinned := ""
-	for _, b := range s.Bindings {
-		if b.Notifier == p.notifierID && b.Action == "notification" && b.Rule == p.id {
-			pinned = b.Revision
-		}
+func segmentEvidence(p *policyState, f NativeEpisodeFixture, s managed.Snapshot, receipts []targetops.Receipt, timing dispatchSamples) error {
+	b, err := ownedBinding(p, s.Bindings)
+	if err != nil {
+		return err
 	}
-	if pinned == "" {
-		return errors.New("expected policy binding absent")
+	active, err := time.Parse(time.RFC3339Nano, f.Source.ActiveSince)
+	if err != nil {
+		return err
 	}
+	clock := slotClock{receiver: f.Source.Receiver, active: active, source: f.Source.SourceSeverity}
 	var low, higher, esc int
+	seen := map[string]bool{}
 	for _, e := range s.Effects {
-		if e.TargetState == "unknown" || e.CallbackOutcome == "unknown" || e.ChildState == "unknown_requires_reconciliation" {
+		if unknownEffect(e) {
 			return errors.New("original recipient outcome unknown")
 		}
-		if e.Notifier != p.notifierID || e.Action != "notification" || e.ScheduleRoot == "" {
+		if e.Notifier != p.notifierID || e.Action != p.spec.Action {
 			continue
 		}
-		if e.TargetState != "confirmed" || e.ConfirmedAt == "" || e.Revision != pinned || e.Logical != e.ScheduleRoot {
-			return errors.New("unsettled or unbound scheduled recipient")
-		}
-		switch {
-		case e.Kind == "resend" && e.Severity == "major" && esc == 0:
-			low++
-		case e.Kind == "escalate" && p.spec.Escalation != nil && e.Severity == p.spec.Escalation.TargetSeverity:
-			esc++
-		case e.Kind == "resend" && p.spec.Escalation != nil && esc == 1 && e.Severity == p.spec.Escalation.TargetSeverity:
-			higher++
-		default:
-			return errors.New("unexpected scheduled action/recipient severity")
-		}
-	}
-	// Every overdue ordinary slot must be represented. Confirmation resets the
-	// clock; target/provider latency is retained separately. A missing late-run
-	// resend must fail even when early counts were sufficient.
-	var last time.Time
-	for _, e := range s.Effects {
-		if e.Notifier != p.notifierID || e.Action != "notification" || e.ConfirmedAt == "" {
+		if e.ScheduleRoot == "" {
+			if e.ConfirmedAt == "" {
+				continue
+			}
+			confirmed, err := time.Parse(time.RFC3339Nano, e.ConfirmedAt)
+			if err != nil {
+				return err
+			}
+			if e.Kind != "ordinary" || low+higher+esc != 0 || !clock.last.IsZero() {
+				return errors.New("ambiguous extra native contact within quiet segment")
+			}
+			clock.last = confirmed
 			continue
 		}
-		when, err := time.Parse(time.RFC3339Nano, e.ConfirmedAt)
-		if err != nil {
+		if seen[e.ScheduleRoot] {
+			return errors.New("duplicate scheduled recipient")
+		}
+		seen[e.ScheduleRoot] = true
+		if err = clock.accept(p, b, e, timing.Windows[e.Logical]); err != nil {
 			return err
 		}
-		if e.ScheduleRoot != "" && !last.IsZero() {
-			next := last.Add(p.spec.Interval)
-			active, err := time.Parse(time.RFC3339Nano, f.Source.ActiveSince)
-			if err != nil {
-				return err
-			}
-			if p.spec.Escalation != nil {
-				raise := active.Add(p.spec.Escalation.After)
-				if raise.After(last) && raise.Before(next) {
-					next = raise
-				}
-			}
-			callback, err := time.Parse(time.RFC3339Nano, e.ReceivedAt)
-			if err != nil {
-				return err
-			}
-			if callback.Before(next) || callback.After(next.Add(30*time.Second)) {
-				return errors.New("scheduled callback outside independent segment deadline")
-			}
-		}
-		if when.After(last) {
-			last = when
+		if e.Kind == "escalate" {
+			esc++
+		} else if clock.raised {
+			higher++
+		} else {
+			low++
 		}
 	}
-	if last.IsZero() || s.MeasuredAt.After(last.Add(p.spec.Interval+30*time.Second)) {
-		return errors.New("sustained policy has an overdue unobserved repeat")
+	due, _, _ := clock.next(p)
+	if s.MeasuredAt.After(due.Add(30 * time.Second)) {
+		return errors.New("sustained policy has an overdue unobserved action")
 	}
 	if low < 1 || p.spec.Escalation != nil && (esc != 1 || higher < 1) {
 		return errors.New("required repeat/escalation evidence absent")

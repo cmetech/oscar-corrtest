@@ -138,55 +138,6 @@ func (m *managedLane) policyChanges(ctx context.Context) error {
 	}
 	return m.clear(ctx, aid, cond)
 }
-func (m *managedLane) suppression(ctx context.Context) error {
-	reader, ok := m.run.e.d.nativeSender.(nativeReader)
-	if !ok {
-		return errors.New("suppression reader unavailable")
-	}
-	for _, kind := range []string{"silence", "inhibit"} {
-		aid := managed.AID(m.run.id, kind, 0)
-		cond := m.condition(kind)
-		// The operator owns an isolated matcher that suppresses only Major for
-		// this fixture. The Minor source first establishes the native reference.
-		if err := m.emit(ctx, aid, cond, "MN"); err != nil {
-			return err
-		}
-		f, err := m.observe(ctx, aid, "minor", "")
-		if err != nil {
-			return err
-		}
-		if err = m.emit(ctx, aid, cond, "MJ"); err != nil {
-			return err
-		}
-		wait, cancel := context.WithTimeout(ctx, time.Minute)
-		err = poll(wait, func() (bool, error) {
-			members, err := reader.Members(wait, map[string]string{"aid": aid, "node": m.config.TID, "source_id": m.config.SourceID, "severity": "major"})
-			if err != nil {
-				return false, err
-			}
-			if len(members) != 1 || kind == "silence" && len(members[0].Status.SilencedBy) == 0 || kind == "inhibit" && len(members[0].Status.InhibitedBy) == 0 {
-				return false, nil
-			}
-			selection, err := m.actor.Eligibility(wait, f.History.ID)
-			if err != nil {
-				return false, err
-			}
-			resend := selection.Actions["resend"]
-			if resend.Allowed || resend.Reason != "NATIVE_SUPPRESSED" || !selection.Actions["acknowledge"].Allowed || !selection.Actions["ticket_create"].Allowed {
-				return false, nil
-			}
-			return true, m.save(wait, "native.suppression_changed", map[string]any{"kind": kind, "source": members[0], "eligibility": selection})
-		})
-		cancel()
-		if err != nil {
-			return err
-		}
-		if err = m.clear(ctx, aid, cond); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 
 // Exercise a genuine emitted parent under the same serial correlation lane.
 // Normal set-B tickets stay on their existing source alerts.

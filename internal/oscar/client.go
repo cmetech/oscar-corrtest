@@ -616,6 +616,7 @@ type annotationWire struct {
 }
 
 type historyWire struct {
+	Acknowledged      bool             `json:"acknowledged"`
 	SourceSeverity    string           `json:"source_severity"`
 	EffectiveSeverity string           `json:"effective_severity"`
 	TicketID          string           `json:"ticket_id"`
@@ -634,7 +635,7 @@ type historyWire struct {
 }
 
 func (r historyWire) normalized() HistoryRecord {
-	result := HistoryRecord{SourceSeverity: r.SourceSeverity, EffectiveSeverity: r.EffectiveSeverity, TicketID: r.TicketID, OccurrenceCount: r.OccurrenceCount, EpisodeNumber: r.EpisodeNumber, OriginalSeverity: r.OriginalSeverity, Severity: r.Severity, StartsAt: r.StartsAt.Time, ID: fmt.Sprint(r.ID), AlertName: r.AlertName, Fingerprint: r.Fingerprint, Status: r.Status, CreatedAt: r.CreatedAt.Time, Labels: map[string]string{}, Annotations: map[string]string{}}
+	result := HistoryRecord{Acknowledged: r.Acknowledged, SourceSeverity: r.SourceSeverity, EffectiveSeverity: r.EffectiveSeverity, TicketID: r.TicketID, OccurrenceCount: r.OccurrenceCount, EpisodeNumber: r.EpisodeNumber, OriginalSeverity: r.OriginalSeverity, Severity: r.Severity, StartsAt: r.StartsAt.Time, ID: fmt.Sprint(r.ID), AlertName: r.AlertName, Fingerprint: r.Fingerprint, Status: r.Status, CreatedAt: r.CreatedAt.Time, Labels: map[string]string{}, Annotations: map[string]string{}}
 	for _, item := range r.Labels {
 		result.Labels[item.Label] = item.Value
 	}

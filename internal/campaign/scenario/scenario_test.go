@@ -315,7 +315,7 @@ func TestV3LoadsFor150MinutesBeforeDrain(t *testing.T) {
 func TestManagedAlertsSmokeScenarioIsIndependent(t *testing.T) {
 	s, ok := Lookup("managed-alerts-smoke@v1")
 	if !ok || !s.Custom || s.RequiresComparisonProvenance() || s.Baseline.Rate != 0 || s.Standing != nil ||
-		s.LoadEnd != 12*time.Minute || s.Phase("drain").Start != s.LoadEnd || s.Phase("drain").End != 17*time.Minute ||
+		s.LoadEnd != 20*time.Minute || s.Phase("drain").Start != s.LoadEnd || s.Phase("drain").End != 25*time.Minute ||
 		s.NativeWorkload == nil || !s.NativeWorkload.ManagedTL1 || !s.NativeWorkload.ConfiguredPolicy ||
 		s.Hash() == AlertingDaySmokeV3().Hash() {
 		t.Fatalf("managed functional smoke: %+v", s)

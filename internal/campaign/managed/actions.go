@@ -24,25 +24,53 @@ type Eligibility struct {
 	Actions   map[string]Decision
 }
 type CommandReceipt struct {
-	Error        struct{ Code string } `json:"error"`
-	ItemStatus   int                   `json:"status_code"`
-	StatusCode   int                   `json:"statusCode"`
-	RequestID    string                `json:"request_id"`
-	Operation    string                `json:"operation_id"`
-	ResendID     string                `json:"resend_id"`
-	AlertID      string                `json:"alert_id"`
-	NativeState  string                `json:"native_state"`
-	TargetCounts map[string]int        `json:"native_target_counts"`
-	Counts       map[string]int
-	Code         string
-	Outcome      string
-	Record       struct {
+	Owner         int64                 `json:"-"`
+	IssuedRequest string                `json:"-"`
+	TicketID      string                `json:"ticket_id"`
+	Error         struct{ Code string } `json:"error"`
+	ItemStatus    int                   `json:"status_code"`
+	StatusCode    int                   `json:"statusCode"`
+	RequestID     string                `json:"request_id"`
+	Operation     string                `json:"operation_id"`
+	ResendID      string                `json:"resend_id"`
+	AlertID       string                `json:"alert_id"`
+	NativeState   string                `json:"native_state"`
+	TargetCounts  stateCounts           `json:"native_target_counts"`
+	Counts        stateCounts
+	Code          string
+	Outcome       string
+	Record        struct {
 		ID           string
 		Episode      int `json:"episode_number"`
 		Acknowledged bool
 	}
 	Results []CommandReceipt
 }
+
+// Counts are maps in the public response. Keep only protocol states in evidence.
+type stateCounts map[string]int
+
+func (s *stateCounts) UnmarshalJSON(data []byte) error {
+	var values map[string]int
+	if err := json.Unmarshal(data, &values); err != nil {
+		return err
+	}
+	out := stateCounts{}
+	for key, count := range values {
+		if count < 0 {
+			return errors.New("invalid native receipt count")
+		}
+		switch key {
+		case "confirmed", "no_effect", "partial", "unknown", "pending", "held", "ready", "entered", "reserved", "accepted", "failed", "sent", "suppressed", "queued", "dispatching", "skipped":
+		default:
+			key = "unrecognized"
+		}
+		out[key] += count
+	}
+	*s = out
+	return nil
+}
+
 type Actor struct {
 	root, cookie string
 	client       *http.Client
@@ -98,7 +126,15 @@ func (a *Actor) Eligibility(ctx context.Context, id string) (Eligibility, error)
 	if err != nil || status != 200 || len(res.Items) != 1 || res.Items[0].HistoryID != id || res.Items[0].Episode < 1 {
 		return zero, errors.New("signed eligibility unavailable for selected episode")
 	}
-	return res.Items[0], nil
+	item := res.Items[0]
+	actions := map[string]Decision{}
+	for _, key := range []string{"resend", "ticket_create", "acknowledge", "clear", "escalate", "ticket_associate"} {
+		if decision, ok := item.Actions[key]; ok {
+			actions[key] = decision
+		}
+	}
+	item.Actions = actions
+	return item, nil
 }
 
 // Command sends one intent; a transport error never allocates a replacement ID.

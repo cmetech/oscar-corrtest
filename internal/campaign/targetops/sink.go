@@ -52,7 +52,19 @@ func (s *Sink) Receipts(ctx context.Context, capture, campaignRun string, since 
 }
 
 func (s *Sink) ManagedReceipts(ctx context.Context, aid string, since time.Time) ([]Receipt, error) {
-	return s.receiptsByLabel(ctx, "campaign", "aid", aid, since)
+	receipts, err := s.receiptsByLabel(ctx, "campaign", "aid", aid, since)
+	if err != nil {
+		return nil, err
+	}
+	// The shared list API permits whole-second "since" filters. Enforce the
+	// actual subsecond admission/hold window against the captured timestamps.
+	out := receipts[:0]
+	for _, r := range receipts {
+		if !r.ReceivedAt.Before(since) {
+			out = append(out, r)
+		}
+	}
+	return out, nil
 }
 
 func (s *Sink) receiptsByLabel(ctx context.Context, capture, label, value string, since time.Time) ([]Receipt, error) {

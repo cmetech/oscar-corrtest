@@ -84,5 +84,5 @@ func (r *run) observeOrdinary(ctx context.Context, e lane.Event, path string) {
 		r.noteMissing("native member/receiver/start unproved for " + e.Identity)
 		return
 	}
-	r.event(ctx, "native.ordinary.observed", "info", "source read from public native v2 API", map[string]any{"identity": e.Identity, "route": path, "member": members[0]})
+	r.event(ctx, "native.ordinary.observed", "info", "source read from public native v2 API", map[string]any{"identity": e.Identity, "route": path, "member": memberEvidence(members[0])})
 }

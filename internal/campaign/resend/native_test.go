@@ -130,29 +130,28 @@ func TestUnknownTicketDoesNotRecreate(t *testing.T) {
 	}
 }
 func TestEntryEnrollmentAndCrashOwnership(t *testing.T) {
-	for _, order := range []bool{true, false} {
-		for _, tracked := range []bool{true, false} {
-			for _, failure := range []string{"crash", "unknown"} {
-				e := EntryFact{"source", "entry", "one", tracked}
-				enroll := EntryFact{"source", "enroll", "catalog", true}
-				f := []EntryFact{e, enroll}
-				if order {
-					f = []EntryFact{enroll, e}
-				}
-				f = append(f, EntryFact{"source", failure, "one", tracked}, EntryFact{"sibling", "entry", "independent", true})
-				replacement := append(append([]EntryFact{}, f...), EntryFact{"source", "entry", "two", true})
-				held := tracked || failure == "unknown"
-				if err := CheckEntryHistory(replacement); (err != nil) != held {
-					t.Fatalf("%+v: %v", replacement, err)
-				}
-				if held {
-					if err := CheckEntryHistory(append(f, EntryFact{"source", "confirmed", "two", true})); err == nil {
-						t.Fatal("foreign owner settled original")
-					}
-					if err := CheckEntryHistory(append(f, EntryFact{"source", "confirmed", "one", true})); err != nil {
-						t.Fatal(err)
-					}
-				}
+	for _, enrollFirst := range []bool{false, true} {
+		for _, external := range []string{"", "accepted", "unknown"} {
+			entry := EntryFact{"source", "entry", "one"}
+			enroll := EntryFact{"source", "enroll", "catalog"}
+			seq := []EntryFact{entry, enroll}
+			if enrollFirst {
+				seq = []EntryFact{enroll, entry}
+			}
+			if external != "" {
+				seq = append(seq, EntryFact{"source", external, "one"})
+			}
+			seq = append(seq, EntryFact{"source", "crash", "one"}, EntryFact{"other", "entry", "independent"})
+			if err := CheckEntryHistory(seq); err != nil {
+				t.Fatal(err)
+			}
+			check := func(f EntryFact) error { return CheckEntryHistory(append(append([]EntryFact{}, seq...), f)) }
+			held := enrollFirst || external != ""
+			if err := check(EntryFact{"source", "entry", "replacement"}); (err != nil) != held {
+				t.Fatal(enrollFirst, external, err)
+			}
+			if held && (check(EntryFact{"source", "confirmed", "foreign"}) == nil || check(EntryFact{"source", "confirmed", "one"}) != nil) {
+				t.Fatal("original owner fence", seq)
 			}
 		}
 	}

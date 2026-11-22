@@ -35,6 +35,7 @@ type HistoryQuery struct {
 }
 
 type HistoryRecord struct {
+	Acknowledged      bool              `json:"acknowledged,omitempty"`
 	SourceSeverity    string            `json:"sourceSeverity,omitempty"`
 	EffectiveSeverity string            `json:"effectiveSeverity,omitempty"`
 	TicketID          string            `json:"ticketId,omitempty"`

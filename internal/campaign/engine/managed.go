@@ -40,7 +40,7 @@ func (d *managedDeps) precheck(ctx context.Context) precheck.Result {
 		result.Detail = err.Error()
 		return result
 	}
-	if _, err := d.config.Snapshot(ctx, uuid.Nil.String()); err != nil {
+	if err := d.config.CheckAccess(ctx); err != nil {
 		result.Detail = err.Error()
 		return result
 	}
@@ -57,13 +57,13 @@ type managedLane struct {
 	definition targetops.PolicyDefinition
 	run        *run
 	*managedDeps
-	peer            *managed.Peer
-	unsettledTicket string
-	repeat          *policyState
-	policy          *policyState
-	cleared         sync.Map
-	mu              sync.Mutex
-	open            map[string]string // AID -> condition; only this run's PDUs
+	peer *managed.Peer
+
+	repeat  *policyState
+	policy  *policyState
+	cleared sync.Map
+	mu      sync.Mutex
+	open    map[string]string // AID -> condition; only this run's PDUs
 }
 
 func (r *run) managedOnly() bool { return r.s.ID == "managed-alerts-smoke" && r.s.Version == "v1" }
@@ -151,39 +151,50 @@ func (r *run) managedPhase(ctx context.Context) {
 		r.addDirty(err.Error())
 		return
 	}
-	if m.unsettledTicket != "" {
-		r.addDirty("ticket ownership requires reconciliation for " + m.unsettledTicket)
-		return
-	}
+
 	if err = m.save(cleanCtx, "native.tl1.closed", map[string]bool{"verified": true}); err != nil {
 		r.addDirty(err.Error())
 	}
 }
 func (m *managedLane) save(ctx context.Context, kind string, value any) error {
-	b, err := json.Marshal(value)
+	b, err := json.Marshal(managedEventEvidence(value))
 	if err != nil {
 		return err
 	}
 	return m.run.store().AppendCampaignEvent(ctx, m.run.id, kind, "info", kind, b, m.run.now())
 }
-func (m *managedLane) activate(ctx context.Context, p scenario.PolicySpec) error {
+func (m *managedLane) policyDefinition(p scenario.PolicySpec) (targetops.PolicyDefinition, error) {
 	r := m.run
 	// The test rule matches only this campaign's wire conditions on the exact
 	// commissioned source and TID. Mixed clean/no-policy conditions are distinct.
-	condition := fmt.Sprintf(`source_id == %q and node == %q and (condition == %q or condition == %q)`, m.config.SourceID, m.config.TID, m.condition("POL"), m.condition("LOAD"))
-	if p.Key == "EDIT" || p.Key == "REPEAT" {
-		condition = fmt.Sprintf(`source_id == %q and node == %q and condition == %q`, m.config.SourceID, m.config.TID, m.condition(p.Key))
+	scope := p.Key
+	if scope == "TL1" {
+		scope = "POL"
+	}
+	condition := fmt.Sprintf(`source_id == %q and node == %q and condition == %q`, m.config.SourceID, m.config.TID, m.condition(scope))
+	priority := r.s.NativeWorkload.ManagedPriorities[p.Key]
+	if priority <= len(r.s.Resend) {
+		return targetops.PolicyDefinition{}, errors.New("invalid managed policy priority")
 	}
 	name := "Campaign-" + r.id + "-" + p.Key
 	nid := r.sinkID
 	if nid == "" || p.Interval < time.Second || p.Escalation != nil && p.Escalation.After < time.Second {
-		return errors.New("missing controlled recipient or interval")
+		return targetops.PolicyDefinition{}, errors.New("missing controlled recipient or interval")
 	}
 	sec := int(p.Interval / time.Second)
-	def := targetops.PolicyDefinition{NotifierID: nid, Name: name, Action: p.Action, Mode: p.Mode, IntervalSeconds: &sec, Priority: 1, Condition: condition}
+	def := targetops.PolicyDefinition{NotifierID: nid, Name: name, Action: p.Action, Mode: p.Mode, IntervalSeconds: &sec, Priority: priority, Condition: condition}
 	if p.Escalation != nil {
 		def.Escalation = &targetops.Escalation{AfterSeconds: int(p.Escalation.After / time.Second), TargetSeverity: p.Escalation.TargetSeverity}
 	}
+	return def, nil
+}
+func (m *managedLane) activate(ctx context.Context, p scenario.PolicySpec) error {
+	r := m.run
+	def, err := m.policyDefinition(p)
+	if err != nil {
+		return err
+	}
+	name, nid := def.Name, def.NotifierID
 	prior := policyPrior{"", name, nid, p.Action}
 	intent, err := r.record(ctx, kindPolicyCreate, name, prior)
 	if err != nil {
@@ -269,13 +280,17 @@ func (m *managedLane) rows(ctx context.Context, aid string) ([]oscar.HistoryReco
 
 type NativeEpisodeFixture struct {
 	Source   managed.SourceReceipt
-	History  oscar.HistoryRecord
+	History  observedHistory
 	Bindings []managed.Binding
 }
 
 func (m *managedLane) observe(ctx context.Context, aid, sev, previous string) (NativeEpisodeFixture, error) {
 	var fixture NativeEpisodeFixture
-	wait, stop := context.WithTimeout(ctx, 65*time.Second)
+	budget := 65 * time.Second
+	if aid == managed.AID(m.run.id, "AUTO", 0) {
+		budget = setBTicketObservation
+	}
+	wait, stop := context.WithTimeout(ctx, budget)
 	defer stop()
 	err := poll(wait, func() (bool, error) {
 		rows, err := m.rows(wait, aid)
@@ -321,7 +336,8 @@ func (m *managedLane) observe(ctx context.Context, aid, sev, previous string) (N
 				}
 				valid := false
 				for _, v := range members {
-					if v.Fingerprint == f.Fingerprint && v.EndsAt.After(m.run.now()) && v.Labels["correlation_key"] == f.Correlation {
+					if observedMember(v, f, sev, m.run.now()) && len(v.Receivers) == 1 && v.Receivers[0].Name != "" {
+						f.Receiver = v.Receivers[0].Name
 						valid = true
 						f.RefreshDeadline = v.EndsAt.Format(time.RFC3339Nano)
 					}
@@ -329,7 +345,7 @@ func (m *managedLane) observe(ctx context.Context, aid, sev, previous string) (N
 				if !valid {
 					return false, nil
 				}
-				fixture = NativeEpisodeFixture{f, row, snapshot.Bindings}
+				fixture = NativeEpisodeFixture{f, historyEvidence(row), snapshot.Bindings}
 				return true, m.save(wait, "native.source_observed", fixture)
 			}
 		}
@@ -337,12 +353,18 @@ func (m *managedLane) observe(ctx context.Context, aid, sev, previous string) (N
 	})
 	return fixture, err
 }
-func (m *managedLane) command(ctx context.Context, kind, id string) (managed.CommandReceipt, error) {
+func (m *managedLane) command(ctx context.Context, kind string, f NativeEpisodeFixture) (managed.CommandReceipt, error) {
+	id := f.History.ID
 	request := uuid.NewString()
 	if err := m.save(ctx, "native.action.intent", map[string]string{"history": id, "kind": kind, "request": request}); err != nil {
 		return managed.CommandReceipt{}, err
 	}
+	owner, err := m.run.record(ctx, kindManagedOwner, request, originalOwner{Kind: kind, History: id, Request: request, AID: f.History.Labels["aid"], Episode: f.History.EpisodeNumber})
+	if err != nil {
+		return managed.CommandReceipt{}, err
+	}
 	receipt, err := m.actor.Command(ctx, kind, id, request)
+	receipt.Owner, receipt.IssuedRequest = owner, request
 	if er := m.save(context.WithoutCancel(ctx), "native.action.result", map[string]any{"history": id, "kind": kind, "request": request, "receipt": receipt}); er != nil {
 		return receipt, er
 	}
@@ -452,7 +474,7 @@ func (m *managedLane) mixed(ctx context.Context, rate float64) error {
 			return ctx.Err()
 		}
 		aid := managed.AID(m.run.id, "mixed", offer.Slot)
-		scope := "LOAD"
+		scope := "POL"
 		if offer.Slot%2 == 0 {
 			scope = "PLAIN"
 		}
@@ -461,8 +483,9 @@ func (m *managedLane) mixed(ctx context.Context, rate float64) error {
 		}
 	}
 }
-func (m *managedLane) ticket(ctx context.Context, aid string) error {
-	wait, stop := context.WithTimeout(ctx, time.Minute)
+func (m *managedLane) ticket(ctx context.Context, f NativeEpisodeFixture, command managed.CommandReceipt) error {
+	aid := f.History.Labels["aid"]
+	wait, stop := context.WithTimeout(ctx, setBTicketObservation)
 	defer stop()
 	return poll(wait, func() (bool, error) {
 		rows, err := m.rows(wait, aid)
@@ -470,8 +493,33 @@ func (m *managedLane) ticket(ctx context.Context, aid string) error {
 			return false, err
 		}
 		for _, row := range rows {
-			if row.Status == "resolved" || row.TicketID == "" {
+			if row.ID != f.History.ID || row.EpisodeNumber != f.History.EpisodeNumber || row.Status == "resolved" || row.TicketID == "" {
 				continue
+			}
+			var proof managed.TicketProof
+			if command.Operation != "" {
+				fact, er := m.config.ActorFact(wait, row.ID, command.IssuedRequest, "manual_ticket")
+				if errors.Is(er, managed.ErrActorPending) {
+					return false, nil
+				}
+				if er != nil {
+					return false, er
+				}
+				if fact.Operation != command.Operation || fact.Episode != f.History.EpisodeNumber || fact.Incident != row.TicketID || command.TicketID != "" && fact.Incident != command.TicketID {
+					return false, errors.New("History differs from original admitted ticket")
+				}
+			} else {
+				snap, er := m.config.Snapshot(wait, row.ID)
+				if er != nil {
+					return false, er
+				}
+				proof, er = automaticTicket(f, snap.Tickets, row.TicketID)
+				if er != nil {
+					return false, er
+				}
+				if proof.Flow == "" {
+					return false, nil
+				}
 			}
 			inc, err := m.snow.Incident(wait, row.TicketID)
 			if err != nil {
@@ -484,7 +532,7 @@ func (m *managedLane) ticket(ctx context.Context, aid string) error {
 			if _, err = m.run.record(wait, kindIncident, inc.Number, map[string]string{"state": inc.State}); err != nil {
 				return false, err
 			}
-			if err = m.save(wait, "native.ticket", map[string]string{"aid": aid, "history": row.ID, "incident": inc.Number, "sys_id": inc.SysID, "priority": inc.Priority}); err != nil {
+			if err = m.save(wait, "native.ticket", map[string]any{"aid": aid, "request": command.IssuedRequest, "command": command.Operation, "commandTicket": command.TicketID, "automatic": proof, "episode": row.EpisodeNumber, "history": row.ID, "incident": inc.Number, "sys_id": inc.SysID, "priority": inc.Priority}); err != nil {
 				return false, err
 			}
 			if inc.Priority != m.config.TicketPriority {

@@ -46,12 +46,23 @@ leaves the before/after baseline missing.
    actual PDI mapping. Confirm all effects target that PDI. The harness reads
    the associated incident number, sys_id and stored priority independently.
    Major and Critical may produce the same provider priority.
-4. For the full mixed campaign, configure a source-scoped silence matching only
-   Major and `aid=~CT-[0-9a-f]{24}-silence-000000`, plus an isolated,
-   active inhibitor for only Major on `aid=~CT-[0-9a-f]{24}-inhibit-000000`.
-   A Minor event can first obtain a verified reference. Keep group routing
-   suitable for selected-sibling isolation. Capture the receiver configuration
-   digest and native group/repeat intervals.
+4. The full mixed campaign commissions the suppression companions after the
+   verified Minor→Major transition. The isolated native ingress must allow
+   silence create/list/get/expire and alert POST/GET using CorrTest's configured
+   native v2 transport. The harness creates an eight-minute, run-owned silence
+   with four exact equalities (AID, source, TID and Major), retains the returned
+   ID and checks creator, unique comment and all matchers before expiry.
+   On an uncertain POST it looks up that subject and unique comment and never
+   reissues the create. Route the control alert `CorrTestNativeInhibitor` to a
+   test null receiver. Precommission an inhibition rule for the dedicated
+   source/TID with that exact source alertname, target `integration=tl1_probe`,
+   target `severity=major` and target
+   `aid=~"CT-[0-9a-f]{24}-inhibit-000000"`. Set the inhibitor equality fields
+   to `aid`, `source_id` and `node`. The harness raises and clears only its
+   uniquely labelled v2 control alert; both subjects must start unsuppressed.
+   Route each managed subject to exactly one commissioned canonical receiver,
+   preserve individual AID/startsAt/correlation identity in sink payloads and
+   retain native group/repeat intervals in the configuration digest.
 5. Route independent ordinary native v2 `campaign_lane=native-direct` offers
    to a dedicated directly captured receiver, and `native-canonical` to the
    canonical OSCAR receiver with CAMPAIGN_SINK delivery. Keep direct and
@@ -74,9 +85,14 @@ leaves the before/after baseline missing.
    read-only account. Client options force `--ssl-mode=VERIFY_IDENTITY`.
    Grant SELECT on AM_AlertHistoryWriteReceipt, AM_NativeActionEpisode,
    AM_NativeActionVariant, AM_NativeActionOperation, AM_NativeActionTarget,
-   AM_NativeCallbackReceipt, TM_NotificationDeliveries, TM_ResendEpisodeState
-   and TM_ResendScheduleDispatch. The adapter issues four fixed parameterized
-   selects by the owned History UUID in a read-only consistent snapshot. The
+   AM_NativeCallbackReceipt, TM_NotificationDeliveries, TM_ResendEpisodeState,
+   TM_ResendScheduleDispatch, TM_ResendPolicyRevision, AM_AlertTicketWorkflow,
+   TKT_Ticketing_Audit, AM_AlertResend and AM_AlertAudit. Enable the normal
+   automatic ticket workflow visibility path on the isolated test provider
+   so its original flow, associated History episode, operation and success
+   audit can be joined. The adapter reads five fixed SELECT projections per
+   full snapshot. Recovery and the manual ticket check use separate fixed
+   SELECT projections of the issued request and controlled History. The
    all-zero UUID precheck verifies access without selecting a live test alert.
    Receipt reads are controller measurement traffic. Record their elapsed
    durations and include the measurement load in the configuration manifest.
@@ -110,13 +126,35 @@ ownership intact. No replay or automatic device reprovisioning occurs.
 
 ## Workload and evidence
 
-The functional smoke allows 12 minutes of source lifecycle plus five minutes
+The managed-only functional smoke allows 20 minutes of source lifecycle plus five minutes
 of planned drain. Preparation (including first policy activation) precedes T0.
 It exercises Minor to Major continuity, manual resend, independent one-minute
 ordinary resends, three-minute Critical escalation, later Critical resend,
-acknowledgement, native source clear, resolved eligibility, fresh refire,
+acknowledgement and its subsequent Critical repeat, native source clear, resolved eligibility, fresh refire,
 mixed bulk, an unrelated sibling, automatic and manual ticketing. The API
-exercise does not inspect browser button rendering.
+exercise does not inspect browser button rendering. The mixed V3 smoke also
+reserves 20 minutes of load, with its ordinary standing pool through T+20 and
+a two-minute drain. The full 150-minute run retains its 30-minute drain.
+The ticket observation budget is 150 seconds per provider case. The automatic
+History lookup also permits the existing anti-flap hold. Commission an
+environment whose actual hold plus write/provider latency fits the relevant
+window and whose total lifecycle fits the smoke budget. A longer deployment
+hold is an explicit missing result. Record the actual hold in the manifest.
+
+Ordinary policy priorities are their established positions (R1–R4, 1–4).
+The immutable managed workload configuration assigns TL1=5, REPEAT=6 and
+EDIT=7. Existing site conflicts remain catalog errors. The test-only rules
+match exact source, TID and run-owned condition with a missing-safe equality
+chain. Missing TL1 properties are ordinary misses. The POL condition is shared
+by the functional, assigned mixed, escalating standing and suppression AIDs.
+Only the owned full-campaign companions use silence CRUD or the inhibitor.
+Each sustained subject uses a root-only DB sample about every two seconds
+plus a full late-segment snapshot. With two subjects for 150 minutes the
+sampling ceiling is roughly 9,000 root-only reads. Persist measured timings
+and query count per segment. An uncertain dispatch bracket is inconclusive.
+The original source closure marker and provider-owner mutation ledger have
+separate meanings. Cleanup re-reads original requests or exact targets and
+leaves unresolved ownership DIRTY across operator reruns.
 
 The 150-minute mixed workload retains the existing baseline, ticket window,
 correlation sets, ordinary redelivery policies and standing pool. It adds the

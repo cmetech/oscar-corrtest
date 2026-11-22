@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -55,4 +56,84 @@ func matchSink(effects []managed.Effect, receipts []targetops.Receipt, notifier,
 		return false, errors.New("unattributed controlled provider contact")
 	}
 	return len(claimed) > 0, nil
+}
+
+func bulkIsolation(f, sibling NativeEpisodeFixture, root, notifier string, effects []managed.Effect, selected, other []targetops.Receipt) (bool, error) {
+	var mine []managed.Effect
+	for _, e := range effects {
+		if e.Logical == root && e.Notifier == notifier && e.Action == "notification" {
+			if e.Kind != "resend" || e.Target == "" || e.Child == "" || e.Operation == "" || e.ConfirmedAt == "" {
+				return false, nil
+			}
+			mine = append(mine, e)
+		}
+	}
+	if len(mine) != 1 {
+		return false, errors.New("selected original has no unique physical notification child")
+	}
+	for _, r := range other {
+		for _, a := range r.Alerts {
+			if a.Status == "firing" && a.Labels["aid"] == sibling.History.Labels["aid"] {
+				return false, errors.New("unselected sibling delivered during isolated bulk window")
+			}
+		}
+	}
+	start, err := time.Parse(time.RFC3339Nano, f.Source.Starts)
+	if err != nil {
+		return false, err
+	}
+	var firing []targetops.Receipt
+	for _, r := range selected {
+		for _, a := range r.Alerts {
+			if a.Status != "firing" {
+				continue
+			}
+			got, err := time.Parse(time.RFC3339Nano, a.StartsAt)
+			if err != nil || !got.Equal(start) || a.HistoryID != "" && a.HistoryID != f.History.ID || a.Labels["aid"] != f.History.Labels["aid"] || a.Labels["source_id"] != f.Source.SourceID || a.Labels["node"] != f.Source.TID || a.Labels["correlation_key"] != f.Source.Correlation {
+				return false, errors.New("bulk payload differs from selected episode")
+			}
+			firing = append(firing, r)
+		}
+	}
+	return matchSink(mine, firing, notifier, f.Source.Correlation)
+}
+
+// Both members must have independently visible ordinary payloads before the
+// bulk request. Otherwise an empty sibling capture cannot establish isolation.
+func (m *managedLane) bulkBaseline(ctx context.Context, f NativeEpisodeFixture) error {
+	start, err := time.Parse(time.RFC3339Nano, f.Source.Starts)
+	if err != nil {
+		return err
+	}
+	wait, stop := context.WithTimeout(ctx, 45*time.Second)
+	defer stop()
+	aid := f.History.Labels["aid"]
+	return poll(wait, func() (bool, error) {
+		snap, err := m.config.Snapshot(wait, f.History.ID)
+		if err != nil {
+			return false, err
+		}
+		if err = m.holdUnknown(wait, f, snap); err != nil {
+			return false, err
+		}
+		rs, err := m.sink.ManagedReceipts(wait, aid, start)
+		if err != nil {
+			return false, err
+		}
+		var mine []targetops.Receipt
+		for _, r := range rs {
+			for _, a := range r.Alerts {
+				at, er := time.Parse(time.RFC3339Nano, a.StartsAt)
+				if er == nil && at.Equal(start) && a.Status == "firing" && a.Labels["correlation_key"] == f.Source.Correlation {
+					mine = append(mine, r)
+					break
+				}
+			}
+		}
+		ok, err := matchSink(snap.Effects, mine, m.policy.notifierID, f.Source.Correlation)
+		if err != nil || !ok {
+			return false, err
+		}
+		return true, m.save(wait, "native.bulk.baseline", map[string]any{"subject": f, "receipts": mine})
+	})
 }

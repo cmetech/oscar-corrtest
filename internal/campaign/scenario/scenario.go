@@ -173,13 +173,14 @@ const (
 // NativeWorkloadSpec records the paths that must be observed through real
 // native routes. Enrollment here refers to canonical identity, not a policy.
 type NativeWorkloadSpec struct {
-	Cohorts          []NativeCohort `json:"cohorts"`
-	ManagedTL1       bool           `json:"managedTL1,omitempty"`
-	ConfiguredPolicy bool           `json:"configuredPolicy,omitempty"`
-	ManagedPolicy    *PolicySpec    `json:"managedPolicy,omitempty"`
-	ManagedRepeat    *PolicySpec    `json:"managedRepeat,omitempty"`
-	ManagedSegment   time.Duration  `json:"managedSegment,omitempty"`
-	ManagedRate      float64        `json:"managedRate,omitempty"`
+	Cohorts           []NativeCohort `json:"cohorts"`
+	ManagedTL1        bool           `json:"managedTL1,omitempty"`
+	ConfiguredPolicy  bool           `json:"configuredPolicy,omitempty"`
+	ManagedPolicy     *PolicySpec    `json:"managedPolicy,omitempty"`
+	ManagedRepeat     *PolicySpec    `json:"managedRepeat,omitempty"`
+	ManagedSegment    time.Duration  `json:"managedSegment,omitempty"`
+	ManagedPriorities map[string]int `json:"managedPriorities,omitempty"`
+	ManagedRate       float64        `json:"managedRate,omitempty"`
 }
 
 type Scenario struct {
@@ -337,6 +338,7 @@ func AlertingDayV3() Scenario {
 	s.NativeWorkload.ManagedPolicy = &PolicySpec{Key: "TL1", Action: "notification", Mode: "time", Interval: 60 * time.Second, Notifier: "CAMPAIGN_SINK", Escalation: &EscalationSpec{After: 3 * time.Minute, TargetSeverity: "critical"}}
 	s.NativeWorkload.ManagedRepeat = &PolicySpec{Key: "REPEAT", Action: "notification", Mode: "time", Interval: time.Minute, Notifier: "CAMPAIGN_SINK"}
 	s.NativeWorkload.ManagedSegment = 10 * time.Minute
+	s.NativeWorkload.ManagedPriorities = map[string]int{"TL1": 5, "REPEAT": 6, "EDIT": 7}
 	s.NativeWorkload.ManagedRate = 0.2
 	s.Limits.RegressionPct = 10
 	return s
@@ -347,8 +349,9 @@ func AlertingDaySmokeV3() Scenario {
 	s := AlertingDaySmokeV2()
 	v3 := AlertingDayV3()
 	s.Version = "v3"
-	s.LoadEnd = 10 * time.Minute
-	s.Phases = append(s.Phases[:5], Phase{"drain", s.LoadEnd, s.LoadEnd + 2*time.Minute})
+	s.LoadEnd = 20 * time.Minute
+	s.Standing.Until = s.LoadEnd
+	s.Phases = append(s.Phases[:5], Phase{"sustained_load", 10 * time.Minute, s.LoadEnd}, Phase{"drain", s.LoadEnd, s.LoadEnd + 2*time.Minute})
 	s.Breaker = nil
 	s.NativeWorkload, s.Limits = v3.NativeWorkload, v3.Limits
 	return s
@@ -359,7 +362,7 @@ func AlertingDaySmokeV3() Scenario {
 func ManagedAlertsSmokeV1() Scenario {
 	s := AlertingDaySmokeV3()
 	s.ID, s.Version = "managed-alerts-smoke", "v1"
-	s.LoadEnd = 12 * time.Minute
+	s.LoadEnd = 20 * time.Minute
 	s.Phases = []Phase{{"preflight", -2 * time.Minute, 0}, {"managed_lifecycle", 0, s.LoadEnd},
 		{"drain", s.LoadEnd, s.LoadEnd + 5*time.Minute}}
 	s.Baseline, s.Correlation, s.Standing = BaselineSpec{}, CorrelationSpec{}, nil
