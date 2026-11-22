@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- CorrTest managed qualification now checks the original source variant,
+  controlled receiver, pinned policy revision, dispatch interval and physical
+  provider receipt for timed actions. The run-owned silence and inhibitor
+  companions and post-acknowledgement repeat use the same commissioned path.
+  The dedicated and mixed V3 smoke plans reserve 20 minutes of load. Legacy
+  scenarios and both 150-minute qualification windows retain their durations.
+- Managed evidence exports an allowlisted History and label projection.
+  Cleanup retains unresolved original requests and provider targets across
+  reruns. Operators need the additional read-only workflow, actor audit and
+  policy revision grants, scoped native silence access for the full configured
+  campaign, a commissioned inhibitor rule and a functioning test PDI. See
+  [Managed source campaigns](docs/managed-native-campaign.md). No database
+  migration is required. The new scenarios retain their execution guards.
+
 - Native campaign plans now drive isolated TL1 device traffic through a real
   probe and named receiver. The managed smoke uses native source observations,
   signed operator actions and independent provider receipts. The mixed plan
