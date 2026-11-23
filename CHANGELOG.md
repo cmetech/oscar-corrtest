@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Source `21796ca` checks normal routing scope for escalations and supports a commissioned
+  Major-A/Critical-B case inside `managed-alerts-smoke@v1`. Set `ManagedTL1.CrossRouteReceiver`
+  after installing both controlled routes. Standard smoke records the case as uncommissioned.
+  Rebuild CorrTest and retain the distinct case evidence after the combined platform patch.
+  Functional and load qualification are UNRUN.
+
 - CorrTest reads the original receiver ID from the signed History write
   binding when qualifying managed rate and sustained deliveries. This lets
   a coalesced notification match its original source variant and receiver.
