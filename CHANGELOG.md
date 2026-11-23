@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- CorrTest reads the original receiver ID from the signed History write
+  binding when qualifying managed rate and sustained deliveries. This lets
+  a coalesced notification match its original source variant and receiver.
+  Source `c4c82f0` requires no schema migration. Rebuild CorrTest before
+  running the managed mixed qualification scenarios.
+
 - CorrTest reconciles ordinary native delivery to per-route decisions, actual
   outbound attempts and each source episode, including attempts that produced
   no sink receipt. Mixed smoke needs the ordinary route/attempt projection.
