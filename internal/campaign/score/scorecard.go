@@ -2,6 +2,7 @@ package score
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -109,6 +110,7 @@ type TaskStats struct {
 }
 
 type Scorecard struct {
+	ObserverConfig               string `json:",omitempty"`
 	ScenarioHash, Trigger, RunBy string
 	Comparable, CleanupClean     bool
 	RegressionPct                float64
@@ -123,6 +125,7 @@ type Scorecard struct {
 	ATT                          *ATT              // v2 only: the AT&T-shape measurements (report-only)
 	Fingerprint                  *FingerprintStats // fingerprint-policy lane facet only
 	Verdict                      domain.Verdict
+	EvidenceIncomplete           bool `json:",omitempty"`
 	Reasons                      []string
 }
 
@@ -195,6 +198,14 @@ func covered(pts []Point, from, to float64) bool {
 	return true
 }
 
+func CoveredSeries(pts []Point, from, to time.Time) bool {
+	for i, p := range pts {
+		if math.IsNaN(p.Value) || math.IsInf(p.Value, 0) || math.IsNaN(p.Time) || math.IsInf(p.Time, 0) || i > 0 && p.Time <= pts[i-1].Time {
+			return false
+		}
+	}
+	return covered(pts, float64(from.Unix()), float64(to.Unix()))
+}
 func queueStats(in Inputs, incon *[]string) map[string]QueueStats {
 	out := map[string]QueueStats{}
 	if len(in.QueueDepth) == 0 {
@@ -416,9 +427,10 @@ func Compute(in Inputs, lim scenario.Limits) Scorecard {
 		incon = append(incon, "not run: "+n)
 	}
 
+	c.EvidenceIncomplete = len(incon) != 0
 	switch {
 	case len(fails) > 0:
-		c.Verdict, c.Reasons = domain.VerdictFail, fails
+		c.Verdict, c.Reasons = domain.VerdictFail, append(fails, incon...)
 	case len(incon) > 0:
 		c.Verdict, c.Reasons = domain.VerdictInconclusive, incon
 	default:

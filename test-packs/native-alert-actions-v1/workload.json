@@ -1,0 +1,13 @@
+{
+  "selectors": ["managed-alerts-smoke@v1", "alerting-day-smoke@v3", "alerting-day-control@v1", "alerting-day@v3"],
+  "dedicatedSmoke": {"functionalMinutes":20,"drainMinutes":5,"baseline":false},
+  "mixedSmoke": {"loadMinutes":20,"drainMinutes":2,"segmentsPerRule":2},
+  "fullMixed": {"baselineFiringsPerSecond":3.5,"loadMinutes":150,"drainMinutes":30,"segmentsPerRule":15},
+  "mixedRate": {"defaultWirePDUsPerSecond":0.2,"maxWirePDUsPerSecond":100,"codes":["MN","MJ","CL"],"slotGroup":64,"denominator":"baseline scheduled firings and clears in [T0,loadEnd), plus mixed-rate TL1 PDUs"},
+  "controlledRules":[
+    {"key":"TL1","scope":"POL","recipient":"CAMPAIGN_SINK","action":"notification","intervalSeconds":60,"escalation":{"afterSeconds":180,"targetSeverity":"critical"},"priority":5},
+    {"key":"REPEAT","scope":"REPEAT","recipient":"CAMPAIGN_SINK","action":"notification","intervalSeconds":60,"priority":6}
+  ],
+  "independentTimerFixtures":[{"repeatMinutes":10,"escalationMinutes":30},{"repeatMinutes":10,"escalationMinutes":35}],
+  "limits":{"dispatchLagSeconds":30,"historyP95Seconds":40,"frontOfficeP95Seconds":2,"frontOfficeP99Seconds":5,"drainSeconds":900,"controlRegressionPercent":5,"configuredP99RegressionPercent":10}
+}

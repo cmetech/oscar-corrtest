@@ -118,8 +118,18 @@ func (r *run) haltLane(ctx context.Context) {
 func (r *run) finishAfterDrain(ctx context.Context, forced domain.Verdict, why string) error {
 	if !r.t0.IsZero() {
 		r.waitQueues(ctx)
+		if r.managed != nil && r.s.NativeWorkload.ManagedSegment > 0 {
+			observer, stop := context.WithDeadline(ctx, r.t0.Add(r.s.Phase("drain").End))
+			if err := r.managed.verifyDrain(observer); err != nil {
+				r.noteMissing("post-drain managed readback: " + err.Error())
+			}
+			stop()
+		}
 	}
-	incidents := r.closeIncidents(ctx)
+	var incidents []targetops.Incident
+	if !r.managedOnly() {
+		incidents = r.closeIncidents(ctx)
+	}
 	end := r.now()
 	if err := r.transition(ctx, domain.CampaignCleaningUp, "cleanup"); err != nil {
 		return err
@@ -137,18 +147,30 @@ func mustJSON(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
 // waitQueues waits (<= 30 min) for every queue to return to the idle depth.
 func (r *run) waitQueues(ctx context.Context) {
 	deadline := r.now().Add(maxQueueWait)
+	if r.s.NativeWorkload != nil {
+		deadline = r.now().Add(r.s.Phase("drain").End - r.s.LoadEnd)
+		if stop := r.t0.Add(r.s.Phase("drain").End); stop.Before(deadline) {
+			deadline = stop
+		}
+	}
 	for next := r.now(); next.Before(deadline) && r.e.clock.SleepUntil(ctx, next); next = next.Add(guardEvery) {
 		v, err := r.e.d.Metrics.Query(ctx, queueDepthQuery, r.now())
 		if err != nil {
 			continue
 		}
-		idle := true
+		idle := len(v) > 0
 		for _, s := range v {
 			idle = idle && r.s.Precheck.QueueIdle(s.Value)
 		}
 		if idle {
+			if r.s.NativeWorkload != nil {
+				r.event(ctx, "native.drain.idle", "info", "queues idle", map[string]any{"queues": v, "observedAt": r.now()})
+			}
 			return
 		}
+	}
+	if r.s.NativeWorkload != nil {
+		r.noteMissing("queue drain not observed within declared window")
 	}
 	r.event(ctx, "campaign.drain", "warn", "queues did not return to idle within 30m", nil)
 }
@@ -324,9 +346,18 @@ func (r *run) resolveIncident(ctx context.Context, number string) error {
 
 // cleanup walks the open mutations in reverse and restores each one.
 func (r *run) cleanup(ctx context.Context) domain.CleanupStatus {
+	if r.s.NativeWorkload != nil && r.s.NativeWorkload.ManagedTL1 {
+		_, started, se := r.store().FirstCampaignEvent(ctx, r.id, "native.tl1.started")
+		_, closed, ce := r.store().FirstCampaignEvent(ctx, r.id, "native.tl1.closed")
+		if se != nil || ce != nil || started && !closed {
+			r.addDirty("owned TL1 source closure unverified; reconcile original collector and receipts")
+		}
+	}
 	r.restoreKinds(ctx) // all kinds; the fingerprint policy resolves its alerts first
 	r.reresolveFingerprint(ctx)
-	r.verifyHistoryResolved(ctx)
+	if !r.managedOnly() {
+		r.verifyHistoryResolved(ctx)
+	}
 	open, err := r.store().OpenMutations(ctx, r.id)
 	r.mu.Lock()
 	incidents := append([]string{}, r.openIncidents...)
@@ -417,6 +448,10 @@ func (r *run) restore(ctx context.Context, m domain.CampaignMutation) (err error
 		return r.restoreAlertLimits(ctx, m.Prior)
 	case kindFingerprintPolicy:
 		return r.disableFingerprint(ctx)
+	case kindSilence, kindInhibitor:
+		return r.restoreSuppression(ctx, m)
+	case kindManagedOwner:
+		return r.recoverOriginal(ctx, m)
 	case kindIncident:
 		return r.resolveIncident(ctx, m.ObjectID)
 	case kindPolicyCreate, kindPolicyActivate:

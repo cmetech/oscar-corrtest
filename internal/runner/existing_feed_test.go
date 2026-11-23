@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -212,12 +213,12 @@ func testOwnedExistingFeedRunner(t *testing.T, profile string) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if strings.HasPrefix(fault, "history-") {
-				var boundedCancel context.CancelFunc
-				ctx, boundedCancel = context.WithTimeout(ctx, 200*time.Millisecond)
-				defer boundedCancel()
-			}
 			err = engine.Execute(ctx, run)
+			// A History fault must stop the run by itself, not by outlasting a
+			// deadline (a 200 ms bound used to expire first on loaded runners).
+			if strings.HasPrefix(fault, "history-") && errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("History fault ended by deadline, not rejection: %v", err)
+			}
 			saved, getErr := db.GetRun(context.Background(), run.ID)
 			if getErr != nil {
 				t.Fatal(getErr)

@@ -174,6 +174,9 @@ func Compile(run domain.Run, input scenario.Scenario, capabilities Capabilities)
 		item := CasePlan{Control: source.Control, Name: source.Name, Code: caseCode, Polarity: source.Polarity, Checkpoints: source.Checkpoints, Assertions: source.Assertions, ObservationWindow: observationWindow}
 		item.Rule = RulePlan{Name: ruleName, Pattern: input.Pattern, WindowSeconds: int(source.Window / time.Second), GroupBy: source.GroupBy, MatchCriteria: matchCriteria(input.Pattern, names, source), EmitAlertName: syntheticName, EmitLabels: identityLabels(run, input, source, ruleName, "synthetic", "synthetic_parent"), Description: fmt.Sprintf("Temporary OSCAR correlation test rule; run=%s scenario=%s case=%s", run.ID, input.Name, source.Name)}
 		if syntheticName != "" {
+			if source.ParentTicket && source.Polarity == "positive" {
+				item.Rule.EmitLabels["create_ticket"] = "snow"
+			}
 			parentSummary := fmt.Sprintf("[CORRTEST][%s][%s][%s] %s: correlation parent", input.Pattern, trigger, short, source.Name)
 			item.Rule.EmitAnnotations = map[string]string{"summary": parentSummary, "description": parentSummary}
 		}

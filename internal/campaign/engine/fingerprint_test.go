@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
@@ -55,33 +56,35 @@ func TestFingerprintLaneMergesSplitsAndReverts(t *testing.T) {
 	}{{name: "merged"}, {name: "not merged", noMerge: true, wantFail: "fingerprint merge: 3 History rows"}} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			h := fingerprintHarness(t)
-			h.oscar.fpNoMerge = tc.noMerge
-			if err := h.run(context.Background()); err != nil {
-				t.Fatal(err)
-			}
-			c := h.campaign()
-			verdict, reasons, fp := fingerprintCard(t, c)
-			if c.Cleanup != domain.CleanupClean || !fp.Reverted || fp.PublicationID != "pub-1" || fp.Sent != 4 {
-				t.Fatalf("cleanup %s stats %+v", c.Cleanup, fp)
-			}
-			h.assertRestored()
-			h.oscar.mu.Lock()
-			on, enables, disables := h.oscar.fpOn, h.oscar.fpEnables, h.oscar.fpDisables
-			h.oscar.mu.Unlock()
-			if on || enables != 1 || disables != 1 {
-				t.Fatalf("policy on=%t enables %d disables %d", on, enables, disables)
-			}
-			got := fingerprintReasons(reasons)
-			if tc.wantFail == "" {
-				if len(got) > 0 || fp.MergedRows != 1 || fp.SplitRows != 1 {
-					t.Fatalf("reasons %v stats %+v", got, fp)
+			synctest.Test(t, func(t *testing.T) {
+				h := fingerprintHarness(t)
+				h.oscar.fpNoMerge = tc.noMerge
+				if err := h.run(context.Background()); err != nil {
+					t.Fatal(err)
 				}
-				return
-			}
-			if verdict != domain.VerdictFail || len(got) != 1 || !strings.HasPrefix(got[0], tc.wantFail) {
-				t.Fatalf("verdict %s reasons %v", verdict, got)
-			}
+				c := h.campaign()
+				verdict, reasons, fp := fingerprintCard(t, c)
+				if c.Cleanup != domain.CleanupClean || !fp.Reverted || fp.PublicationID != "pub-1" || fp.Sent != 4 {
+					t.Fatalf("cleanup %s stats %+v", c.Cleanup, fp)
+				}
+				h.assertRestored()
+				h.oscar.mu.Lock()
+				on, enables, disables := h.oscar.fpOn, h.oscar.fpEnables, h.oscar.fpDisables
+				h.oscar.mu.Unlock()
+				if on || enables != 1 || disables != 1 {
+					t.Fatalf("policy on=%t enables %d disables %d", on, enables, disables)
+				}
+				got := fingerprintReasons(reasons)
+				if tc.wantFail == "" {
+					if len(got) > 0 || fp.MergedRows != 1 || fp.SplitRows != 1 {
+						t.Fatalf("reasons %v stats %+v", got, fp)
+					}
+					return
+				}
+				if verdict != domain.VerdictFail || len(got) != 1 || !strings.HasPrefix(got[0], tc.wantFail) {
+					t.Fatalf("verdict %s reasons %v", verdict, got)
+				}
+			})
 		})
 	}
 }
@@ -90,47 +93,51 @@ func TestFingerprintLaneMergesSplitsAndReverts(t *testing.T) {
 // sends nothing and scores neither PASS nor FAIL.
 func TestFingerprintLaneSkippedWhenNotCommissioned(t *testing.T) {
 	t.Parallel()
-	h := fingerprintHarness(t)
-	h.oscar.fpSkip = "fingerprint policies unpublished (no desired publication)"
-	if err := h.run(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	c := h.campaign()
-	_, reasons, fp := fingerprintCard(t, c)
-	if fp.Skipped != h.oscar.fpSkip || len(fingerprintReasons(reasons)) > 0 || c.Cleanup != domain.CleanupClean {
-		t.Fatalf("stats %+v reasons %v cleanup %s", fp, reasons, c.Cleanup)
-	}
-	h.oscar.mu.Lock()
-	defer h.oscar.mu.Unlock()
-	if h.oscar.fpEnables+h.oscar.fpDisables != 0 || h.oscar.posts[fingerprintAlert] != 0 {
-		t.Fatalf("skipped lane acted: enables %d disables %d posts %d", h.oscar.fpEnables, h.oscar.fpDisables, h.oscar.posts[fingerprintAlert])
-	}
+	synctest.Test(t, func(t *testing.T) {
+		h := fingerprintHarness(t)
+		h.oscar.fpSkip = "fingerprint policies unpublished (no desired publication)"
+		if err := h.run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		c := h.campaign()
+		_, reasons, fp := fingerprintCard(t, c)
+		if fp.Skipped != h.oscar.fpSkip || len(fingerprintReasons(reasons)) > 0 || c.Cleanup != domain.CleanupClean {
+			t.Fatalf("stats %+v reasons %v cleanup %s", fp, reasons, c.Cleanup)
+		}
+		h.oscar.mu.Lock()
+		defer h.oscar.mu.Unlock()
+		if h.oscar.fpEnables+h.oscar.fpDisables != 0 || h.oscar.posts[fingerprintAlert] != 0 {
+			t.Fatalf("skipped lane acted: enables %d disables %d posts %d", h.oscar.fpEnables, h.oscar.fpDisables, h.oscar.posts[fingerprintAlert])
+		}
+	})
 }
 
 // TestFingerprintRevertFailureIsDirty: a disable that never converges leaves
 // the mutation open, so cleanup is DIRTY rather than silently CLEAN.
 func TestFingerprintRevertFailureIsDirty(t *testing.T) {
 	t.Parallel()
-	h := fingerprintHarness(t)
-	h.oscar.fpDisableErr = errors.New("fingerprint publication did not converge in time")
-	if err := h.run(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	c := h.campaign()
-	_, _, fp := fingerprintCard(t, c)
-	if c.Cleanup != domain.CleanupDirty || fp.Reverted {
-		t.Fatalf("cleanup %s reverted %t", c.Cleanup, fp.Reverted)
-	}
-	open, err := h.db.OpenMutations(context.Background(), h.id)
-	if err != nil || len(open) != 1 || open[0].Kind != kindFingerprintPolicy {
-		t.Fatalf("open mutations %v %+v", err, open)
-	}
-	h.oscar.mu.Lock()
-	h.oscar.fpDisableErr = nil
-	h.oscar.mu.Unlock()
-	if st, err := New(h.deps, h.clock).Cleanup(context.Background(), h.id); err != nil || st != domain.CleanupClean {
-		t.Fatalf("cleanup re-run: %s %v", st, err)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		h := fingerprintHarness(t)
+		h.oscar.fpDisableErr = errors.New("fingerprint publication did not converge in time")
+		if err := h.run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		c := h.campaign()
+		_, _, fp := fingerprintCard(t, c)
+		if c.Cleanup != domain.CleanupDirty || fp.Reverted {
+			t.Fatalf("cleanup %s reverted %t", c.Cleanup, fp.Reverted)
+		}
+		open, err := h.db.OpenMutations(context.Background(), h.id)
+		if err != nil || len(open) != 1 || open[0].Kind != kindFingerprintPolicy {
+			t.Fatalf("open mutations %v %+v", err, open)
+		}
+		h.oscar.mu.Lock()
+		h.oscar.fpDisableErr = nil
+		h.oscar.mu.Unlock()
+		if st, err := New(h.deps, h.clock).Cleanup(context.Background(), h.id); err != nil || st != domain.CleanupClean {
+			t.Fatalf("cleanup re-run: %s %v", st, err)
+		}
+	})
 }
 
 // TestFingerprintCleanupResolvesRevertedRows: the live state of
@@ -146,54 +153,56 @@ func TestFingerprintCleanupResolvesRevertedRows(t *testing.T) {
 	}{{name: "re-enabled and resolved", want: domain.CleanupClean}, {name: "resolve refused", ignore: true, want: domain.CleanupDirty}} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			h := fingerprintHarness(t)
-			if err := h.run(context.Background()); err != nil {
-				t.Fatal(err)
-			}
-			if c := h.campaign(); c.Cleanup != domain.CleanupClean {
-				t.Fatalf("first cleanup %s", c.Cleanup)
-			}
-			h.oscar.mu.Lock()
-			reopened := 0
-			for row := range h.oscar.fpScoped {
-				row.Status = "firing"
-				for pair := range h.oscar.fpPairs[row] {
-					h.oscar.fpPairs[row][pair] = true
+			synctest.Test(t, func(t *testing.T) {
+				h := fingerprintHarness(t)
+				if err := h.run(context.Background()); err != nil {
+					t.Fatal(err)
 				}
-				reopened++
-			}
-			h.oscar.ignoreResolves = tc.ignore
-			h.oscar.mu.Unlock()
-			if reopened != 2 {
-				t.Fatalf("policy-scoped rows %d, want 2", reopened)
-			}
-			st, err := New(h.deps, h.clock).Cleanup(context.Background(), h.id)
-			if err != nil || st != tc.want {
-				t.Fatalf("cleanup re-run: %s %v", st, err)
-			}
-			h.oscar.mu.Lock()
-			on, enables, disables := h.oscar.fpOn, h.oscar.fpEnables, h.oscar.fpDisables
-			h.oscar.mu.Unlock()
-			if tc.want == domain.CleanupClean {
-				if on || enables != 2 || disables != 2 {
-					t.Fatalf("policy on=%t enables %d disables %d", on, enables, disables)
+				if c := h.campaign(); c.Cleanup != domain.CleanupClean {
+					t.Fatalf("first cleanup %s", c.Cleanup)
 				}
-				h.assertRestored()
-				return
-			}
-			// Unresolved rows keep the policy on (the only state they resolve
-			// in) with its mutation open for the next cleanup.
-			open, err := h.db.OpenMutations(context.Background(), h.id)
-			if !on || enables != 2 || disables != 1 || err != nil || len(open) != 1 || open[0].Kind != kindFingerprintPolicy {
-				t.Fatalf("policy on=%t enables %d disables %d open %v %+v", on, enables, disables, err, open)
-			}
-			evs, _ := h.db.RecentCampaignEvents(context.Background(), h.id, 50)
-			for _, e := range evs {
-				if strings.Contains(e.Summary, fingerprintAlert+" alerts fired under the fingerprint policy") && strings.Contains(e.Summary, "history ") {
+				h.oscar.mu.Lock()
+				reopened := 0
+				for row := range h.oscar.fpScoped {
+					row.Status = "firing"
+					for pair := range h.oscar.fpPairs[row] {
+						h.oscar.fpPairs[row][pair] = true
+					}
+					reopened++
+				}
+				h.oscar.ignoreResolves = tc.ignore
+				h.oscar.mu.Unlock()
+				if reopened != 2 {
+					t.Fatalf("policy-scoped rows %d, want 2", reopened)
+				}
+				st, err := New(h.deps, h.clock).Cleanup(context.Background(), h.id)
+				if err != nil || st != tc.want {
+					t.Fatalf("cleanup re-run: %s %v", st, err)
+				}
+				h.oscar.mu.Lock()
+				on, enables, disables := h.oscar.fpOn, h.oscar.fpEnables, h.oscar.fpDisables
+				h.oscar.mu.Unlock()
+				if tc.want == domain.CleanupClean {
+					if on || enables != 2 || disables != 2 {
+						t.Fatalf("policy on=%t enables %d disables %d", on, enables, disables)
+					}
+					h.assertRestored()
 					return
 				}
-			}
-			t.Fatalf("no precise fingerprint DIRTY reason in %+v", evs)
+				// Unresolved rows keep the policy on (the only state they resolve
+				// in) with its mutation open for the next cleanup.
+				open, err := h.db.OpenMutations(context.Background(), h.id)
+				if !on || enables != 2 || disables != 1 || err != nil || len(open) != 1 || open[0].Kind != kindFingerprintPolicy {
+					t.Fatalf("policy on=%t enables %d disables %d open %v %+v", on, enables, disables, err, open)
+				}
+				evs, _ := h.db.RecentCampaignEvents(context.Background(), h.id, 50)
+				for _, e := range evs {
+					if strings.Contains(e.Summary, fingerprintAlert+" alerts fired under the fingerprint policy") && strings.Contains(e.Summary, "history ") {
+						return
+					}
+				}
+				t.Fatalf("no precise fingerprint DIRTY reason in %+v", evs)
+			})
 		})
 	}
 }

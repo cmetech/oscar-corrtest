@@ -89,7 +89,9 @@ func (r *run) standingPhase(ctx context.Context) {
 		inflight.Add(1)
 		go func() {
 			defer func() { <-sem; inflight.Done() }()
+			start := r.now()
 			status, _ := r.e.d.Target.PostAlert(ctx, m.alert)
+			r.sourceOffer("standing", start, status)
 			r.countStanding("post", status)
 		}()
 	}
@@ -120,7 +122,10 @@ func (r *run) resolveStanding(ctx context.Context, members []standingMember, sem
 		wg.Add(1)
 		go func() {
 			defer func() { <-sem; wg.Done() }()
-			r.countStanding("resolve", r.postStandingResolve(ctx, m))
+			start := r.now()
+			status := r.postStandingResolve(ctx, m)
+			r.sourceOffer("standing_clear", start, status)
+			r.countStanding("resolve", status)
 		}()
 	}
 	wg.Wait()

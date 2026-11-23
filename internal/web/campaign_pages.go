@@ -14,31 +14,36 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/campaign/lane"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/precheck"
 	campaignscenario "github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/score"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	appruntime "github.com/cmetech/oscar-corrtest/internal/runtime"
 	"github.com/cmetech/oscar-corrtest/internal/version"
+	"strconv"
 )
 
 const precheckEventType = "campaign.precheck"
 
 // campaignPage carries everything the three campaign templates need.
 type campaignPage struct {
-	Scenarios  []string // built-in scenario refs (id@version) for the pre-check form
-	Selected   string   // scenario preselected from ?scenario= (the Scenarios page links here)
-	Campaigns  []domain.Campaign
-	Campaign   domain.Campaign
-	Events     []domain.CampaignEvent
-	Card       *score.Scorecard
-	PrecheckID string
-	Checks     []precheck.Result
-	Pending    bool // pre-check campaign still running
-	Blocked    bool
-	Compare    compareResult
-	IDs        string
-	Terminal   bool
+	Scenarios                       []string // built-in scenario refs (id@version) for the pre-check form
+	Selected                        string   // scenario preselected from ?scenario= (the Scenarios page links here)
+	Campaigns                       []domain.Campaign
+	Campaign                        domain.Campaign
+	Events                          []domain.CampaignEvent
+	Card                            *score.Scorecard
+	PrecheckID                      string
+	Checks                          []precheck.Result
+	Pending                         bool // pre-check campaign still running
+	Blocked                         bool
+	Compare                         score.Comparison
+	IDs, ReferenceIDs, ScenarioHash string
+	Mode                            score.ComparisonMode
+	ProvenanceRoles                 []domain.CampaignRole
+	Provenance                      *domain.CampaignProvenance
+	Terminal                        bool
 }
 
 func campaignTerminal(s domain.CampaignStatus) bool {
@@ -56,10 +61,10 @@ func sessionIdentity(r *http.Request) string {
 }
 
 // loadPrechecks reads the pre-check results recorded on a campaign.
-func loadPrechecks(ctx context.Context, ctl campaignController, id string) (checks []precheck.Result, pending bool, err error) {
+func loadPrechecks(ctx context.Context, ctl campaignController, id string) (checks []precheck.Result, s campaignscenario.Scenario, pending bool, err error) {
 	v, err := ctl.CampaignStatus(ctx, id)
 	if err != nil {
-		return nil, false, err
+		return nil, s, false, err
 	}
 	for _, e := range v.Events {
 		if e.Type != precheckEventType {
@@ -70,7 +75,19 @@ func loadPrechecks(ctx context.Context, ctl campaignController, id string) (chec
 			checks = d.Results
 		}
 	}
-	return checks, checks == nil && !campaignTerminal(v.Campaign.Status), nil
+	if v.Scenario != nil {
+		s = *v.Scenario
+		if !lane.RegisteredWorkload(s, v.Campaign.ScenarioHash) {
+			return nil, s, false, errors.New("recorded scenario hash mismatch")
+		}
+	} else {
+		var ok bool
+		s, ok = campaignscenario.ByHash(v.Campaign.ScenarioHash)
+		if !ok || s.NativeWorkload != nil {
+			return nil, s, false, errors.New("missing recorded scenario")
+		}
+	}
+	return checks, s, checks == nil && !campaignTerminal(v.Campaign.Status), nil
 }
 
 func registerCampaignPages(mux *http.ServeMux, info version.Info, data DataSource, tmpl *template.Template, nonce nonceFunc, csrfSecret []byte, csrfErr error) {
@@ -101,7 +118,15 @@ func registerCampaignPages(mux *http.ServeMux, info version.Info, data DataSourc
 			cp.PrecheckID = cs[0].ID
 		}
 		if cp.PrecheckID != "" {
-			cp.Checks, cp.Pending, err = loadPrechecks(r.Context(), ctl, cp.PrecheckID)
+			var s campaignscenario.Scenario
+			cp.Checks, s, cp.Pending, err = loadPrechecks(r.Context(), ctl, cp.PrecheckID)
+			if err == nil && s.RequiresComparisonProvenance() {
+				if s.NativeWorkload.ConfiguredPolicy {
+					cp.ProvenanceRoles = []domain.CampaignRole{domain.CampaignConfiguredPolicyReference, domain.CampaignConfiguredPolicyCandidate}
+				} else {
+					cp.ProvenanceRoles = []domain.CampaignRole{domain.CampaignPreChangeControl, domain.CampaignPostChangeControl}
+				}
+			}
 			if err != nil { // a stale id is not fatal
 				cp.PrecheckID = ""
 			}
@@ -129,13 +154,17 @@ func registerCampaignPages(mux *http.ServeMux, info version.Info, data DataSourc
 		}
 		return true
 	}
-	begin := func(w http.ResponseWriter, r *http.Request, s campaignscenario.Scenario, ack []string, only bool) (domain.Campaign, bool) {
+	begin := func(w http.ResponseWriter, r *http.Request, s campaignscenario.Scenario, ack []string, only bool, provenance *domain.CampaignProvenance) (domain.Campaign, bool) {
 		c, err := ctl.StartCampaign(r.Context(), appruntime.CampaignOptions{
 			Scenario: s, Trigger: "ui", TriggerIdentity: sessionIdentity(r),
-			RunBy: "human", Acknowledged: ack, PrecheckOnly: only,
+			RunBy: "human", Acknowledged: ack, PrecheckOnly: only, Provenance: provenance,
 		})
-		if errors.Is(err, appruntime.ErrCampaignActive) {
+		if errors.Is(err, appruntime.ErrCampaignActive) || errors.Is(err, appruntime.ErrCampaignWorkload) {
 			list(w, r, r.PostFormValue("precheck"), err.Error(), http.StatusConflict)
+			return c, false
+		}
+		if errors.Is(err, appruntime.ErrCampaignProvenance) {
+			list(w, r, r.PostFormValue("precheck"), err.Error(), http.StatusUnprocessableEntity)
 			return c, false
 		}
 		if err != nil {
@@ -161,7 +190,17 @@ func registerCampaignPages(mux *http.ServeMux, info version.Info, data DataSourc
 			list(w, r, "", "Unknown scenario "+ref+".", http.StatusBadRequest)
 			return
 		}
-		if c, ok := begin(w, r, s, nil, true); ok {
+		if raw := r.PostFormValue("managed_share"); raw != "" {
+			v, err := strconv.ParseFloat(raw, 64)
+			if err == nil {
+				s, err = lane.ConfigureShare(s, &v)
+			}
+			if err != nil {
+				list(w, r, "", err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+		if c, ok := begin(w, r, s, nil, true, nil); ok {
 			http.Redirect(w, r, "/campaigns?precheck="+url.QueryEscape(c.ID), http.StatusSeeOther)
 		}
 	})
@@ -170,7 +209,7 @@ func registerCampaignPages(mux *http.ServeMux, info version.Info, data DataSourc
 			return
 		}
 		pid := r.PostFormValue("precheck")
-		checks, _, err := loadPrechecks(r.Context(), ctl, pid)
+		checks, s, _, err := loadPrechecks(r.Context(), ctl, pid)
 		if err != nil || checks == nil {
 			list(w, r, pid, "Run pre-checks first.", http.StatusUnprocessableEntity)
 			return
@@ -190,29 +229,35 @@ func registerCampaignPages(mux *http.ServeMux, info version.Info, data DataSourc
 			}
 			ack = append(ack, c.ID)
 		}
-		// Start runs the scenario its pre-check ran.
-		pv, err := ctl.CampaignStatus(r.Context(), pid)
-		s, ok := campaignscenario.ByHash(pv.Campaign.ScenarioHash)
-		if err != nil || !ok {
-			list(w, r, pid, "The pre-check's scenario is unknown; run pre-checks again.", http.StatusUnprocessableEntity)
-			return
+		var provenance *domain.CampaignProvenance
+		if s.RequiresComparisonProvenance() {
+			provenance = &domain.CampaignProvenance{
+				Role: domain.CampaignRole(r.PostFormValue("role")), TargetBuild: r.PostFormValue("target_build"),
+				CorrTestBuild: r.PostFormValue("corrtest_build"), WorkloadConfig: r.PostFormValue("workload_config"),
+			}
 		}
-		if c, ok := begin(w, r, s, ack, false); ok {
+		if c, ok := begin(w, r, s, ack, false, provenance); ok {
 			http.Redirect(w, r, "/campaigns/"+url.PathEscape(c.ID), http.StatusSeeOther)
 		}
 	})
 	mux.HandleFunc("GET /campaigns/compare", func(w http.ResponseWriter, r *http.Request) {
-		cp := &campaignPage{IDs: r.URL.Query().Get("ids")}
-		if ids := splitIDs(cp.IDs); len(ids) >= 2 {
-			res, err := compareCampaigns(r.Context(), ctl, ids)
+		query := r.URL.Query()
+		req := comparisonRequest(query)
+		cp := &campaignPage{IDs: query.Get("ids"), ReferenceIDs: query.Get("referenceIds"), ScenarioHash: req.scenarioHash, Mode: req.mode}
+		if len(query) != 0 {
+			res, err := compareCampaigns(r.Context(), ctl, req)
 			if err != nil {
-				view(w, r, "campaign-compare", cp, err.Error(), http.StatusBadRequest)
+				status := http.StatusServiceUnavailable
+				switch {
+				case errors.Is(err, score.ErrMissingBaseline), errors.Is(err, score.ErrIncompatibleComparison):
+					status = http.StatusBadRequest
+				case errors.Is(err, appruntime.ErrCampaignNotFound):
+					status = http.StatusNotFound
+				}
+				view(w, r, "campaign-compare", cp, err.Error(), status)
 				return
 			}
 			cp.Compare = res
-		} else if cp.IDs != "" {
-			view(w, r, "campaign-compare", cp, "Enter two or more campaign ids.", http.StatusBadRequest)
-			return
 		}
 		view(w, r, "campaign-compare", cp, "", http.StatusOK)
 	})
@@ -227,6 +272,9 @@ func registerCampaignPages(mux *http.ServeMux, info version.Info, data DataSourc
 			return
 		}
 		cp := &campaignPage{Campaign: v.Campaign, Events: v.Events, Terminal: campaignTerminal(v.Campaign.Status)}
+		if v.Options != nil {
+			cp.Provenance = v.Options.Provenance
+		}
 		if card, ok := parseCard(v.Campaign); ok {
 			cp.Card = &card
 		}

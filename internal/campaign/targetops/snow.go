@@ -1,20 +1,20 @@
 package targetops
 
 import (
-	"slices"
-
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	corr "github.com/cmetech/oscar-corrtest/internal/scenario"
 	"io"
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	corr "github.com/cmetech/oscar-corrtest/internal/scenario"
 )
 
 // SNOW talks directly to a ServiceNow PDI Table API with its own basic-auth credential.
@@ -30,6 +30,7 @@ type Comment struct {
 }
 
 type Incident struct {
+	Priority         string
 	Number           string
 	SysID            string
 	State            string
@@ -108,6 +109,7 @@ func (s *SNOW) Wake(ctx context.Context, max time.Duration) error {
 }
 
 type incidentWire struct {
+	Priority         string `json:"priority"`
 	Number           string `json:"number"`
 	SysID            string `json:"sys_id"`
 	State            string `json:"state"`
@@ -115,10 +117,10 @@ type incidentWire struct {
 }
 
 func (w incidentWire) inc() Incident {
-	return Incident{Number: w.Number, SysID: w.SysID, State: w.State, ShortDescription: w.ShortDescription}
+	return Incident{Priority: w.Priority, Number: w.Number, SysID: w.SysID, State: w.State, ShortDescription: w.ShortDescription}
 }
 
-const incidentFields = "number,sys_id,state,short_description"
+const incidentFields = "number,sys_id,state,short_description,priority"
 
 func validNumber(n string) bool {
 	return n != "" && !strings.ContainsAny(n, "^=&? ")

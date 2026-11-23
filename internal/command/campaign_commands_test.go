@@ -86,7 +86,8 @@ func TestCampaignPrecheckFailureExit3(t *testing.T) {
 }
 
 func TestCampaignCompareNotImplementedExit1(t *testing.T) {
-	code, _, errs := campaignCLI(t, campaignServer("", ""), "campaign", "compare", "a", "b")
+	code, _, errs := campaignCLI(t, campaignServer("", ""), "campaign", "compare", "candidate",
+		"--reference-run", "baseline", "--scenario-hash", "hash", "--mode", "control_before_after")
 	if code != 1 || !strings.Contains(errs, "not implemented") {
 		t.Fatalf("code=%d err=%s", code, errs)
 	}
@@ -187,5 +188,56 @@ func TestCampaignHelpHasNoPendingSupport(t *testing.T) {
 		if strings.HasPrefix(name, "campaign") && strings.Contains(topic.description, "pending") {
 			t.Errorf("%s: %q", name, topic.description)
 		}
+	}
+}
+
+func TestCampaignCompareSendsExplicitIDsAndMode(t *testing.T) {
+	code, out, errs := campaignCLI(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if r.URL.Path != "/api/v1/campaign/compare" || q.Get("ids") != "later" ||
+			q.Get("referenceIds") != "prior-1,prior-2" || q.Get("mode") != "configured_policy" || q.Get("scenarioHash") != "v3-hash" {
+			t.Errorf("unexpected request: %s", r.URL)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":{"ReferenceCount":2}}`))
+	}, "campaign", "compare", "later", "--reference-run", "prior-1", "--reference-run", "prior-2",
+		"--mode", "configured_policy", "--scenario-hash", "v3-hash", "--output", "json")
+	if code != 0 || !strings.Contains(out, "ReferenceCount") {
+		t.Fatalf("code=%d out=%s err=%s", code, out, errs)
+	}
+}
+
+func TestCampaignCompareMissingBaselineDoesNotQueryServer(t *testing.T) {
+	code, _, errs := campaignCLI(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request: %s", r.URL)
+		w.WriteHeader(http.StatusBadRequest)
+	}, "campaign", "compare", "after")
+	if code != 2 || !strings.Contains(errs, "missing baseline") {
+		t.Fatalf("code=%d err=%s", code, errs)
+	}
+}
+
+func TestCampaignRunSendsBuildProvenance(t *testing.T) {
+	code, _, errs := campaignCLI(t, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Scenario   string                    `json:"scenario"`
+			Provenance domain.CampaignProvenance `json:"provenance"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil ||
+			body.Scenario != "alerting-day-control@v1" ||
+			body.Provenance != (domain.CampaignProvenance{
+				Role: domain.CampaignPostChangeControl, TargetBuild: "post-id", CorrTestBuild: "runner-id", WorkloadConfig: "pack-sha",
+			}) {
+			t.Errorf("run body=%+v err=%v", body, err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"data":{"ID":"cmp_1","Status":"PRECHECK"}}`))
+	}, "campaign", "run", "--scenario", "alerting-day-control@v1", "--comparison-role", "post_change_control",
+		"--target-build", "post-id", "--corrtest-build", "runner-id", "--workload-config", "pack-sha")
+	if code != 0 {
+		t.Fatalf("code=%d err=%s", code, errs)
 	}
 }

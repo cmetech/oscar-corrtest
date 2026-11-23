@@ -130,7 +130,9 @@ func (r *run) deliver(ctx context.Context, m *cohortMember, tick time.Time) {
 		r.event(context.WithoutCancel(ctx), cohortEvent, "info", "cohort member "+m.alert.Name, cohortPrior{m.alert.Name, m.alert.Labels, m.alert.StartsAt})
 		m.recorded = true
 	}
+	start := r.now()
 	status, err := r.e.d.Target.PostAlert(ctx, m.alert)
+	r.sourceOffer("ordinary_resend", start, status)
 	switch {
 	case status == 0 && err != nil && ctx.Err() == nil:
 		if m.policy.spec.Action == "ticket" && len(m.deliveries) == 0 {
@@ -165,13 +167,19 @@ func (r *run) resolveFiring(ctx context.Context, includeLane bool) ([]oscar.Hist
 			continue
 		}
 		firing = append(firing, row)
+		if strings.HasPrefix(row.Labels["campaign_lane"], "native-") || row.Labels["integration"] == "tl1_probe" {
+			continue
+		} // only the actual source owns these clears
 		req, err := oscar.BuildHistoryResolve(row, r.id)
 		if err == nil {
 			// The latest re-post first: it is the pair that keeps the row open.
 			for _, at := range append(r.freshStarts(row), row.StartsAt) {
 				req.Alerts[0].StartsAt = at.UTC().Format(time.RFC3339Nano)
 				var status int
-				if status, err = r.e.d.Target.PostAlertGroup(ctx, req); err == nil && status/100 != 2 {
+				start := r.now()
+				status, err = r.e.d.Target.PostAlertGroup(ctx, req)
+				r.sourceOffer("controller_clear", start, status)
+				if err == nil && status/100 != 2 {
 					err = fmt.Errorf("HTTP %d", status)
 				}
 				if err != nil {

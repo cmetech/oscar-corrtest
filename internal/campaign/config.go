@@ -6,11 +6,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+
+	"github.com/cmetech/oscar-corrtest/internal/campaign/managed"
 )
 
 // Config is the campaign configuration file. Credential fields are file paths;
 // secrets never appear in the file. MetricsCredentialFile is optional.
 type Config struct {
+	ManagedTL1                               *managed.Config
+	NativeObserverDir                        string
 	TargetID                                 string
 	WorkerURL, WorkerTokenFile, WorkerCAFile string
 	ProbeHost, ProbeKeyFile                  string

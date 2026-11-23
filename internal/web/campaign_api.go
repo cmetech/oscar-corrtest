@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/campaign/lane"
 	campaignscenario "github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
+	"github.com/cmetech/oscar-corrtest/internal/campaign/score"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/workerapi"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/evidence"
@@ -80,16 +82,23 @@ func registerCampaignRoutes(mux *http.ServeMux, data DataSource, workerMode bool
 		start := func(precheckOnly bool) func(http.ResponseWriter, *http.Request, string) {
 			return func(w http.ResponseWriter, r *http.Request, identity string) {
 				var body struct {
-					Scenario     string   `json:"scenario"`
-					Acknowledged []string `json:"acknowledged"`
-					RunBy        string   `json:"runBy"`
+					ManagedShare *float64                   `json:"managedShare,omitempty"`
+					Scenario     string                     `json:"scenario"`
+					Acknowledged []string                   `json:"acknowledged"`
+					RunBy        string                     `json:"runBy"`
+					Provenance   *domain.CampaignProvenance `json:"provenance"`
 				}
 				if !decodeStrict(w, r, &body) {
 					return
 				}
 				s, ok := campaignscenario.Lookup(body.Scenario)
 				if !ok {
-					apiError(w, http.StatusBadRequest, "unknown_scenario", "scenario must be alerting-day@v1 or alerting-day-smoke@v1")
+					apiError(w, http.StatusBadRequest, "unknown_scenario", "scenario must be a registered id@version selector")
+					return
+				}
+				s, err := lane.ConfigureShare(s, body.ManagedShare)
+				if err != nil {
+					apiError(w, http.StatusBadRequest, "invalid_share", err.Error())
 					return
 				}
 				if body.RunBy == "" {
@@ -103,10 +112,18 @@ func registerCampaignRoutes(mux *http.ServeMux, data DataSource, workerMode bool
 				// runs the pre-check suite and completes without starting load.
 				c, err := ctl.StartCampaign(r.Context(), appruntime.CampaignOptions{
 					Scenario: s, Trigger: "cli", TriggerIdentity: identity, RunBy: body.RunBy,
-					Acknowledged: body.Acknowledged, PrecheckOnly: precheckOnly,
+					Acknowledged: body.Acknowledged, PrecheckOnly: precheckOnly, Provenance: body.Provenance,
 				})
 				if errors.Is(err, appruntime.ErrCampaignActive) {
 					apiError(w, http.StatusConflict, "campaign_active", err.Error())
+					return
+				}
+				if errors.Is(err, appruntime.ErrCampaignWorkload) {
+					apiError(w, http.StatusBadRequest, "invalid_workload", err.Error())
+					return
+				}
+				if errors.Is(err, appruntime.ErrCampaignProvenance) {
+					apiError(w, http.StatusBadRequest, "invalid_provenance", err.Error())
 					return
 				}
 				if err != nil {
@@ -173,21 +190,19 @@ func registerCampaignRoutes(mux *http.ServeMux, data DataSource, workerMode bool
 			apiData(w, http.StatusOK, view)
 		})
 		mux.HandleFunc("GET /api/v1/campaign/compare", func(w http.ResponseWriter, r *http.Request) {
-			ids := splitIDs(r.URL.Query().Get("ids"))
-			if len(ids) < 2 {
-				apiError(w, http.StatusBadRequest, "invalid_request", "ids must list two or more campaign ids")
-				return
-			}
-			res, err := compareCampaigns(r.Context(), ctl, ids)
-			if errors.Is(err, appruntime.ErrCampaignNotFound) {
+			res, err := compareCampaigns(r.Context(), ctl, comparisonRequest(r.URL.Query()))
+			switch {
+			case errors.Is(err, score.ErrMissingBaseline):
+				apiError(w, http.StatusBadRequest, "missing_baseline", err.Error())
+			case errors.Is(err, score.ErrIncompatibleComparison):
+				apiError(w, http.StatusBadRequest, "incompatible_runs", err.Error())
+			case errors.Is(err, appruntime.ErrCampaignNotFound):
 				apiError(w, http.StatusNotFound, "not_found", err.Error())
-				return
-			}
-			if err != nil {
+			case err != nil:
 				apiError(w, http.StatusInternalServerError, "compare_failed", err.Error())
-				return
+			default:
+				apiData(w, http.StatusOK, res)
 			}
-			apiData(w, http.StatusOK, res)
 		})
 		mux.HandleFunc("GET /api/v1/campaign/runs/{id}/bundle", func(w http.ResponseWriter, r *http.Request) {
 			if _, ok := requestBearerIdentity(r); !ok {

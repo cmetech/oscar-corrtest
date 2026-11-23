@@ -3,65 +3,81 @@ package web
 import (
 	"context"
 	"encoding/json"
-	"sort"
+	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/score"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 )
 
-type compareItem struct {
-	ID     string
-	RunBy  string
-	Flags  []string // custom, other scenario, not comparable
-	Deltas []score.Delta
+type campaignComparisonRequest struct {
+	candidateIDs, referenceIDs []string
+	scenarioHash               string
+	mode                       score.ComparisonMode
 }
 
-type compareResult struct {
-	Reference score.Scorecard
-	Items     []compareItem
+func comparisonRequest(query url.Values) campaignComparisonRequest {
+	return campaignComparisonRequest{
+		candidateIDs: splitIDs(query.Get("ids")), referenceIDs: splitIDs(query.Get("referenceIds")),
+		scenarioHash: strings.TrimSpace(query.Get("scenarioHash")), mode: score.ComparisonMode(query.Get("mode")),
+	}
 }
 
-// compareCampaigns scores each id against the reference: the median of the first three
-// comparable, clean, PASS completed campaigns (oldest first). Flags mark runs that
-// should not be read against it; RunBy stays visible so agent and human runs are distinguishable.
-func compareCampaigns(ctx context.Context, ctl campaignController, ids []string) (compareResult, error) {
-	all, err := ctl.ListCampaigns(ctx, domain.CampaignFilter{Status: domain.CampaignCompleted})
-	if err != nil {
-		return compareResult{}, err
+// compareCampaigns loads only the IDs in the request, then compares their stored evidence.
+func compareCampaigns(ctx context.Context, ctl campaignController, req campaignComparisonRequest) (score.Comparison, error) {
+	if len(req.referenceIDs) == 0 {
+		return score.Comparison{}, score.ErrMissingBaseline
 	}
-	sort.SliceStable(all, func(i, j int) bool { return all[i].StartedAt.Before(all[j].StartedAt) })
-	var cards []score.Scorecard
-	for _, c := range all {
-		if card, ok := parseCard(c); ok {
-			cards = append(cards, card)
-		}
+	if len(req.referenceIDs) > score.MaxComparisonReferences || len(req.candidateIDs) == 0 {
+		return score.Comparison{}, fmt.Errorf("%w: select one to three references and at least one candidate", score.ErrIncompatibleComparison)
 	}
-	res := compareResult{Reference: score.Reference(cards)}
-	for _, id := range ids {
-		v, err := ctl.CampaignStatus(ctx, id)
-		if err != nil {
-			return compareResult{}, err
-		}
-		it := compareItem{ID: id, RunBy: v.Campaign.RunBy}
-		card, ok := parseCard(v.Campaign)
-		if v.Campaign.Custom {
-			it.Flags = append(it.Flags, "custom scenario")
-		}
-		if !ok {
-			it.Flags = append(it.Flags, "no scorecard")
-		} else {
-			if card.ScenarioHash != res.Reference.ScenarioHash {
-				it.Flags = append(it.Flags, "other scenario version")
+	load := func(ids []string) ([]score.IdentifiedScorecard, error) {
+		runs := make([]score.IdentifiedScorecard, 0, len(ids))
+		for _, id := range ids {
+			view, err := ctl.CampaignStatus(ctx, id)
+			if err != nil {
+				return nil, err
 			}
-			it.Deltas = score.CompareTo(card, res.Reference)
+			c := view.Campaign
+			card, ok := parseCard(c)
+			if !ok || c.ID != id || card.Verdict != c.Verdict {
+				return nil, fmt.Errorf("%w: run %q has no consistent stored scorecard", score.ErrIncompatibleComparison, id)
+			}
+			var report struct {
+				FullLoadCompleted bool `json:"fullLoadCompleted"`
+			}
+			if err := json.Unmarshal(c.Report, &report); err != nil {
+				return nil, fmt.Errorf("%w: run %q has no stored completion evidence", score.ErrIncompatibleComparison, id)
+			}
+			card.RunBy = c.RunBy
+			run := score.IdentifiedScorecard{
+				RunID: c.ID, ScenarioHash: c.ScenarioHash, Status: c.Status, Cleanup: c.Cleanup,
+				Comparable: c.Comparable, Custom: c.Custom, FullLoadCompleted: report.FullLoadCompleted,
+				StartedAt: c.StartedAt, EndedAt: c.EndedAt, Scorecard: card,
+			}
+			if view.Scenario != nil {
+				run.Scenario = *view.Scenario
+			}
+			if view.Options != nil {
+				run.Acknowledged, run.PrecheckOnly = view.Options.Acknowledged, view.Options.PrecheckOnly
+				if view.Options.Provenance != nil {
+					run.Provenance = *view.Options.Provenance
+				}
+			}
+			runs = append(runs, run)
 		}
-		if !v.Campaign.Comparable || (ok && !card.Comparable) {
-			it.Flags = append(it.Flags, "not comparable")
-		}
-		res.Items = append(res.Items, it)
+		return runs, nil
 	}
-	return res, nil
+	references, err := load(req.referenceIDs)
+	if err != nil {
+		return score.Comparison{}, err
+	}
+	candidates, err := load(req.candidateIDs)
+	if err != nil {
+		return score.Comparison{}, err
+	}
+	return score.CompareCompatible(references, candidates, req.scenarioHash, req.mode)
 }
 
 func parseCard(c domain.Campaign) (score.Scorecard, bool) {

@@ -25,17 +25,23 @@ var activationPollInterval = 2 * time.Second
 const resendPath = "/api/v1/resend-policies"
 
 // PolicyDefinition uses OSCAR's exact field names. Enabled has no omitempty: drafts must say false.
+type Escalation struct {
+	AfterSeconds   int    `json:"after_seconds"`
+	TargetSeverity string `json:"target_severity"`
+}
+
 type PolicyDefinition struct {
-	NotifierID       string `json:"notifier_id"`
-	Name             string `json:"name"`
-	Action           string `json:"action"` // notification | ticket
-	Mode             string `json:"mode"`   // time | occurrences | either
-	IntervalSeconds  *int   `json:"interval_seconds,omitempty"`
-	EveryOccurrences *int   `json:"every_occurrences,omitempty"`
-	MaxResends       *int   `json:"max_resends,omitempty"`
-	Priority         int    `json:"priority"`
-	Condition        string `json:"condition,omitempty"`
-	Enabled          bool   `json:"enabled"`
+	Escalation       *Escalation `json:"escalation,omitempty"`
+	NotifierID       string      `json:"notifier_id"`
+	Name             string      `json:"name"`
+	Action           string      `json:"action"` // notification | ticket
+	Mode             string      `json:"mode"`   // time | occurrences | either
+	IntervalSeconds  *int        `json:"interval_seconds,omitempty"`
+	EveryOccurrences *int        `json:"every_occurrences,omitempty"`
+	MaxResends       *int        `json:"max_resends,omitempty"`
+	Priority         int         `json:"priority"`
+	Condition        string      `json:"condition,omitempty"`
+	Enabled          bool        `json:"enabled"`
 }
 
 type Policy struct {
@@ -96,6 +102,13 @@ func CreateDraft(ctx context.Context, c *oscar.Client, def PolicyDefinition, exp
 	def.Enabled = false
 	var p Policy
 	err := c.DoJSON(ctx, http.MethodPost, resendPath, nil, map[string]any{"definition": def, "expected_revision": expectedRevision}, &p)
+	return p, mapResendErr(err)
+}
+
+// Edit replaces an owned rule at its exact catalog revision.
+func Edit(ctx context.Context, c *oscar.Client, id string, def PolicyDefinition, expectedRevision int) (Policy, error) {
+	var p Policy
+	err := c.DoJSON(ctx, http.MethodPut, resendPath+"/"+id, nil, map[string]any{"definition": def, "expected_revision": expectedRevision}, &p)
 	return p, mapResendErr(err)
 }
 

@@ -125,13 +125,15 @@ type Metrics interface {
 
 // Deps wires the engine to its collaborators.
 type Deps struct {
-	Store   Store
-	Worker  Worker
-	Target  Target
-	SNOW    SNOW
-	Sink    Sink
-	Metrics Metrics
-	Probe   func(ctx context.Context) (targetops.ProbeResult, error)
+	managed      *managedDeps
+	nativeSender lane.Sender
+	Store        Store
+	Worker       Worker
+	Target       Target
+	SNOW         SNOW
+	Sink         Sink
+	Metrics      Metrics
+	Probe        func(ctx context.Context) (targetops.ProbeResult, error)
 	// Precheck runs the C10 checks (precheck.Run with the real adapter).
 	Precheck func(ctx context.Context, s scenario.Scenario) []precheck.Result
 	// TaskRuns reads the homelab pack's task runs in [start, end) from the
@@ -146,6 +148,7 @@ type Deps struct {
 	FrontOfficeURL   string
 	FrontOfficeHTTP  *http.Client
 	FrontOfficeUsers []frontoffice.User
+	ObserverDir      string
 	ReportDir        string // ledger files; default os.TempDir()
 	// ExportRun writes a correlation run's standard bundle (Runtime.ExportRun).
 	ExportRun func(ctx context.Context, runID, destination string) (evidence.Result, error)
@@ -171,12 +174,15 @@ func New(d Deps, clock lane.Clock) *Engine {
 
 // run is the state of one campaign execution.
 type run struct {
-	e      *Engine
-	id     string
-	s      scenario.Scenario
-	opts   runtime.CampaignOptions
-	t0     time.Time
-	laneID string
+	monoStart    time.Time
+	sourceTotals map[string]sourceOffers
+	managed      *managedLane
+	e            *Engine
+	id           string
+	s            scenario.Scenario
+	opts         runtime.CampaignOptions
+	t0           time.Time
+	laneID       string
 
 	comparable bool
 	sinkID     string
@@ -262,7 +268,9 @@ func (e *Engine) Run(ctx context.Context, id string, o runtime.CampaignOptions) 
 	stable := context.WithoutCancel(ctx)
 	r := &run{e: e, id: id, s: o.Scenario, opts: o, laneID: id + "-baseline", cohorts: map[string]*cohortMember{}, fo: map[string][]score.FOSample{}}
 	sc, _ := json.Marshal(o.Scenario)
-	_ = e.d.Store.AppendCampaignEvent(stable, id, scenarioEvent, "info", "campaign scenario recorded", sc, r.now())
+	if err := e.d.Store.AppendCampaignEvent(stable, id, scenarioEvent, "info", "campaign scenario recorded", sc, r.now()); err != nil {
+		return err
+	}
 
 	results := e.d.Precheck(context.WithValue(ctx, campaignIDKey{}, id), o.Scenario)
 	ok, comparable, reason := precheck.Startable(results, o.Acknowledged)
@@ -336,6 +344,9 @@ func (e *Engine) Recover(ctx context.Context, id string) error {
 		return r.finishAfterDrain(ctx, domain.VerdictInconclusive, "no traffic: interrupted before the lane started")
 	}
 	r.t0 = t0
+	if r.managedOnly() {
+		return r.finishAfterDrain(ctx, domain.VerdictInconclusive, "managed lifecycle interrupted")
+	}
 	return r.finish(ctx, "interrupted: recovered after restart")
 }
 
@@ -359,7 +370,9 @@ func (e *Engine) Cleanup(ctx context.Context, id string) (domain.CleanupStatus, 
 	if t0, ok := r.recordedT0(ctx); ok { // bounds the History read-back
 		r.t0 = t0
 	}
-	r.closeIncidents(ctx)
+	if !r.managedOnly() {
+		r.closeIncidents(ctx)
+	}
 	st := r.cleanup(ctx)
 	if err := e.d.Store.SetCampaignCleanup(ctx, id, st, r.now(), fmt.Sprintf("cleanup re-run: %s -> %s", c.Cleanup, st)); err != nil {
 		return "", err
@@ -384,13 +397,41 @@ func (r *run) recordedT0(ctx context.Context) (time.Time, bool) {
 // execute runs steps 2-9 once the campaign is RUNNING.
 func (r *run) execute(ctx context.Context) error {
 	stable := context.WithoutCancel(ctx)
+	defer func() {
+		if r.managed != nil {
+			r.managed.peer.Close()
+		}
+	}()
+	if r.managedOnly() {
+		sink, err := controlledNotifiers(ctx, r.e.d.Target, r.e.d.CampaignNotifier)
+		if err != nil {
+			return r.abort(ctx, err.Error())
+		}
+		r.sinkID = sink
+		if err = r.prepareManaged(ctx); err != nil {
+			return r.abort(ctx, err.Error())
+		}
+		r.monoStart = time.Now()
+		r.t0 = r.now()
+		if err = r.store().AppendCampaignEvent(ctx, r.id, "campaign.t0", "info", "managed lifecycle started", mustJSON(map[string]time.Time{"T0": r.t0}), r.t0); err != nil {
+			return r.abort(ctx, err.Error())
+		}
+		r.managedPhase(ctx)
+		if err := r.transition(stable, domain.CampaignDraining, "managed source drain"); err != nil {
+			return err
+		}
+		if ctx.Err() != nil {
+			return r.finishAfterDrain(stable, domain.VerdictInconclusive, "managed lifecycle interrupted")
+		}
+		return r.finishAfterDrain(stable, "", "")
+	}
 	phaseCtx, stopPhases := context.WithCancel(ctx)
 	defer stopPhases()
 
 	for _, step := range []struct {
 		name string
 		do   func(context.Context) error
-	}{{"isolation", r.isolate}, {"policy drafts", r.createDrafts}, {"lane start", r.startLane}} {
+	}{{"isolation", r.isolate}, {"policy drafts", r.createDrafts}, {"managed preparation", r.prepareManaged}, {"lane start", r.startLane}} {
 		if ctx.Err() != nil { // stopped or closing: never start the next step
 			return r.abort(ctx, step.name+" not started")
 		}
@@ -427,7 +468,9 @@ func (r *run) execute(ctx context.Context) error {
 	go func() { defer bg.Done(); r.guards(phaseCtx, func() { stopPhases(); stopFO() }) }()
 
 	var work sync.WaitGroup
-	work.Add(4)
+	work.Add(6)
+	go func() { defer work.Done(); r.managedPhase(phaseCtx) }()
+	go func() { defer work.Done(); r.nativeOrdinaryPhase(phaseCtx) }()
 	go func() { defer work.Done(); r.correlation(phaseCtx) }()
 	go func() { defer work.Done(); r.resendPhase(phaseCtx) }()
 	go func() { defer work.Done(); r.standingPhase(phaseCtx) }()    // v2 only

@@ -54,16 +54,22 @@ type CorrelationSpec struct {
 	TicketedPatterns []string  `json:"ticketedPatterns"`
 }
 
+type EscalationSpec struct {
+	After          time.Duration `json:"after"`
+	TargetSeverity string        `json:"targetSeverity"`
+}
+
 type PolicySpec struct {
-	Key        string        `json:"key"`
-	Action     string        `json:"action"`
-	Mode       string        `json:"mode"`
-	Interval   time.Duration `json:"interval"`
-	Every      int           `json:"every"`
-	MaxResends *int          `json:"maxResends"`
-	Fresh      bool          `json:"fresh"`
-	Cohort     int           `json:"cohort"`
-	Notifier   string        `json:"notifier"`
+	Key        string          `json:"key"`
+	Action     string          `json:"action"`
+	Mode       string          `json:"mode"`
+	Interval   time.Duration   `json:"interval"`
+	Every      int             `json:"every"`
+	MaxResends *int            `json:"maxResends"`
+	Fresh      bool            `json:"fresh"`
+	Cohort     int             `json:"cohort"`
+	Notifier   string          `json:"notifier"`
+	Escalation *EscalationSpec `json:"escalation,omitempty"`
 }
 
 type FrontOfficeSpec struct {
@@ -155,6 +161,29 @@ type FingerprintSpec struct {
 	Verify   time.Duration `json:"verify"`
 }
 
+// NativeCohort identifies a distinct source-delivery path in the qualification workload.
+type NativeCohort string
+
+const (
+	NativeDirectNoPolicy  NativeCohort = "direct_no_policy"
+	NativeCanonicalFirst  NativeCohort = "canonical_first_no_policy"
+	NativeCanonicalRepeat NativeCohort = "canonical_repeat_no_policy"
+)
+
+// NativeWorkloadSpec records the paths that must be observed through real
+// native routes. Enrollment here refers to canonical identity, not a policy.
+type NativeWorkloadSpec struct {
+	Cohorts           []NativeCohort `json:"cohorts"`
+	ManagedTL1        bool           `json:"managedTL1,omitempty"`
+	ConfiguredPolicy  bool           `json:"configuredPolicy,omitempty"`
+	ManagedPolicy     *PolicySpec    `json:"managedPolicy,omitempty"`
+	ManagedRepeat     *PolicySpec    `json:"managedRepeat,omitempty"`
+	ManagedSegment    time.Duration  `json:"managedSegment,omitempty"`
+	ManagedPriorities map[string]int `json:"managedPriorities,omitempty"`
+	ManagedShare      float64        `json:"managedShare,omitempty"`
+	ManagedRate       float64        `json:"managedRate,omitempty"`
+}
+
 type Scenario struct {
 	ID          string          `json:"id"`
 	Version     string          `json:"version"`
@@ -172,10 +201,12 @@ type Scenario struct {
 	// DeadTarget is the delivery-retry isolation facet.
 	DeadTarget *DeadTargetSpec `json:"deadTarget,omitempty"`
 	// Fingerprint is the fingerprint-policy lane facet; nil runs no lane.
-	Fingerprint *FingerprintSpec `json:"fingerprint,omitempty"`
-	Limits      Limits           `json:"limits"`
-	Precheck    PrecheckLimits   `json:"precheck"`
-	Seed        int64            `json:"seed"`
+	Fingerprint    *FingerprintSpec    `json:"fingerprint,omitempty"`
+	LoadEnd        time.Duration       `json:"loadEnd,omitempty"`
+	NativeWorkload *NativeWorkloadSpec `json:"nativeWorkload,omitempty"`
+	Limits         Limits              `json:"limits"`
+	Precheck       PrecheckLimits      `json:"precheck"`
+	Seed           int64               `json:"seed"`
 }
 
 // TransportDedupWindow is OSCAR's JetStream duplicate window for ordinary alerts
@@ -203,10 +234,10 @@ func AlertingDayV1() Scenario {
 			ResolveAfter: 15 * min, TicketEveryNth: 20, TicketFrom: 60 * min, TicketTo: 120 * min},
 		Correlation: CorrelationSpec{SetA: setA, SetB: setB, TicketedPatterns: []string{"flood", "threshold"}},
 		Resend: []PolicySpec{
-			{"R1", "notification", "time", 110 * time.Second, 0, n(5), false, 10, "CAMPAIGN_SINK"},
-			{"R2", "notification", "occurrences", 0, 3, nil, true, 10, "CAMPAIGN_SINK"},
-			{"R3", "notification", "either", 300 * time.Second, 5, n(2), true, 10, "CAMPAIGN_SINK"},
-			{"R4", "ticket", "time", 590 * time.Second, 0, n(2), false, 10, "ALERTHISTORY"},
+			{"R1", "notification", "time", 110 * time.Second, 0, n(5), false, 10, "CAMPAIGN_SINK", nil},
+			{"R2", "notification", "occurrences", 0, 3, nil, true, 10, "CAMPAIGN_SINK", nil},
+			{"R3", "notification", "either", 300 * time.Second, 5, n(2), true, 10, "CAMPAIGN_SINK", nil},
+			{"R4", "ticket", "time", 590 * time.Second, 0, n(2), false, 10, "ALERTHISTORY", nil},
 		},
 		Redelivery: 130 * time.Second, ResendUntil: 118 * min, // clear of TransportDedupWindow
 		FrontOffice: FrontOfficeSpec{Users: 4, Interval: 15 * time.Second, Jitter: 3 * time.Second, SearchEvery: 2 * min},
@@ -256,7 +287,7 @@ func AlertingDaySmokeV1() Scenario {
 		Severity:     map[string]float64{"critical": 0.05, "major": 0.15, "minor": 0.40, "warning": 0.40},
 		ResolveAfter: min, TicketEveryNth: 100, TicketFrom: 4 * min, TicketTo: 8 * min} // seed 20261113: 2 tickets
 	s.Correlation = CorrelationSpec{SetA: []CaseRef{{Pattern: "flood", Level: "builtin"}}, TicketedPatterns: []string{"flood", "threshold"}}
-	s.Resend = []PolicySpec{{"R1", "notification", "time", 50 * time.Second, 0, n(2), false, 2, "CAMPAIGN_SINK"}}
+	s.Resend = []PolicySpec{{"R1", "notification", "time", 50 * time.Second, 0, n(2), false, 2, "CAMPAIGN_SINK", nil}}
 	s.ResendUntil = 9*min + 48*time.Second // v1 stops cohorts just before drain; ~3 deliveries after activation
 	return s
 }
@@ -274,6 +305,73 @@ func AlertingDaySmokeV2() Scenario {
 	s.Standing = &StandingSpec{Size: 100, Instances: 25, Interval: 2 * min, Until: 10 * min, Concurrency: 4}
 	s.Breaker = &BreakerSpec{QueueHigh: 100, QueueLow: 10, BurstConcurrency: 32, ResolveProbes: 10}
 	s.Limits.QuerySetVersion = "q2"
+	return s
+}
+
+// AlertingDayControlV1 freezes the ordinary no-policy control for both builds.
+func AlertingDayControlV1() Scenario {
+	s := AlertingDayV2()
+	s.ID, s.Version = "alerting-day-control", "v1"
+	s.LoadEnd = 150 * time.Minute
+	s.Phases = append(s.Phases[:4],
+		Phase{"sustained_load", 90 * time.Minute, s.LoadEnd},
+		Phase{"drain", s.LoadEnd, s.LoadEnd + 30*time.Minute})
+	s.Standing.Until = s.LoadEnd
+	s.Breaker = nil
+	s.Resend, s.Redelivery, s.ResendUntil = nil, 0, 0
+	s.NativeWorkload = &NativeWorkloadSpec{Cohorts: []NativeCohort{
+		NativeDirectNoPolicy, NativeCanonicalFirst, NativeCanonicalRepeat,
+	}}
+	s.Limits.FrontOfficeP95 = 2 * time.Second
+	s.Limits.RegressionPct = 5
+	return s
+}
+
+// AlertingDayV3 retains the ordinary load and adds native-backed policy cohorts.
+func AlertingDayV3() Scenario {
+	s := AlertingDayControlV1()
+	s.ID, s.Version = "alerting-day", "v3"
+	v2 := AlertingDayV2()
+	s.Phases[4] = v2.Phase("resend")
+	s.Phases = append(s.Phases[:5], Phase{"sustained_load", 120 * time.Minute, s.LoadEnd}, s.Phase("drain"))
+	s.Resend, s.Redelivery, s.ResendUntil = v2.Resend, v2.Redelivery, v2.ResendUntil
+	s.NativeWorkload.ConfiguredPolicy, s.NativeWorkload.ManagedTL1 = true, true
+	s.NativeWorkload.ManagedPolicy = &PolicySpec{Key: "TL1", Action: "notification", Mode: "time", Interval: 60 * time.Second, Notifier: "CAMPAIGN_SINK", Escalation: &EscalationSpec{After: 3 * time.Minute, TargetSeverity: "critical"}}
+	s.NativeWorkload.ManagedRepeat = &PolicySpec{Key: "REPEAT", Action: "notification", Mode: "time", Interval: time.Minute, Notifier: "CAMPAIGN_SINK"}
+	s.NativeWorkload.ManagedSegment = 10 * time.Minute
+	s.NativeWorkload.ManagedPriorities = map[string]int{"TL1": 5, "REPEAT": 6, "EDIT": 7}
+	s.NativeWorkload.ManagedRate = 0.2
+	s.Limits.RegressionPct = 10
+	return s
+}
+
+// AlertingDaySmokeV3 is a bounded, non-comparable run of the V3 paths.
+func AlertingDaySmokeV3() Scenario {
+	s := AlertingDaySmokeV2()
+	v3 := AlertingDayV3()
+	s.Version = "v3"
+	s.LoadEnd = 20 * time.Minute
+	s.Standing.Until = s.LoadEnd
+	s.Phases = append(s.Phases[:5], Phase{"sustained_load", 10 * time.Minute, s.LoadEnd}, Phase{"drain", s.LoadEnd, s.LoadEnd + 2*time.Minute})
+	s.Breaker = nil
+	s.NativeWorkload, s.Limits = v3.NativeWorkload, v3.Limits
+	return s
+}
+
+// ManagedAlertsSmokeV1 is a bounded functional lane for real TL1 source
+// actions. It shares V3's managed source path and does not carry ordinary load.
+func ManagedAlertsSmokeV1() Scenario {
+	s := AlertingDaySmokeV3()
+	s.ID, s.Version = "managed-alerts-smoke", "v1"
+	s.LoadEnd = 20 * time.Minute
+	s.Phases = []Phase{{"preflight", -2 * time.Minute, 0}, {"managed_lifecycle", 0, s.LoadEnd},
+		{"drain", s.LoadEnd, s.LoadEnd + 5*time.Minute}}
+	s.Baseline, s.Correlation, s.Standing = BaselineSpec{}, CorrelationSpec{}, nil
+	s.Resend, s.Redelivery, s.ResendUntil = nil, 0, 0
+	s.NativeWorkload.Cohorts = nil
+	s.NativeWorkload.ManagedRate = 0
+	s.NativeWorkload.ManagedRepeat = nil
+	s.NativeWorkload.ManagedSegment = 0
 	return s
 }
 
@@ -357,7 +455,7 @@ func FunctionalBurstFullV1() Scenario {
 
 // Builtins are the built-in campaign scenarios.
 func Builtins() []Scenario {
-	return []Scenario{AlertingDayV1(), AlertingDayV2(), AlertingDaySmokeV1(), AlertingDaySmokeV2(), DeliveryRetryV1(), ResendOnlyV1(), FunctionalV1(), FunctionalBurstV1(), FunctionalBurstFullV1()}
+	return []Scenario{AlertingDayV1(), AlertingDayV2(), AlertingDaySmokeV1(), AlertingDaySmokeV2(), DeliveryRetryV1(), ResendOnlyV1(), FunctionalV1(), FunctionalBurstV1(), FunctionalBurstFullV1(), AlertingDayControlV1(), AlertingDayV3(), AlertingDaySmokeV3(), ManagedAlertsSmokeV1()}
 }
 
 // Lookup returns the built-in scenario named "id@version".
@@ -388,6 +486,11 @@ func (s Scenario) Phase(name string) Phase {
 		}
 	}
 	return Phase{}
+}
+
+// RequiresComparisonProvenance identifies the long qualification plans.
+func (s Scenario) RequiresComparisonProvenance() bool {
+	return s.NativeWorkload != nil && !s.Custom
 }
 
 // Hash is the hex sha256 of canonical JSON: sorted keys, durations as integer milliseconds.

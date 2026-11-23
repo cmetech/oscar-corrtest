@@ -38,7 +38,10 @@ import (
 const speed = 50
 
 // scaledClock is the fake clock: campaign time runs speed x wall time, so
-// a scenario with phases in seconds finishes in a few wall seconds.
+// a scenario with phases in seconds finishes in a few wall seconds. Every
+// harness test runs inside a synctest bubble, where "wall time" is synctest's
+// fake time: it advances only when every goroutine in the bubble is blocked,
+// so runner load (sqlite, HTTP, -race) never stretches campaign time.
 type scaledClock struct{ base, start time.Time }
 
 func newClock() *scaledClock {
@@ -139,11 +142,12 @@ type delivery struct {
 // Target, SNOW, Sink and Metrics interfaces. Firings reach History and the
 // sink; create_ticket=snow opens an incident; a resolve adds OSCAR's comment.
 type fakeOSCAR struct {
-	t     *testing.T
-	clock *scaledClock
-	lane  *laneClock // the worker lane's clock; stamps History and sink rows for lane posts
-	s     scenario.Scenario
-	srv   *httptest.Server
+	t      *testing.T
+	clock  *scaledClock
+	lane   *laneClock // the worker lane's clock; stamps History and sink rows for lane posts
+	s      scenario.Scenario
+	srv    *httptest.Server
+	client *http.Client
 
 	mu         sync.Mutex
 	notifiers  map[string]*targetops.Notifier
@@ -219,8 +223,10 @@ func newFakeOSCAR(t *testing.T, clock *scaledClock, s scenario.Scenario) *fakeOS
 		{ID: "n5", Name: "CAMPAIGN_SINK", Status: "disabled"}, {ID: "n6", Name: "PAGER", Status: "disabled"}} {
 		f.notifiers[n.ID] = &n
 	}
-	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
-	t.Cleanup(f.srv.Close)
+	// In-memory network: inside a synctest bubble (see scaledClock) loopback
+	// sockets would never count as durably blocked, so fake time would stall.
+	f.srv = httptest.NewTestServer(t, http.HandlerFunc(f.serve))
+	f.client = f.srv.Client() // also sets f.srv.URL
 	return f
 }
 
@@ -968,6 +974,7 @@ type harness struct {
 	id     string
 }
 
+// newHarness must be called inside synctest.Test (see scaledClock).
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	ctx := context.Background()
@@ -983,6 +990,7 @@ func newHarness(t *testing.T) *harness {
 	f.lane = &laneClock{scaledClock: clock}
 	target := domain.Target{ID: "t1", BaseURL: f.srv.URL}
 	m := worker.NewManager(laneStore{storage.NewLaneLedger(db), db}, target, f.lane, 30*time.Second)
+	m.UseHTTPClient(f.client)
 	t.Cleanup(m.Shutdown)
 	w := &fakeWorker{m: m}
 	h := &harness{t: t, clock: clock, db: db, oscar: f, worker: w, s: s, id: "camp_" + strings.ReplaceAll(t.Name(), "/", "_")}
@@ -998,7 +1006,7 @@ func newHarness(t *testing.T) *harness {
 				{Job: "monitor:check_connection:homelab", Status: "SUCCESS", Duration: 3 * time.Second},
 				{Job: "monitor:check_filesystem_space:homelab", Status: "FAILURE", Duration: time.Second}}, nil
 		},
-		Correlate: f.correlate, TargetID: "t1", IngestURL: f.srv.URL, FrontOfficeURL: f.srv.URL, FrontOfficeHTTP: f.srv.Client(),
+		Correlate: f.correlate, TargetID: "t1", IngestURL: f.srv.URL, FrontOfficeURL: f.srv.URL, FrontOfficeHTTP: f.client,
 		FrontOfficeUsers: []frontoffice.User{{Name: "fo-01", APIKey: "k1"}, {Name: "fo-02", APIKey: "k2"}}, ReportDir: t.TempDir()}
 	if err := db.CreateCampaign(ctx, domain.Campaign{ID: h.id, ScenarioID: s.ID, ScenarioHash: s.Hash(), Custom: true, Trigger: "cli",
 		RunBy: "agent", Status: domain.CampaignPrecheck, StartedAt: clock.Now()}); err != nil {

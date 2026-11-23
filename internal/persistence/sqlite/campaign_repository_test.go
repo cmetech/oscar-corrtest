@@ -63,7 +63,7 @@ func TestMigration0006AppliesOnTopOf0005(t *testing.T) {
 		t.Fatal(err)
 	}
 	var n, runs int
-	if err := db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 10 {
+	if err := db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 11 {
 		t.Fatalf("n=%d err=%v", n, err)
 	}
 	if err := db.QueryRow(`SELECT count(*) FROM runs`).Scan(&runs); err != nil || runs != 1 {
@@ -512,6 +512,50 @@ func TestMigration0010AcceptsFingerprintPolicy(t *testing.T) {
 	}
 	var ids string
 	if err := db.QueryRow(`SELECT group_concat(id || ':' || kind) FROM campaign_mutations ORDER BY id`).Scan(&ids); err != nil || ids != "1:dead_notifier_create,2:fingerprint_policy_enable" {
+		t.Fatalf("rows %q err %v", ids, err)
+	}
+}
+
+// Migration 0011: campaign_mutations accepts the managed native lanes' owner and suppression kinds and keeps every row.
+func TestMigration0011AcceptsNativeOwners(t *testing.T) {
+	ctx := context.Background()
+	db := openTestSQL(t)
+	old := fstest.MapFS{}
+	entries, _ := fs.ReadDir(embeddedMigrations, "migrations")
+	for _, e := range entries {
+		if e.Name() < "0011" {
+			data, _ := embeddedMigrations.ReadFile("migrations/" + e.Name())
+			old["migrations/"+e.Name()] = &fstest.MapFile{Data: data}
+		}
+	}
+	if err := migrate(ctx, db, old); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO campaigns(id, scenario_id, scenario_hash, custom, trigger, run_by, trigger_identity, status, started_at) VALUES('c1','s','h',0,'cli','agent','me','COMPLETED','2026-01-01T00:00:00Z')`,
+		`INSERT INTO campaign_mutations(campaign_id, kind, object_id, prior_json, recorded_at) VALUES('c1','fingerprint_policy_enable','corrtest-fp-ignore-volatile','{"name":"corrtest-fp-ignore-volatile"}','2026-01-01T00:00:00Z')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	kinds := []string{"managed_provider_owner", "native_owned_silence", "native_owned_inhibitor"}
+	insert := `INSERT INTO campaign_mutations(campaign_id, kind, object_id, recorded_at) VALUES('c1',?,'o','2026-01-01T00:00:00Z')`
+	for _, k := range kinds {
+		if _, err := db.Exec(insert, k); err == nil {
+			t.Fatalf("0010 should refuse %s", k)
+		}
+	}
+	if err := migrate(ctx, db, embeddedMigrations); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range kinds {
+		if _, err := db.Exec(insert, k); err != nil {
+			t.Fatalf("%s after 0011: %v", k, err)
+		}
+	}
+	var ids string
+	if err := db.QueryRow(`SELECT group_concat(id || ':' || kind) FROM campaign_mutations ORDER BY id`).Scan(&ids); err != nil || ids != "1:fingerprint_policy_enable,2:managed_provider_owner,3:native_owned_silence,4:native_owned_inhibitor" {
 		t.Fatalf("rows %q err %v", ids, err)
 	}
 }

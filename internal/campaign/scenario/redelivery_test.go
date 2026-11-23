@@ -12,6 +12,9 @@ import (
 // landing at 120s went either way. Redelivery must clear the window.
 func TestRedeliveryClearsTransportDedupWindow(t *testing.T) {
 	for _, s := range Builtins() {
+		if len(s.Resend) == 0 {
+			continue // no resend cohorts: the redelivery loop never posts
+		}
 		if s.Redelivery < TransportDedupWindow+10*time.Second {
 			t.Errorf("%s@%s redelivery %s must exceed the %s transport dedup window with margin",
 				s.ID, s.Version, s.Redelivery, TransportDedupWindow)

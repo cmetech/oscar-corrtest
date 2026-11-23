@@ -616,20 +616,26 @@ type annotationWire struct {
 }
 
 type historyWire struct {
-	OriginalSeverity *string          `json:"original_severity"`
-	Severity         *string          `json:"severity"`
-	StartsAt         flexTime         `json:"startsAt"`
-	ID               any              `json:"id"`
-	AlertName        string           `json:"alertname"`
-	Fingerprint      string           `json:"fingerprint"`
-	Status           string           `json:"status"`
-	CreatedAt        flexTime         `json:"createdAt"`
-	Labels           []labelWire      `json:"labels"`
-	Annotations      []annotationWire `json:"annotations"`
+	Acknowledged      bool             `json:"acknowledged"`
+	SourceSeverity    string           `json:"source_severity"`
+	EffectiveSeverity string           `json:"effective_severity"`
+	TicketID          string           `json:"ticket_id"`
+	OccurrenceCount   int              `json:"occurrence_count"`
+	EpisodeNumber     int              `json:"episode_number"`
+	OriginalSeverity  *string          `json:"original_severity"`
+	Severity          *string          `json:"severity"`
+	StartsAt          flexTime         `json:"startsAt"`
+	ID                any              `json:"id"`
+	AlertName         string           `json:"alertname"`
+	Fingerprint       string           `json:"fingerprint"`
+	Status            string           `json:"status"`
+	CreatedAt         flexTime         `json:"createdAt"`
+	Labels            []labelWire      `json:"labels"`
+	Annotations       []annotationWire `json:"annotations"`
 }
 
 func (r historyWire) normalized() HistoryRecord {
-	result := HistoryRecord{OriginalSeverity: r.OriginalSeverity, Severity: r.Severity, StartsAt: r.StartsAt.Time, ID: fmt.Sprint(r.ID), AlertName: r.AlertName, Fingerprint: r.Fingerprint, Status: r.Status, CreatedAt: r.CreatedAt.Time, Labels: map[string]string{}, Annotations: map[string]string{}}
+	result := HistoryRecord{Acknowledged: r.Acknowledged, SourceSeverity: r.SourceSeverity, EffectiveSeverity: r.EffectiveSeverity, TicketID: r.TicketID, OccurrenceCount: r.OccurrenceCount, EpisodeNumber: r.EpisodeNumber, OriginalSeverity: r.OriginalSeverity, Severity: r.Severity, StartsAt: r.StartsAt.Time, ID: fmt.Sprint(r.ID), AlertName: r.AlertName, Fingerprint: r.Fingerprint, Status: r.Status, CreatedAt: r.CreatedAt.Time, Labels: map[string]string{}, Annotations: map[string]string{}}
 	for _, item := range r.Labels {
 		result.Labels[item.Label] = item.Value
 	}

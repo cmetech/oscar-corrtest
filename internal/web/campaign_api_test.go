@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/campaign/score"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/workerapi"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	appruntime "github.com/cmetech/oscar-corrtest/internal/runtime"
@@ -315,5 +317,52 @@ func TestCampaignCleanupRoute(t *testing.T) {
 	data.cleanErr = appruntime.ErrCampaignActive
 	if w := apiDo(h, http.MethodPost, "/api/v1/campaign/runs/camp_1/cleanup", "", true, nil); w.Code != http.StatusConflict {
 		t.Fatalf("active status=%d", w.Code)
+	}
+}
+
+func TestCompareIgnoresUnrelatedEarlierRuns(t *testing.T) {
+	f, query := comparisonPageFixture()
+	h := newPagesHandler(f)
+	w := apiDo(h, http.MethodGet, "/api/v1/campaign/compare?"+query.Encode(), "", false, nil)
+	var reply struct{ Data score.Comparison }
+	if err := json.Unmarshal(w.Body.Bytes(), &reply); err != nil {
+		t.Fatalf("status=%d response=%s", w.Code, w.Body)
+	}
+	got := reply.Data
+	if w.Code != http.StatusOK || got.ReferenceCount != 1 || len(got.References) != 1 || got.References[0].RunID != "before" ||
+		len(got.Items) != 1 || got.Items[0].RunID != "after" || len(got.Items[0].Deltas) != 1 || got.Items[0].Deltas[0].WorsePct != 8 {
+		t.Fatalf("status=%d comparison=%+v", w.Code, got)
+	}
+	if f.listed || strings.Join(f.statusIDs, ",") != "before,after" {
+		t.Fatalf("comparison queried unrelated runs: listed=%v ids=%v", f.listed, f.statusIDs)
+	}
+}
+
+func TestCompareAPIRequiresExplicitReferenceAndStoredProvenance(t *testing.T) {
+	f, query := comparisonPageFixture()
+	delete(f.options, "after")
+	h := newPagesHandler(f)
+	w := apiDo(h, http.MethodGet, "/api/v1/campaign/compare?ids=after", "", false, nil)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "missing_baseline") || len(f.statusIDs) != 0 {
+		t.Fatalf("missing baseline: status=%d response=%s loaded=%v", w.Code, w.Body, f.statusIDs)
+	}
+	w = apiDo(h, http.MethodGet, "/api/v1/campaign/compare?"+query.Encode(), "", false, nil)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "incompatible_runs") {
+		t.Fatalf("untagged candidate: status=%d response=%s", w.Code, w.Body)
+	}
+}
+
+func TestCampaignAPIForwardsRecordedProvenance(t *testing.T) {
+	f := &fakeDataSourceForCampaign{}
+	h := campaignServer(t, f, false)
+	w := apiDo(h, http.MethodPost, "/api/v1/campaign/runs", `{
+		"scenario":"alerting-day-control@v1",
+		"provenance":{"role":"pre_change_control","targetBuild":"before-id","corrTestBuild":"runner-id","workloadConfig":"same-pack"}
+	}`, true, nil)
+	if w.Code != http.StatusAccepted || len(f.started) != 1 || f.started[0].Provenance == nil ||
+		*f.started[0].Provenance != (domain.CampaignProvenance{
+			Role: domain.CampaignPreChangeControl, TargetBuild: "before-id", CorrTestBuild: "runner-id", WorkloadConfig: "same-pack",
+		}) {
+		t.Fatalf("status=%d response=%s started=%v", w.Code, w.Body, f.started)
 	}
 }

@@ -1,6 +1,7 @@
 package scenario
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
@@ -280,5 +281,76 @@ func TestFunctionalV1OverlapsEveryLaneAtFivePerSecond(t *testing.T) {
 	}
 	if f := s.Fingerprint; f.At+f.Converge*4+f.Verify > drain {
 		t.Fatalf("fingerprint lane %+v cannot finish before the drain %s", f, drain)
+	}
+}
+
+func TestV3LoadsFor150MinutesBeforeDrain(t *testing.T) {
+	for _, ref := range []string{"alerting-day-control@v1", "alerting-day@v3"} {
+		s, ok := Lookup(ref)
+		if !ok || s.LoadEnd != 150*time.Minute || s.Phase("drain").Start != s.LoadEnd ||
+			s.Phase("drain").End-s.LoadEnd != 30*time.Minute || s.Standing == nil ||
+			s.Standing.Until != s.LoadEnd || s.Baseline.Rate != 3.5 || s.Breaker != nil {
+			t.Fatalf("%s: invalid load/drain plan: %+v", ref, s)
+		}
+		if s.NativeWorkload == nil || !reflect.DeepEqual(s.NativeWorkload.Cohorts,
+			[]NativeCohort{NativeDirectNoPolicy, NativeCanonicalFirst, NativeCanonicalRepeat}) ||
+			s.NativeWorkload.ConfiguredPolicy != (ref == "alerting-day@v3") {
+			t.Fatalf("%s: native cohort plan %+v", ref, s.NativeWorkload)
+		}
+	}
+	smoke, ok := Lookup("alerting-day-smoke@v3")
+	if !ok || !smoke.Custom || smoke.LoadEnd >= 150*time.Minute || smoke.Phase("drain").Start != smoke.LoadEnd ||
+		smoke.NativeWorkload == nil || !smoke.NativeWorkload.ConfiguredPolicy {
+		t.Fatalf("V3 smoke: %+v", smoke)
+	}
+	control, v3 := AlertingDayControlV1(), AlertingDayV3()
+	if len(control.Resend) != 0 || !reflect.DeepEqual(v3.Resend, AlertingDayV2().Resend) || len(smoke.Resend) != 1 {
+		t.Fatal("V3 must retain ordinary resend coverage outside the before/after control")
+	}
+	if control.Limits.RegressionPct != 5 || v3.Limits.RegressionPct != 10 || control.Limits.FrontOfficeP95 != 2*time.Second {
+		t.Fatalf("qualification budgets: control %+v, configured %+v", control.Limits, v3.Limits)
+	}
+}
+
+func TestManagedAlertsSmokeScenarioIsIndependent(t *testing.T) {
+	s, ok := Lookup("managed-alerts-smoke@v1")
+	if !ok || !s.Custom || s.RequiresComparisonProvenance() || s.Baseline.Rate != 0 || s.Standing != nil ||
+		s.LoadEnd != 20*time.Minute || s.Phase("drain").Start != s.LoadEnd || s.Phase("drain").End != 25*time.Minute ||
+		s.NativeWorkload == nil || !s.NativeWorkload.ManagedTL1 || !s.NativeWorkload.ConfiguredPolicy ||
+		s.Hash() == AlertingDaySmokeV3().Hash() {
+		t.Fatalf("managed functional smoke: %+v", s)
+	}
+}
+
+func TestOldScenarioHashesUnchanged(t *testing.T) {
+	// Canonical JSON digests from the frozen pre-D1 selector definitions.
+	for ref, want := range map[string]string{
+		"alerting-day@v1":          goldenHash,
+		"alerting-day@v2":          "54cdc896e4c48e3b1deb136c9c611cf2f71671889083d340f8e9655b56a67779",
+		"alerting-day-smoke@v1":    "290086b9a03cff29787dcd90d91d9c9d068f2cc70a047ee5e6a7c0adee6ea7c4",
+		"alerting-day-smoke@v2":    "ac083024d4eab0fdcb15b8d3ecc4a523d45deef0e5556afcf12a18cb8d718ddb",
+		"delivery-retry@v1":        "e83410253bdab9181e8281b8c5a4582b1a197de54b4d40131e7c827db83d1214",
+		"resend-only@v1":           "00446b930573d0bcb37d754b9155828b9453464bcb964a90400c5fa45bf9927b",
+		"functional@v1":            "7eab7a3cf772a77beee199b92cd3631ce54d0606a45ac46fad0dc68074a9c8c2",
+		"functional-burst@v1":      "a7b95af5e8a965c469352aa0005bae1fcad42369569753fd711572df6bbfd5b9",
+		"functional-burst-full@v1": "002cc0a03a39702c69618db01e193e09fb236c164c2a9beed93501d9c0b2781b",
+	} {
+		t.Run(ref, func(t *testing.T) {
+			s, ok := Lookup(ref)
+			if !ok || s.Hash() != want {
+				t.Fatalf("hash %s want %s", s.Hash(), want)
+			}
+			b, err := json.Marshal(s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(b, &fields); err != nil {
+				t.Fatal(err)
+			}
+			if fields["loadEnd"] != nil || fields["nativeWorkload"] != nil {
+				t.Fatal("optional qualification fields leaked into a frozen scenario")
+			}
+		})
 	}
 }

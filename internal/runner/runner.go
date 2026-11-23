@@ -459,6 +459,7 @@ func (r *Runner) cleanup(ctx context.Context, runID string, resources []domain.R
 		}
 		var result oscar.InjectionResult
 		var err error
+		offeredAt := r.opts.Now().UTC()
 		if r.ordinaryRoute() {
 			resolver, ok := r.api.(interface {
 				ResolveHistoryRecorded(context.Context, oscar.HistoryRecord, oscar.InjectionRecorder) (oscar.InjectionResult, error)
@@ -475,7 +476,7 @@ func (r *Runner) cleanup(ctx context.Context, runID string, resources []domain.R
 		} else {
 			result, err = r.api.ResolveHistory(ctx, record)
 		}
-		fact := domain.AlertResolutionFact{AlertName: record.AlertName, Fingerprint: record.Fingerprint, InjectionClass: string(result.Class), StatusCode: result.StatusCode, Accepted: err == nil && r.inputAccepted(result.Class)}
+		fact := domain.AlertResolutionFact{OfferedAt: offeredAt, AlertName: record.AlertName, Fingerprint: record.Fingerprint, InjectionClass: string(result.Class), StatusCode: result.StatusCode, Accepted: err == nil && r.inputAccepted(result.Class)}
 		if err != nil {
 			fact.InjectionClass = string(oscar.InjectionIndeterminate)
 			if fact.StatusCode == 0 {

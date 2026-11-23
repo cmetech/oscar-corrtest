@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/campaign/lane"
 	campaignscenario "github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/evidence"
@@ -24,6 +26,10 @@ var ErrCampaignNotActive = errors.New("campaign is not active in this process")
 
 // ErrCampaignNotFound is returned by CampaignStatus for an unknown id.
 var ErrCampaignNotFound = errors.New("campaign not found")
+
+var ErrCampaignWorkload = errors.New("invalid effective native workload")
+
+var ErrCampaignProvenance = errors.New("invalid campaign provenance")
 
 // CampaignEngine executes and recovers campaigns. The real engine arrives in a later task.
 //
@@ -43,12 +49,15 @@ type CampaignOptions struct {
 	RunBy           string
 	Acknowledged    []string // advisory IDs
 	PrecheckOnly    bool
+	Provenance      *domain.CampaignProvenance
 }
 
 // CampaignView is a campaign plus its most recent events, for status endpoints.
 type CampaignView struct {
-	Campaign domain.Campaign        `json:"campaign"`
-	Events   []domain.CampaignEvent `json:"events"`
+	Campaign domain.Campaign                 `json:"campaign"`
+	Events   []domain.CampaignEvent          `json:"events"`
+	Scenario *campaignscenario.Scenario      `json:"scenario,omitempty"`
+	Options  *domain.CampaignRecordedOptions `json:"options,omitempty"`
 }
 
 const campaignViewEvents = 50
@@ -84,6 +93,12 @@ func (r *Runtime) releaseCampaign() {
 
 // StartCampaign persists a PRECHECK campaign and runs the engine in the background.
 func (r *Runtime) StartCampaign(ctx context.Context, o CampaignOptions) (domain.Campaign, error) {
+	if o.Scenario.NativeWorkload != nil && !lane.RegisteredWorkload(o.Scenario, o.Scenario.Hash()) {
+		return domain.Campaign{}, ErrCampaignWorkload
+	}
+	if err := validateCampaignProvenance(&o); err != nil {
+		return domain.Campaign{}, err
+	}
 	if r.campaignEngine == nil {
 		return domain.Campaign{}, errors.New("campaign engine not configured")
 	}
@@ -111,9 +126,10 @@ func (r *Runtime) StartCampaign(ctx context.Context, o CampaignOptions) (domain.
 		r.releaseCampaign()
 		return domain.Campaign{}, err
 	}
-	// Audit record only; the engine receives the options directly.
-	detail, _ := json.Marshal(map[string]any{"acknowledged": o.Acknowledged, "precheckOnly": o.PrecheckOnly, "runBy": o.RunBy})
-	if err := r.database.AppendCampaignEvent(ctx, c.ID, "campaign.options", "info", "campaign options recorded", detail, c.StartedAt); err != nil {
+	detail, _ := json.Marshal(domain.CampaignRecordedOptions{
+		Acknowledged: o.Acknowledged, PrecheckOnly: o.PrecheckOnly, RunBy: o.RunBy, Provenance: o.Provenance,
+	})
+	if err := r.database.AppendCampaignEvent(ctx, c.ID, domain.CampaignOptionsEvent, "info", "campaign options recorded", detail, c.StartedAt); err != nil {
 		_ = r.database.TransitionCampaign(context.WithoutCancel(ctx), c.ID, domain.CampaignInterrupted, time.Now().UTC(), "options audit failed")
 		cancel()
 		r.releaseCampaign()
@@ -130,6 +146,34 @@ func (r *Runtime) StartCampaign(ctx context.Context, o CampaignOptions) (domain.
 		}
 	}()
 	return c, nil
+}
+
+func validateCampaignProvenance(o *CampaignOptions) error {
+	if o.PrecheckOnly || !o.Scenario.RequiresComparisonProvenance() {
+		if o.Provenance != nil {
+			return fmt.Errorf("%w: declarations are for full qualification runs", ErrCampaignProvenance)
+		}
+		return nil
+	}
+	if o.Provenance == nil {
+		return fmt.Errorf("%w: specify a role, target build, CorrTest build and workload configuration", ErrCampaignProvenance)
+	}
+	p := *o.Provenance
+	p.TargetBuild = strings.TrimSpace(p.TargetBuild)
+	p.CorrTestBuild = strings.TrimSpace(p.CorrTestBuild)
+	p.WorkloadConfig = strings.TrimSpace(p.WorkloadConfig)
+	if p.TargetBuild == "" || p.CorrTestBuild == "" || p.WorkloadConfig == "" {
+		return fmt.Errorf("%w: target build, CorrTest build and workload configuration are required", ErrCampaignProvenance)
+	}
+	if o.Scenario.NativeWorkload.ConfiguredPolicy {
+		if p.Role != domain.CampaignConfiguredPolicyReference && p.Role != domain.CampaignConfiguredPolicyCandidate {
+			return fmt.Errorf("%w: select a configured-policy role for this scenario", ErrCampaignProvenance)
+		}
+	} else if p.Role != domain.CampaignPreChangeControl && p.Role != domain.CampaignPostChangeControl {
+		return fmt.Errorf("%w: select a pre-change or post-change control role for this scenario", ErrCampaignProvenance)
+	}
+	o.Provenance = &p
+	return nil
 }
 
 // StopCampaign always cancels the matching campaign's context. It records STOPPING
@@ -167,7 +211,28 @@ func (r *Runtime) CampaignStatus(ctx context.Context, id string) (CampaignView, 
 	if err != nil {
 		return CampaignView{}, err
 	}
-	return CampaignView{Campaign: c, Events: events}, nil
+	view := CampaignView{Campaign: c, Events: events}
+	options, found, err := r.database.FirstCampaignEvent(ctx, id, domain.CampaignOptionsEvent)
+	if err != nil {
+		return CampaignView{}, err
+	}
+	if found {
+		if err := json.Unmarshal(options.Detail, &view.Options); err != nil {
+			return CampaignView{}, fmt.Errorf("read campaign options: %w", err)
+		}
+	}
+	ev, ok, err := r.database.FirstCampaignEvent(ctx, id, "campaign.scenario")
+	if err != nil {
+		return CampaignView{}, err
+	}
+	if ok {
+		var stored campaignscenario.Scenario
+		if err = json.Unmarshal(ev.Detail, &stored); err != nil {
+			return CampaignView{}, err
+		}
+		view.Scenario = &stored
+	}
+	return view, nil
 }
 
 // ListCampaigns returns campaigns matching f.
