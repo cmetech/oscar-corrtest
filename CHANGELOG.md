@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- CorrTest reconciles managed manual and bulk resends from the original
+  callback child receipts. A confirmed sink notification and a definitively
+  skipped ALERTHISTORY ticket can qualify together. Missing or ambiguous
+  children remain owned during cleanup. A missing operator session leaves
+  signed resend recovery pending while other original receipts can settle.
+  Operators need MySQL 8+ for the bounded receipt projection. The existing
+  read-only grants cover it. No migration or configuration change is required.
+
 - CorrTest managed qualification now checks the original source variant,
   controlled receiver, pinned policy revision, dispatch interval and physical
   provider receipt for timed actions. The run-owned silence and inhibitor
