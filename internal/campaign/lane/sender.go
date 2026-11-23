@@ -41,14 +41,20 @@ func NewAlertmanagerSender(ingestURL string, caFile string, timeout time.Duratio
 			return nil, fmt.Errorf("no certificates in CA file %s", caFile)
 		}
 	}
-	return &amSender{url: ingestURL, client: &http.Client{
+	return NewAlertmanagerSenderClient(ingestURL, &http.Client{
 		Timeout:       timeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		Transport: &http.Transport{
 			Proxy:           nil,
 			TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool},
 		},
-	}}, nil
+	}), nil
+}
+
+// NewAlertmanagerSenderClient posts Alertmanager v2 alerts to ingestURL
+// through client (tests pass an in-memory httptest client).
+func NewAlertmanagerSenderClient(ingestURL string, client *http.Client) Sender {
+	return &amSender{url: ingestURL, client: client}
 }
 
 func (s *amSender) Send(ctx context.Context, e Event, runID, lane string) (int, error) {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
@@ -64,49 +65,51 @@ func hasFinding(a *score.ATT, sub string) bool {
 func TestV2ReproducesTheATTBreakerAndRepeats(t *testing.T) {
 	for _, rejectResolves := range []bool{true, false} {
 		t.Run(map[bool]string{true: "26.4.4", false: "fixed"}[rejectResolves], func(t *testing.T) {
-			h := newHarnessV2(t)
-			// The scripted breaker refuses the rest of the burst and the first three
-			// reopen probes, then admits the fourth. Reopen probes are paced by real
-			// timers on the scaled clock; the old shut of 30 needed 16 sequential
-			// probes (4 of the window's 8.75 s), which a slow runner could not fit.
-			// The 3 spare refusals still keep the breaker tripped through the
-			// resolve probes if a late cohort post lands in the window.
-			trip := 5
-			h.oscar.breakerTrip, h.oscar.breakerShut, h.oscar.rejectResolves = trip, h.s.Standing.Size-trip+3, rejectResolves
-			h.oscar.queryValues = map[string]float64{"send_individual_notification": 100, `"tm.notifier.common"`: 300,
-				`outcome="recovered"`: 100, `outcome="redispatched"`: 300, "notifications_failed_total": 40, "alertmanager_notifications_total": 200}
-			if err := h.run(context.Background()); err != nil {
-				t.Fatal(err)
-			}
-			if c := h.campaign(); c.Cleanup != domain.CleanupClean {
-				t.Fatalf("cleanup %s", c.Cleanup)
-			}
-			h.assertLimitsRestored()
-			a := h.att()
-			br := a.Breaker
-			if !br.Applied || !br.Tripped || !br.Restored || br.ResolveProbes != 3 || br.ReopenAfterSeconds <= 0 || br.Burst["rejected_503"] == 0 {
-				t.Fatalf("breaker %+v", br)
-			}
-			if want := map[bool]int{true: 0, false: 3}[rejectResolves]; br.ResolveAdmitted != want {
-				t.Fatalf("resolves admitted %d, want %d", br.ResolveAdmitted, want)
-			}
-			if got := hasFinding(a, "breaker rejected 3 of 3"); got != rejectResolves {
-				t.Fatalf("rejected-resolves finding %v: %v", got, a.Findings)
-			}
-			if a.Standing.Members != 20 || a.Standing.Posts["ok"] < 20*11 || a.Standing.Resolves["ok"] != 20 {
-				t.Fatalf("standing %+v", a.Standing)
-			}
-			if a.Budgets["notifier_jobs_per_alert"] != 3 || a.Budgets["handoff_copies"] != 4 ||
-				!hasFinding(a, "hand-off re-queue: 4.00") || !hasFinding(a, "Alertmanager webhook failures in the breaker window: 40 of 200") {
-				t.Fatalf("budgets %v findings %v", a.Budgets, a.Findings)
-			}
-			h.oscar.mu.Lock()
-			defer h.oscar.mu.Unlock()
-			for _, row := range h.oscar.history {
-				if row.Labels["campaign_lane"] == standingLane && row.Status != "resolved" {
-					t.Fatalf("standing alert %s still firing", row.AlertName)
+			synctest.Test(t, func(t *testing.T) {
+				h := newHarnessV2(t)
+				// The scripted breaker refuses the rest of the burst and the first three
+				// reopen probes, then admits the fourth. Reopen probes are paced by real
+				// timers on the scaled clock; the old shut of 30 needed 16 sequential
+				// probes (4 of the window's 8.75 s), which a slow runner could not fit.
+				// The 3 spare refusals still keep the breaker tripped through the
+				// resolve probes if a late cohort post lands in the window.
+				trip := 5
+				h.oscar.breakerTrip, h.oscar.breakerShut, h.oscar.rejectResolves = trip, h.s.Standing.Size-trip+3, rejectResolves
+				h.oscar.queryValues = map[string]float64{"send_individual_notification": 100, `"tm.notifier.common"`: 300,
+					`outcome="recovered"`: 100, `outcome="redispatched"`: 300, "notifications_failed_total": 40, "alertmanager_notifications_total": 200}
+				if err := h.run(context.Background()); err != nil {
+					t.Fatal(err)
 				}
-			}
+				if c := h.campaign(); c.Cleanup != domain.CleanupClean {
+					t.Fatalf("cleanup %s", c.Cleanup)
+				}
+				h.assertLimitsRestored()
+				a := h.att()
+				br := a.Breaker
+				if !br.Applied || !br.Tripped || !br.Restored || br.ResolveProbes != 3 || br.ReopenAfterSeconds <= 0 || br.Burst["rejected_503"] == 0 {
+					t.Fatalf("breaker %+v", br)
+				}
+				if want := map[bool]int{true: 0, false: 3}[rejectResolves]; br.ResolveAdmitted != want {
+					t.Fatalf("resolves admitted %d, want %d", br.ResolveAdmitted, want)
+				}
+				if got := hasFinding(a, "breaker rejected 3 of 3"); got != rejectResolves {
+					t.Fatalf("rejected-resolves finding %v: %v", got, a.Findings)
+				}
+				if a.Standing.Members != 20 || a.Standing.Posts["ok"] < 20*11 || a.Standing.Resolves["ok"] != 20 {
+					t.Fatalf("standing %+v", a.Standing)
+				}
+				if a.Budgets["notifier_jobs_per_alert"] != 3 || a.Budgets["handoff_copies"] != 4 ||
+					!hasFinding(a, "hand-off re-queue: 4.00") || !hasFinding(a, "Alertmanager webhook failures in the breaker window: 40 of 200") {
+					t.Fatalf("budgets %v findings %v", a.Budgets, a.Findings)
+				}
+				h.oscar.mu.Lock()
+				defer h.oscar.mu.Unlock()
+				for _, row := range h.oscar.history {
+					if row.Labels["campaign_lane"] == standingLane && row.Status != "resolved" {
+						t.Fatalf("standing alert %s still firing", row.AlertName)
+					}
+				}
+			})
 		})
 	}
 }
@@ -114,19 +117,21 @@ func TestV2ReproducesTheATTBreakerAndRepeats(t *testing.T) {
 // TestV2RefusedOverrideSkipsTheWindowAndChangesNothing: without manage:rate_limits
 // the window is reported as not run, nothing is left to restore, cleanup is CLEAN.
 func TestV2RefusedOverrideSkipsTheWindowAndChangesNothing(t *testing.T) {
-	h := newHarnessV2(t)
-	h.oscar.limitsRefused = true
-	if err := h.run(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if c := h.campaign(); c.Cleanup != domain.CleanupClean {
-		t.Fatalf("cleanup %s", c.Cleanup)
-	}
-	a := h.att()
-	if a.Breaker.Applied || !strings.Contains(a.Breaker.Skipped, "override") || !hasFinding(a, "breaker window not run") {
-		t.Fatalf("breaker %+v findings %v", a.Breaker, a.Findings)
-	}
-	if open, _ := h.db.OpenMutations(context.Background(), h.id); len(open) != 0 {
-		t.Fatalf("open mutations %+v", open)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		h := newHarnessV2(t)
+		h.oscar.limitsRefused = true
+		if err := h.run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if c := h.campaign(); c.Cleanup != domain.CleanupClean {
+			t.Fatalf("cleanup %s", c.Cleanup)
+		}
+		a := h.att()
+		if a.Breaker.Applied || !strings.Contains(a.Breaker.Skipped, "override") || !hasFinding(a, "breaker window not run") {
+			t.Fatalf("breaker %+v findings %v", a.Breaker, a.Findings)
+		}
+		if open, _ := h.db.OpenMutations(context.Background(), h.id); len(open) != 0 {
+			t.Fatalf("open mutations %+v", open)
+		}
+	})
 }

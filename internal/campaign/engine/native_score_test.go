@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/lane"
@@ -256,26 +257,28 @@ exec /bin/cat testdata/managed-coalesced.snapshot
 	}
 }
 func TestLateRateAndUnreadOriginalsRetainAllOwners(t *testing.T) {
-	h := newHarness(t)
-	ctx := context.Background()
-	r := &run{id: h.id, e: New(h.deps, h.clock)}
-	m := managedLane{run: r, managedDeps: &managedDeps{originals: &originalReaderFixture{}}}
-	f := NativeEpisodeFixture{History: observedHistory{ID: "history", EpisodeNumber: 3}}
-	snap := managed.Snapshot{Dispatches: []managed.Dispatch{{Root: "no-callback"}, {Root: "late-rate"}}}
-	if _, err := m.proveClosedRoots(ctx, f, snap, "sink"); err == nil {
-		t.Fatal("unread originals reported as closed")
-	}
-	open, err := h.db.OpenMutations(ctx, h.id)
-	if err != nil || len(open) != 2 {
-		t.Fatal(open, err)
-	}
-	ids := map[string]bool{}
-	for _, o := range open {
-		ids[o.ObjectID] = true
-	}
-	if !ids["late-rate"] || !ids["no-callback"] {
-		t.Fatal(open)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		h := newHarness(t)
+		ctx := context.Background()
+		r := &run{id: h.id, e: New(h.deps, h.clock)}
+		m := managedLane{run: r, managedDeps: &managedDeps{originals: &originalReaderFixture{}}}
+		f := NativeEpisodeFixture{History: observedHistory{ID: "history", EpisodeNumber: 3}}
+		snap := managed.Snapshot{Dispatches: []managed.Dispatch{{Root: "no-callback"}, {Root: "late-rate"}}}
+		if _, err := m.proveClosedRoots(ctx, f, snap, "sink"); err == nil {
+			t.Fatal("unread originals reported as closed")
+		}
+		open, err := h.db.OpenMutations(ctx, h.id)
+		if err != nil || len(open) != 2 {
+			t.Fatal(open, err)
+		}
+		ids := map[string]bool{}
+		for _, o := range open {
+			ids[o.ObjectID] = true
+		}
+		if !ids["late-rate"] || !ids["no-callback"] {
+			t.Fatal(open)
+		}
+	})
 }
 
 func TestBaselineEpisodesCannotBorrowEarlierPooledDelivery(t *testing.T) {
@@ -329,30 +332,32 @@ func (f *inhibitorAccountingFixture) Inhibitor(_ context.Context, _ lane.Suppres
 }
 
 func TestFunctionalAndBulkReceiptsAndInhibitorSourceAccounting(t *testing.T) {
-	h := newHarness(t)
-	r := &run{id: h.id, e: New(h.deps, h.clock), s: scenario.ManagedAlertsSmokeV1(), sinkID: "sid"}
-	r.t0 = r.now()
-	client := &inhibitorAccountingFixture{}
-	for _, clear := range []bool{false, true} {
-		if err := r.inhibitorPost(context.Background(), client, lane.SuppressionSubject{}, clear); err != nil {
-			t.Fatal(err)
+	synctest.Test(t, func(t *testing.T) {
+		h := newHarness(t)
+		r := &run{id: h.id, e: New(h.deps, h.clock), s: scenario.ManagedAlertsSmokeV1(), sinkID: "sid"}
+		r.t0 = r.now()
+		client := &inhibitorAccountingFixture{}
+		for _, clear := range []bool{false, true} {
+			if err := r.inhibitorPost(context.Background(), client, lane.SuppressionSubject{}, clear); err != nil {
+				t.Fatal(err)
+			}
 		}
-	}
-	if !slices.Equal(client.posted, []bool{false, true}) || r.sourceTotals["native_inhibitor"].InLoad != 2 {
-		t.Fatal(client.posted, r.sourceTotals)
-	}
-	v := newNativeTally(r)
-	f := NativeEpisodeFixture{History: observedHistory{ID: "original", Labels: map[string]string{"aid": "A"}}}
-	v.changed = f
-	mk := func(id int64) targetops.Receipt {
-		return targetops.Receipt{ID: id, Alerts: []targetops.SinkAlert{{Status: "firing", StartsAt: r.t0.Format(time.RFC3339Nano), Labels: map[string]string{"aid": "A"}}}}
-	}
-	v.consume(domain.CampaignEvent{Type: "native.managed.effects", Detail: mustJSON(map[string]any{"history": "original", "sink": []targetops.Receipt{mk(1), mk(2), mk(3)}})})
-	v.consume(domain.CampaignEvent{Type: "native.bulk.baseline", Detail: mustJSON(map[string]any{"subject": f, "receipts": []targetops.Receipt{mk(3), mk(4)}})})
-	v.finish()
-	if v.PhysicalRequests != 4 || v.ProviderMemberReceipts != 4 {
-		t.Fatal(v.nativeEvidence)
-	}
+		if !slices.Equal(client.posted, []bool{false, true}) || r.sourceTotals["native_inhibitor"].InLoad != 2 {
+			t.Fatal(client.posted, r.sourceTotals)
+		}
+		v := newNativeTally(r)
+		f := NativeEpisodeFixture{History: observedHistory{ID: "original", Labels: map[string]string{"aid": "A"}}}
+		v.changed = f
+		mk := func(id int64) targetops.Receipt {
+			return targetops.Receipt{ID: id, Alerts: []targetops.SinkAlert{{Status: "firing", StartsAt: r.t0.Format(time.RFC3339Nano), Labels: map[string]string{"aid": "A"}}}}
+		}
+		v.consume(domain.CampaignEvent{Type: "native.managed.effects", Detail: mustJSON(map[string]any{"history": "original", "sink": []targetops.Receipt{mk(1), mk(2), mk(3)}})})
+		v.consume(domain.CampaignEvent{Type: "native.bulk.baseline", Detail: mustJSON(map[string]any{"subject": f, "receipts": []targetops.Receipt{mk(3), mk(4)}})})
+		v.finish()
+		if v.PhysicalRequests != 4 || v.ProviderMemberReceipts != 4 {
+			t.Fatal(v.nativeEvidence)
+		}
+	})
 }
 
 func TestConfirmedUnexpectedTicketFailsAndMultipleChildChangeIsVisible(t *testing.T) {

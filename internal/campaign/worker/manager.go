@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/diskfree"
 	"io"
+	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -62,13 +63,33 @@ type Manager struct {
 func NewManager(store Store, target domain.Target, clock lane.Clock, heartbeatTimeout time.Duration) *Manager {
 	m := &Manager{store: store, target: target, clock: clock, timeout: heartbeatTimeout, tick: time.Second, lanes: map[string]*laneState{}}
 	m.newSender = func() (lane.Sender, error) {
-		u, err := url.Parse(target.BaseURL)
-		if err != nil || u.Host == "" {
-			return nil, fmt.Errorf("target base URL %q is invalid", target.BaseURL)
+		u, err := m.ingestURL()
+		if err != nil {
+			return nil, err
 		}
-		return lane.NewAlertmanagerSender(u.Scheme+"://"+u.Host+ingestPath, target.TLS.CAPath, 10*time.Second)
+		return lane.NewAlertmanagerSender(u, target.TLS.CAPath, 10*time.Second)
 	}
 	return m
+}
+
+// UseHTTPClient sends lane traffic through client instead of a transport built
+// from the target's TLS settings (tests pass an in-memory httptest client).
+func (m *Manager) UseHTTPClient(client *http.Client) {
+	m.newSender = func() (lane.Sender, error) {
+		u, err := m.ingestURL()
+		if err != nil {
+			return nil, err
+		}
+		return lane.NewAlertmanagerSenderClient(u, client), nil
+	}
+}
+
+func (m *Manager) ingestURL() (string, error) {
+	u, err := url.Parse(m.target.BaseURL)
+	if err != nil || u.Host == "" {
+		return "", fmt.Errorf("target base URL %q is invalid", m.target.BaseURL)
+	}
+	return u.Scheme + "://" + u.Host + ingestPath, nil
 }
 
 func (m *Manager) Info(context.Context) workerapi.Info {

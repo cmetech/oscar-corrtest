@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/lane"
@@ -22,66 +23,68 @@ import (
 )
 
 func TestCommissionedDraftsHaveMissingSafeScopedPriorities(t *testing.T) {
-	h := newHarness(t)
-	for _, s := range []scenario.Scenario{scenario.AlertingDayV3(), scenario.AlertingDaySmokeV3()} {
-		r := &run{e: New(h.deps, h.clock), s: s, id: h.id, sinkID: "sink", notifiers: map[string]string{"CAMPAIGN_SINK": "sink", "ALERTHISTORY": "history"}}
-		h.oscar.policies = map[string]*fakePolicy{}
-		ctx := context.Background()
-		if err := r.createDrafts(ctx); err != nil {
-			t.Fatal(err)
-		}
-		m := managedLane{run: r, managedDeps: &managedDeps{config: managed.Config{SourceID: "source", TID: "ne"}}}
-		edit := *s.NativeWorkload.ManagedPolicy
-		edit.Key = "EDIT"
-		for _, p := range []scenario.PolicySpec{*s.NativeWorkload.ManagedPolicy, *s.NativeWorkload.ManagedRepeat, edit} {
-			if err := m.activate(ctx, p); err != nil {
+	synctest.Test(t, func(t *testing.T) {
+		h := newHarness(t)
+		for _, s := range []scenario.Scenario{scenario.AlertingDayV3(), scenario.AlertingDaySmokeV3()} {
+			r := &run{e: New(h.deps, h.clock), s: s, id: h.id, sinkID: "sink", notifiers: map[string]string{"CAMPAIGN_SINK": "sink", "ALERTHISTORY": "history"}}
+			h.oscar.policies = map[string]*fakePolicy{}
+			ctx := context.Background()
+			if err := r.createDrafts(ctx); err != nil {
 				t.Fatal(err)
 			}
-		}
-		ordinary := map[string]string{"campaign_run": r.id, "campaign_lane": laneFor(s.Resend[0])}
-		managedLabels := map[string]string{"source_id": "source", "node": "ne", "condition": m.condition("POL")}
-		checked := map[string]bool{}
-		var ordinaryHit, managedHit int
-		for _, row := range h.oscar.policies {
-			def := row.def
-			key := def.NotifierID + def.Action + strconv.Itoa(def.Priority)
-			if checked[key] {
-				t.Fatal("catalog priority conflict", def)
-			}
-			checked[key] = true
-			match := func(labels map[string]string) bool {
-				for _, clause := range strings.Split(def.Condition, " and ") {
-					pair := regexp.MustCompile(`^([a-z_]+) == ("[^"]+")$`).FindStringSubmatch(clause)
-					if pair == nil {
-						t.Fatalf("outside product missing-safe grammar: %s", def.Condition)
-					}
-					v, err := strconv.Unquote(pair[2])
-					if err != nil {
-						t.Fatal(err)
-					}
-					if labels[pair[1]] != v {
-						return false
-					}
-				}
-				return true
-			}
-			if match(ordinary) {
-				ordinaryHit++
-				if def.Priority != 1 {
-					t.Fatal(def)
+			m := managedLane{run: r, managedDeps: &managedDeps{config: managed.Config{SourceID: "source", TID: "ne"}}}
+			edit := *s.NativeWorkload.ManagedPolicy
+			edit.Key = "EDIT"
+			for _, p := range []scenario.PolicySpec{*s.NativeWorkload.ManagedPolicy, *s.NativeWorkload.ManagedRepeat, edit} {
+				if err := m.activate(ctx, p); err != nil {
+					t.Fatal(err)
 				}
 			}
-			if match(managedLabels) {
-				managedHit++
-				if def.Priority != 5 {
-					t.Fatal(def)
+			ordinary := map[string]string{"campaign_run": r.id, "campaign_lane": laneFor(s.Resend[0])}
+			managedLabels := map[string]string{"source_id": "source", "node": "ne", "condition": m.condition("POL")}
+			checked := map[string]bool{}
+			var ordinaryHit, managedHit int
+			for _, row := range h.oscar.policies {
+				def := row.def
+				key := def.NotifierID + def.Action + strconv.Itoa(def.Priority)
+				if checked[key] {
+					t.Fatal("catalog priority conflict", def)
+				}
+				checked[key] = true
+				match := func(labels map[string]string) bool {
+					for _, clause := range strings.Split(def.Condition, " and ") {
+						pair := regexp.MustCompile(`^([a-z_]+) == ("[^"]+")$`).FindStringSubmatch(clause)
+						if pair == nil {
+							t.Fatalf("outside product missing-safe grammar: %s", def.Condition)
+						}
+						v, err := strconv.Unquote(pair[2])
+						if err != nil {
+							t.Fatal(err)
+						}
+						if labels[pair[1]] != v {
+							return false
+						}
+					}
+					return true
+				}
+				if match(ordinary) {
+					ordinaryHit++
+					if def.Priority != 1 {
+						t.Fatal(def)
+					}
+				}
+				if match(managedLabels) {
+					managedHit++
+					if def.Priority != 5 {
+						t.Fatal(def)
+					}
 				}
 			}
+			if len(checked) != len(s.Resend)+3 || ordinaryHit != 1 || managedHit != 1 {
+				t.Fatal(checked, ordinaryHit, managedHit)
+			}
 		}
-		if len(checked) != len(s.Resend)+3 || ordinaryHit != 1 || managedHit != 1 {
-			t.Fatal(checked, ordinaryHit, managedHit)
-		}
-	}
+	})
 }
 func TestEffectiveMemberKeepsSourceIdentity(t *testing.T) {
 	now := time.Unix(100, 0)
@@ -201,30 +204,32 @@ func TestManagedLifecycleStopsAtOriginalUnsettledStage(t *testing.T) {
 	}
 }
 func TestOriginalUnknownSurvivesClosedSourceAndCleanupRerun(t *testing.T) {
-	h := newHarness(t)
-	ctx := context.Background()
-	r := &run{id: h.id, e: New(h.deps, h.clock), s: scenario.ManagedAlertsSmokeV1()}
-	m := &managedLane{run: r}
-	f := NativeEpisodeFixture{History: observedHistory{ID: "history"}}
-	s := managed.Snapshot{Effects: []managed.Effect{{Operation: "original", Target: "target", Child: "child", ChildState: "unknown_requires_reconciliation"}}}
-	if err := m.holdUnknown(ctx, f, s); err == nil {
-		t.Fatal("unresolved owner ignored")
-	}
-	for _, event := range []string{"native.tl1.started", "native.tl1.closed"} {
-		if err := m.save(ctx, event, map[string]bool{"verified": true}); err != nil {
-			t.Fatal(err)
+	synctest.Test(t, func(t *testing.T) {
+		h := newHarness(t)
+		ctx := context.Background()
+		r := &run{id: h.id, e: New(h.deps, h.clock), s: scenario.ManagedAlertsSmokeV1()}
+		m := &managedLane{run: r}
+		f := NativeEpisodeFixture{History: observedHistory{ID: "history"}}
+		s := managed.Snapshot{Effects: []managed.Effect{{Operation: "original", Target: "target", Child: "child", ChildState: "unknown_requires_reconciliation"}}}
+		if err := m.holdUnknown(ctx, f, s); err == nil {
+			t.Fatal("unresolved owner ignored")
 		}
-	}
-	for range 2 {
-		if st := r.cleanup(ctx); st != domain.CleanupDirty {
-			t.Fatal("lost original obligation", st)
+		for _, event := range []string{"native.tl1.started", "native.tl1.closed"} {
+			if err := m.save(ctx, event, map[string]bool{"verified": true}); err != nil {
+				t.Fatal(err)
+			}
 		}
-	}
-	open, err := h.db.OpenMutations(ctx, h.id)
-	if err != nil || len(open) != 1 || open[0].ObjectID != "original/target/child" {
-		t.Fatal(open, err)
-	}
+		for range 2 {
+			if st := r.cleanup(ctx); st != domain.CleanupDirty {
+				t.Fatal("lost original obligation", st)
+			}
+		}
+		open, err := h.db.OpenMutations(ctx, h.id)
+		if err != nil || len(open) != 1 || open[0].ObjectID != "original/target/child" {
+			t.Fatal(open, err)
+		}
 
+	})
 }
 
 type originalReaderFixture struct {
@@ -240,80 +245,84 @@ func (f *originalReaderFixture) Original(_ context.Context, history, op string) 
 	return f.rows, nil
 }
 func TestMissingActorRetainsManualAndSettlesExactSQLChild(t *testing.T) {
-	h := newHarness(t)
-	ctx := context.Background()
-	one := managed.OriginalChild{History: "history", Episode: 3, Root: "original", Operation: "original", Kind: "resend", OpState: "confirmed", Target: "target", TargetState: "confirmed", ManifestOwned: 1, Expected: 2, Reported: 2, Aggregate: "partial", Callback: "callback", Name: "sink", Action: "notification", Notifier: "sink-id", PolicyReceipt: "physical-sink", Child: "physical-sink", ReceiptType: "NotificationDelivery", State: "sent", ProviderAction: "notification", ProviderOutcome: "sent", ProviderConfirmed: "2026-11-22T00:00:01Z"}
-	two := one
-	two.Name, two.Notifier, two.Action, two.Child, two.PolicyReceipt, two.State, two.ProviderOutcome, two.ProviderConfirmed = "ALERTHISTORY", "history-id", "ticket", "physical-ticket", "physical-ticket", "suppressed", "suppressed", ""
-	two.ProviderAction = "ticket"
-	reader := &originalReaderFixture{rows: managed.OriginalReceipt{Children: []managed.OriginalChild{one, two}}}
-	h.deps.managed = &managedDeps{setupErr: errors.New("operator session unavailable"), originals: reader}
-	r := &run{id: h.id, e: New(h.deps, h.clock), s: scenario.ManagedAlertsSmokeV1()}
-	owner := originalOwner{Kind: "effect", History: "history", Episode: 3, Root: "original", Operation: "original", Target: "target", Child: "physical-sink"}
-	if !terminalEffect(owner, reader.rows) {
-		t.Fatal("original sent child in settled partial unrecoverable")
-	}
-	owner.Child = "replacement"
-	if terminalEffect(owner, reader.rows) {
-		t.Fatal("foreign child settled original")
-	}
-	owner.Child = "physical-sink"
-	if _, err := r.record(ctx, kindManagedOwner, "sql-child", owner); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.record(ctx, kindManagedOwner, "request", originalOwner{Kind: "manual_resend", History: "history", Episode: 3, Request: "request"}); err != nil {
-		t.Fatal(err)
-	}
-	if got := r.cleanup(ctx); got != domain.CleanupDirty {
-		t.Fatal(got)
-	}
-	open, err := h.db.OpenMutations(ctx, h.id)
-	if err != nil || len(open) != 1 || open[0].ObjectID != "request" || reader.reads != 1 {
-		t.Fatal(open, err, reader.reads)
-	}
-	if err := r.recoverOriginal(ctx, open[0]); err == nil || !strings.Contains(err.Error(), "signed resend status reader unavailable") {
-		t.Fatal(err)
-	}
-}
-func TestManagedEventExportOmitsSignedHistoryAndArbitraryLabels(t *testing.T) {
-	h := newHarness(t)
-	ctx := context.Background()
-	m := managedLane{run: &run{id: h.id, e: New(h.deps, h.clock)}}
-	secret := "sentinel-must-never-leave"
-	labels := map[string]string{"aid": "owned", "arbitrary": secret}
-	row := oscar.HistoryRecord{ID: "selected", Labels: labels, Annotations: map[string]string{"alarm_key": "keep-original-key", "oscar_managed_history": "delivery." + secret, "arbitrary": secret}}
-	f := NativeEpisodeFixture{History: historyEvidence(row)}
-	member := lane.NativeMember{Labels: labels}
-	rs := []targetops.Receipt{{ID: 9, Alerts: []targetops.SinkAlert{{Labels: labels}}}}
-	values := map[string]any{"native.source_observed": f, "native.resolved": map[string]any{"rows": []oscar.HistoryRecord{row}}, "native.managed.segment": map[string]any{"fixture": f, "receipts": rs}, "native.managed.refresh": map[string]any{"member": member}, "native.managed.effects": map[string]any{"sink": rs}, "native.bulk.isolation": map[string]any{"selected": f, "sibling": f, "selectedReceipts": rs}, "native.suppression_changed": map[string]any{"subject": f}, "native.ordinary.observed": map[string]any{"member": member}}
-	for k, v := range values {
-		if err := m.save(ctx, k, v); err != nil {
+	synctest.Test(t, func(t *testing.T) {
+		h := newHarness(t)
+		ctx := context.Background()
+		one := managed.OriginalChild{History: "history", Episode: 3, Root: "original", Operation: "original", Kind: "resend", OpState: "confirmed", Target: "target", TargetState: "confirmed", ManifestOwned: 1, Expected: 2, Reported: 2, Aggregate: "partial", Callback: "callback", Name: "sink", Action: "notification", Notifier: "sink-id", PolicyReceipt: "physical-sink", Child: "physical-sink", ReceiptType: "NotificationDelivery", State: "sent", ProviderAction: "notification", ProviderOutcome: "sent", ProviderConfirmed: "2026-11-22T00:00:01Z"}
+		two := one
+		two.Name, two.Notifier, two.Action, two.Child, two.PolicyReceipt, two.State, two.ProviderOutcome, two.ProviderConfirmed = "ALERTHISTORY", "history-id", "ticket", "physical-ticket", "physical-ticket", "suppressed", "suppressed", ""
+		two.ProviderAction = "ticket"
+		reader := &originalReaderFixture{rows: managed.OriginalReceipt{Children: []managed.OriginalChild{one, two}}}
+		h.deps.managed = &managedDeps{setupErr: errors.New("operator session unavailable"), originals: reader}
+		r := &run{id: h.id, e: New(h.deps, h.clock), s: scenario.ManagedAlertsSmokeV1()}
+		owner := originalOwner{Kind: "effect", History: "history", Episode: 3, Root: "original", Operation: "original", Target: "target", Child: "physical-sink"}
+		if !terminalEffect(owner, reader.rows) {
+			t.Fatal("original sent child in settled partial unrecoverable")
+		}
+		owner.Child = "replacement"
+		if terminalEffect(owner, reader.rows) {
+			t.Fatal("foreign child settled original")
+		}
+		owner.Child = "physical-sink"
+		if _, err := r.record(ctx, kindManagedOwner, "sql-child", owner); err != nil {
 			t.Fatal(err)
 		}
-	}
-	atts, _, err := m.run.e.exportEvents(ctx, h.id, 1<<20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var body bytes.Buffer
-	for _, a := range atts {
-		z, err := gzip.NewReader(bytes.NewReader(a.Content))
+		if _, err := r.record(ctx, kindManagedOwner, "request", originalOwner{Kind: "manual_resend", History: "history", Episode: 3, Request: "request"}); err != nil {
+			t.Fatal(err)
+		}
+		if got := r.cleanup(ctx); got != domain.CleanupDirty {
+			t.Fatal(got)
+		}
+		open, err := h.db.OpenMutations(ctx, h.id)
+		if err != nil || len(open) != 1 || open[0].ObjectID != "request" || reader.reads != 1 {
+			t.Fatal(open, err, reader.reads)
+		}
+		if err := r.recoverOriginal(ctx, open[0]); err == nil || !strings.Contains(err.Error(), "signed resend status reader unavailable") {
+			t.Fatal(err)
+		}
+	})
+}
+func TestManagedEventExportOmitsSignedHistoryAndArbitraryLabels(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newHarness(t)
+		ctx := context.Background()
+		m := managedLane{run: &run{id: h.id, e: New(h.deps, h.clock)}}
+		secret := "sentinel-must-never-leave"
+		labels := map[string]string{"aid": "owned", "arbitrary": secret}
+		row := oscar.HistoryRecord{ID: "selected", Labels: labels, Annotations: map[string]string{"alarm_key": "keep-original-key", "oscar_managed_history": "delivery." + secret, "arbitrary": secret}}
+		f := NativeEpisodeFixture{History: historyEvidence(row)}
+		member := lane.NativeMember{Labels: labels}
+		rs := []targetops.Receipt{{ID: 9, Alerts: []targetops.SinkAlert{{Labels: labels}}}}
+		values := map[string]any{"native.source_observed": f, "native.resolved": map[string]any{"rows": []oscar.HistoryRecord{row}}, "native.managed.segment": map[string]any{"fixture": f, "receipts": rs}, "native.managed.refresh": map[string]any{"member": member}, "native.managed.effects": map[string]any{"sink": rs}, "native.bulk.isolation": map[string]any{"selected": f, "sibling": f, "selectedReceipts": rs}, "native.suppression_changed": map[string]any{"subject": f}, "native.ordinary.observed": map[string]any{"member": member}}
+		for k, v := range values {
+			if err := m.save(ctx, k, v); err != nil {
+				t.Fatal(err)
+			}
+		}
+		atts, _, err := m.run.e.exportEvents(ctx, h.id, 1<<20)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err = io.Copy(&body, z); err != nil {
-			t.Fatal(err)
+		var body bytes.Buffer
+		for _, a := range atts {
+			z, err := gzip.NewReader(bytes.NewReader(a.Content))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = io.Copy(&body, z); err != nil {
+				t.Fatal(err)
+			}
+			z.Close()
 		}
-		z.Close()
-	}
-	for k := range values {
-		if !strings.Contains(body.String(), k) {
-			t.Fatal("missing event", k)
+		for k := range values {
+			if !strings.Contains(body.String(), k) {
+				t.Fatal("missing event", k)
+			}
 		}
-	}
-	if strings.Contains(body.String(), secret) || strings.Contains(body.String(), "oscar_managed_history") || strings.Contains(body.String(), "arbitrary") || !strings.Contains(body.String(), "keep-original-key") {
-		t.Fatal("bundle missed allowlist boundary")
-	}
+		if strings.Contains(body.String(), secret) || strings.Contains(body.String(), "oscar_managed_history") || strings.Contains(body.String(), "arbitrary") || !strings.Contains(body.String(), "keep-original-key") {
+			t.Fatal("bundle missed allowlist boundary")
+		}
+	})
 }
 
 func TestLabelDrivenTicketRequiresOriginalWorkflowAndAudit(t *testing.T) {

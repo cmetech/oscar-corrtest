@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign"
@@ -351,15 +352,17 @@ func (q *queueMetrics) Query(context.Context, string, time.Time) (targetops.Vect
 // Ruling C37: waitQueues uses the per-queue idle rule (every queue <= the
 // idle depth), not the sum of all queues.
 func TestWaitQueuesPerQueueRule(t *testing.T) {
-	h := newHarness(t)
-	m := &queueMetrics{depths: []float64{30, 30}} // sum 60 > 50, each queue idle
-	h.deps.Metrics = m
-	r := &run{e: New(h.deps, h.clock), id: h.id, s: h.s}
-	r.s.Precheck.IdleQueueDepth = 50
-	r.waitQueues(context.Background())
-	if m.calls != 1 {
-		t.Fatalf("waitQueues polled %d times; every queue was already idle", m.calls)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		h := newHarness(t)
+		m := &queueMetrics{depths: []float64{30, 30}} // sum 60 > 50, each queue idle
+		h.deps.Metrics = m
+		r := &run{e: New(h.deps, h.clock), id: h.id, s: h.s}
+		r.s.Precheck.IdleQueueDepth = 50
+		r.waitQueues(context.Background())
+		if m.calls != 1 {
+			t.Fatalf("waitQueues polled %d times; every queue was already idle", m.calls)
+		}
+	})
 }
 
 // tickClock advances 1ms on every read, like a real clock between two calls.
