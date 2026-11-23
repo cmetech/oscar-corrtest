@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- CorrTest reconciles ordinary native delivery to per-route decisions, actual
+  outbound attempts and each source episode, including attempts that produced
+  no sink receipt. Mixed smoke needs the ordinary route/attempt projection.
+  Full control and mixed qualification additionally need per-attempt SQL/HTTP
+  spans. Managed-only smoke remains usable independently. Regenerate older
+  companion exports to the contract in the OSCAR qualification guide before
+  comparing new runs. Source \`5af1a89\` adds per-offer load coverage, original
+  managed child and final-drain checks, oracle-based timer percentiles and
+  separate source, physical-request and member counts. No database migration.
+
 - CorrTest enables the dedicated TL1 managed smoke, mixed V3 smoke, same-work
   ordinary control and 150-minute mixed V3 qualification selectors. Mixed runs
   accept `--managed-share` as a fraction and compare the persisted effective
