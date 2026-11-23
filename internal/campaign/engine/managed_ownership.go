@@ -75,7 +75,7 @@ func (r *run) recoverOriginal(ctx context.Context, mut domain.CampaignMutation) 
 	if deps == nil {
 		return errors.New("original effect reader unavailable")
 	}
-	if o.Kind == "effect" {
+	if o.Kind == "effect" || o.Kind == "segment_root" {
 		if deps.originals == nil {
 			return errors.New("original child reader unavailable")
 		}
@@ -83,7 +83,8 @@ func (r *run) recoverOriginal(ctx context.Context, mut domain.CampaignMutation) 
 		if err != nil {
 			return err
 		}
-		if terminalEffect(o, s) {
+		_, whole := s.Settlement(o.History, o.Episode, o.Root)
+		if o.Kind == "segment_root" && whole || o.Kind == "effect" && terminalEffect(o, s) {
 			return (&managedLane{run: r}).save(ctx, "native.original.settled", map[string]any{"owner": o, "receipt": s})
 		}
 	}

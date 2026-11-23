@@ -33,8 +33,9 @@ type TicketProof struct {
 	Flow, History, Incident, Operation, Audit, Origin, System, AuditSystem, AuditStatus, AuditIncident string
 	Episode                                                                                            int
 }
-type Dispatch struct{ Root, Binding, Revision, Kind, DueAt, State string }
+type Dispatch struct{ Root, Attempt, Binding, Revision, Kind, DueAt, State string }
 type Snapshot struct {
+	LocalReadEnd  time.Time `json:"-"`
 	Dispatches    []Dispatch
 	Tickets       []TicketProof
 	Bindings      []Binding
@@ -63,7 +64,7 @@ const bindingSelect = `SELECT JSON_OBJECT('ID',b.id,'Rule',b.selected_rule_id,'R
 const ticketSelect = `SELECT JSON_OBJECT('Flow',w.flow_id,'History',w.history_id,'Episode',w.episode_number,'Incident',w.incident_number,'Operation',w.provider_operation_id,'Audit',a.id,'Origin',w.origin,'System',w.system,'AuditSystem',a.ticket_system,'AuditStatus',a.status,'AuditIncident',a.incident_number)
  FROM AM_AlertTicketWorkflow w JOIN TKT_Ticketing_Audit a ON a.id=w.ticket_audit_id AND a.ticket_workflow_id=w.flow_id AND a.operation_type='create'
  WHERE w.history_id=? AND w.provider_confirmed_at IS NOT NULL LIMIT 257`
-const dispatchSelect = `SELECT JSON_OBJECT('Root',d.root_id,'Binding',d.binding_id,'Revision',d.command->>'$.policy_binding.revision_id','Kind',d.command->>'$.kind','DueAt',DATE_FORMAT(d.due_at,'%Y-%m-%dT%H:%i:%s.%fZ'),'State',d.state) FROM TM_ResendScheduleDispatch d JOIN TM_ResendEpisodeState b ON d.binding_id=b.id WHERE b.history_id=? AND d.id=d.root_id ORDER BY d.id LIMIT 257`
+const dispatchSelect = `SELECT JSON_OBJECT('Root',d.root_id,'Attempt',d.current_attempt_id,'Binding',d.binding_id,'Revision',d.command->>'$.policy_binding.revision_id','Kind',d.command->>'$.kind','DueAt',DATE_FORMAT(d.due_at,'%Y-%m-%dT%H:%i:%s.%fZ'),'State',d.state) FROM TM_ResendScheduleDispatch d JOIN TM_ResendEpisodeState b ON d.binding_id=b.id WHERE b.history_id=? AND d.id=d.root_id ORDER BY d.id LIMIT 257`
 const effectSelect = `SELECT JSON_OBJECT('Operation',o.id,'Logical',o.logical_action_id,'Kind',o.request->>'$.kind',
  'Target',t.target_key,'Receiver',t.configuration->>'$.receiver_id','ScopeNotifier',t.configuration->>'$.scope[0].notifier_id','ScopeAction',t.configuration->>'$.scope[0].action','TargetState',t.state,'Callback',c.delivery_id,'CallbackOutcome',c.outcomes->>'$.state',
  'SourceWrite',c.source->>'$.delivery_id','ReceivedAt',DATE_FORMAT(c.received_at,'%Y-%m-%dT%H:%i:%s.%fZ'),
@@ -72,7 +73,7 @@ const effectSelect = `SELECT JSON_OBJECT('Operation',o.id,'Logical',o.logical_ac
  'Severity',COALESCE(d.native_effect->>'$.schedule_severity',c.manifest->>'$.dispatch.effective_severity'),
  'BindingID',s.binding_id,'ScheduleRoot',s.root_id,'Reason',s.anchor->>'$.due_reason','Revision',s.command->>'$.policy_binding.revision_id')
  FROM AM_NativeActionOperation o
- JOIN AM_NativeActionTarget t ON t.operation_id=o.id
+ LEFT JOIN AM_NativeActionTarget t ON t.operation_id=o.id
  LEFT JOIN AM_NativeCallbackReceipt c ON c.delivery_id=t.callback_delivery_id
  LEFT JOIN TM_NotificationDeliveries d ON d.native_callback_id=c.delivery_id
  LEFT JOIN TM_ResendScheduleDispatch s ON s.id=o.id AND s.root_id=o.logical_action_id
@@ -88,7 +89,10 @@ func (c Config) Snapshot(ctx context.Context, id string) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return decodeSnapshot(raw, elapsed)
+	at := time.Now()
+	snap, err := decodeSnapshot(raw, elapsed)
+	snap.LocalReadEnd = at
+	return snap, err
 }
 
 // RootSamples selects only the dispatch identities during sustained timing observation.

@@ -237,9 +237,16 @@ func (m *managedLane) suppression(ctx context.Context) error {
 		if err = m.save(ctx, "native.suppression_changed", map[string]any{"kind": kind, "subject": f, "control": control, "bound": pinned, "firstDecision": initialDecision, "lastDecision": decision, "member": subjectView, "samples": samples, "dispatches": dueDispatches, "start": start, "escalationDue": raise, "end": m.run.now(), "effects": final.Effects, "sink": deliveries}); err != nil {
 			return err
 		}
+		releaseStart := time.Now()
 		if err = m.run.restoreNow(ctx, mutation); err != nil {
 			return err
 		}
+		releaseBy := time.Since(releaseStart)
+		// Bracket a durable current physical attempt on the controller clock.
+		// An attempt already present on the first post-release read has no
+		// lower bound proving admission after the owned release.
+		attempts := map[string]dispatchWindow{}
+		priorRead := time.Time{}
 		wait, cancel = context.WithTimeout(ctx, m.policy.spec.Interval+30*time.Second)
 		err = poll(wait, func() (bool, error) {
 			elig, er := m.actor.Eligibility(wait, f.History.ID)
@@ -249,10 +256,20 @@ func (m *managedLane) suppression(ctx context.Context) error {
 			if elig.Episode != f.History.EpisodeNumber || !elig.Actions["resend"].Allowed {
 				return false, nil
 			}
+			readFrom := time.Now()
 			snap, er := m.config.Snapshot(wait, f.History.ID)
 			if er != nil {
 				return false, er
 			}
+			for _, d := range snap.Dispatches {
+				if d.Attempt == "" || d.Binding != binding.ID || d.Revision != binding.Revision || d.Kind != "escalate" {
+					continue
+				}
+				if _, seen := attempts[d.Attempt]; !seen {
+					attempts[d.Attempt] = dispatchWindow{Before: priorRead, By: time.Now()}
+				}
+			}
+			priorRead = readFrom
 			if er = m.holdUnknown(wait, f, snap); er != nil {
 				return false, er
 			}
@@ -262,6 +279,7 @@ func (m *managedLane) suppression(ctx context.Context) error {
 			}
 			var effects []managed.Effect
 			escalated := false
+			var resumed dispatchWindow
 			for _, e := range snap.Effects {
 				at, er := time.Parse(time.RFC3339Nano, e.ConfirmedAt)
 				if er != nil || at.Before(end) || e.Notifier != m.policy.notifierID || e.Action != "notification" {
@@ -272,6 +290,7 @@ func (m *managedLane) suppression(ctx context.Context) error {
 				}
 				effects = append(effects, e)
 				if e.Kind == "escalate" && e.Severity == "critical" {
+					resumed = attempts[e.Operation]
 					escalated = true
 				}
 			}
@@ -282,7 +301,10 @@ func (m *managedLane) suppression(ctx context.Context) error {
 			if er != nil || !ok {
 				return false, er
 			}
-			return true, m.save(wait, "native.suppression_released", map[string]any{"subject": f, "eligibility": elig, "effects": effects, "receipts": rs})
+			if resumed.Before.IsZero() || resumed.Before.Sub(releaseStart) < releaseBy || resumed.By.Sub(releaseStart) > 30*time.Second {
+				return false, errors.New("resumed durable escalation lacks a qualified release-to-dispatch bracket within 30s")
+			}
+			return true, m.save(wait, "native.suppression_released", map[string]any{"kind": kind, "control": control, "binding": binding, "escalationDue": raise, "releaseStart": releaseStart.UTC(), "releaseByNs": releaseBy, "dispatchAfterNs": resumed.Before.Sub(releaseStart), "dispatchByNs": resumed.By.Sub(releaseStart), "subject": f, "eligibility": elig, "effects": effects, "receipts": rs})
 
 		})
 		cancel()

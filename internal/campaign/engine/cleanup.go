@@ -118,6 +118,13 @@ func (r *run) haltLane(ctx context.Context) {
 func (r *run) finishAfterDrain(ctx context.Context, forced domain.Verdict, why string) error {
 	if !r.t0.IsZero() {
 		r.waitQueues(ctx)
+		if r.managed != nil && r.s.NativeWorkload.ManagedSegment > 0 {
+			observer, stop := context.WithDeadline(ctx, r.t0.Add(r.s.Phase("drain").End))
+			if err := r.managed.verifyDrain(observer); err != nil {
+				r.noteMissing("post-drain managed readback: " + err.Error())
+			}
+			stop()
+		}
 	}
 	var incidents []targetops.Incident
 	if !r.managedOnly() {
@@ -140,7 +147,7 @@ func mustJSON(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
 // waitQueues waits (<= 30 min) for every queue to return to the idle depth.
 func (r *run) waitQueues(ctx context.Context) {
 	deadline := r.now().Add(maxQueueWait)
-	if r.managedOnly() {
+	if r.s.NativeWorkload != nil {
 		deadline = r.now().Add(r.s.Phase("drain").End - r.s.LoadEnd)
 		if stop := r.t0.Add(r.s.Phase("drain").End); stop.Before(deadline) {
 			deadline = stop
@@ -151,13 +158,19 @@ func (r *run) waitQueues(ctx context.Context) {
 		if err != nil {
 			continue
 		}
-		idle := true
+		idle := len(v) > 0
 		for _, s := range v {
 			idle = idle && r.s.Precheck.QueueIdle(s.Value)
 		}
 		if idle {
+			if r.s.NativeWorkload != nil {
+				r.event(ctx, "native.drain.idle", "info", "queues idle", map[string]any{"queues": v, "observedAt": r.now()})
+			}
 			return
 		}
+	}
+	if r.s.NativeWorkload != nil {
+		r.noteMissing("queue drain not observed within declared window")
 	}
 	r.event(ctx, "campaign.drain", "warn", "queues did not return to idle within 30m", nil)
 }

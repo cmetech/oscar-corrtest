@@ -12,6 +12,7 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/campaign/managed"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/precheck"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
+	"github.com/cmetech/oscar-corrtest/internal/campaign/score"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
 	"github.com/cmetech/oscar-corrtest/internal/oscar"
 	"github.com/google/uuid"
@@ -62,11 +63,14 @@ type managedLane struct {
 	*managedDeps
 	peer *managed.Peer
 
-	repeat  *policyState
-	policy  *policyState
-	cleared sync.Map
-	mu      sync.Mutex
-	open    map[string]string // AID -> condition; only this run's PDUs
+	repeat   *policyState
+	policy   *policyState
+	tails    sync.WaitGroup
+	clearsAt sync.Map
+	cleared  sync.Map
+	mu       sync.Mutex
+	closed   map[string]closedSubject
+	open     map[string]string // AID -> condition; only this run's PDUs
 }
 
 func (r *run) managedOnly() bool { return r.s.ID == "managed-alerts-smoke" && r.s.Version == "v1" }
@@ -130,6 +134,20 @@ func (r *run) managedPhase(ctx context.Context) {
 	}
 	var mixed sync.WaitGroup
 	if w.ManagedSegment > 0 && m.repeat != nil {
+		mixed.Add(1)
+		go func() {
+			defer mixed.Done()
+			for at := r.t0; at.Before(r.t0.Add(r.s.LoadEnd)); at = at.Add(5 * time.Minute) {
+				if !r.e.clock.SleepUntil(ctx, at) {
+					return
+				}
+				start := time.Now()
+				_, err := r.e.d.Target.PolicyStatus(ctx, m.policy.notifierID, m.policy.spec.Action, m.policy.id)
+				r.mu.Lock()
+				r.fo["managed_policy_status"] = append(r.fo["managed_policy_status"], score.FOSample{Seconds: time.Since(start).Seconds(), Err: err != nil})
+				r.mu.Unlock()
+			}
+		}()
 		for _, p := range []*policyState{m.repeat, m.policy} {
 			mixed.Add(1)
 			go func() { defer mixed.Done(); m.sustained(ctx, p, w.ManagedSegment) }()
@@ -148,6 +166,13 @@ func (r *run) managedPhase(ctx context.Context) {
 		r.noteMissing("managed lifecycle: " + err.Error())
 	}
 	mixed.Wait()
+	// Both final sentinels stay active until T+loadEnd even when the final
+	// rounded rate offer and pre-boundary samples finish several seconds early.
+	if w.ManagedSegment > 0 {
+		r.e.clock.SleepUntil(ctx, r.t0.Add(r.s.LoadEnd))
+	}
+
+	defer m.tails.Wait()
 	cleanCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Second)
 	defer stop()
 	if err = m.clearOwned(cleanCtx); err != nil {
@@ -252,6 +277,9 @@ func (m *managedLane) emit(ctx context.Context, aid, cond, code string) error {
 		m.cleared.Delete(aid)
 	}
 	e, err := m.peer.Emit(aid, cond, code)
+	if code == "CL" && err == nil {
+		m.clearsAt.Store(aid, e.At)
+	}
 	if logErr := m.save(context.WithoutCancel(ctx), "native.tl1.wire", e); logErr != nil {
 		return logErr
 	}
@@ -465,6 +493,7 @@ func (m *managedLane) clearOwned(ctx context.Context) error {
 func (m *managedLane) mixed(ctx context.Context, rate float64) error {
 	start := m.run.t0
 	span := m.run.s.LoadEnd
+	capacity := make(chan struct{}, 8)
 	for i := 0; ; i++ {
 		offer, ok := managed.MixedOffer(i, rate, span)
 		if !ok {
@@ -483,6 +512,9 @@ func (m *managedLane) mixed(ctx context.Context, rate float64) error {
 		}
 		if err := m.emit(ctx, aid, m.condition(scope), offer.Code); err != nil {
 			return err
+		}
+		if offer.Code == "CL" {
+			m.observeRateSlot(ctx, offer.Slot, capacity)
 		}
 	}
 }

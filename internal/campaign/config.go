@@ -14,6 +14,7 @@ import (
 // secrets never appear in the file. MetricsCredentialFile is optional.
 type Config struct {
 	ManagedTL1                               *managed.Config
+	NativeObserverDir                        string
 	TargetID                                 string
 	WorkerURL, WorkerTokenFile, WorkerCAFile string
 	ProbeHost, ProbeKeyFile                  string

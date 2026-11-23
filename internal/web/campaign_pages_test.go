@@ -38,11 +38,12 @@ func (f *pageData2) CampaignStatus(_ context.Context, id string) (appruntime.Cam
 		case "pc-control":
 			s = campaignscenario.AlertingDayControlV1()
 		}
-		return appruntime.CampaignView{Campaign: domain.Campaign{ID: id, Status: domain.CampaignCompleted, ScenarioID: s.ID, ScenarioHash: s.Hash()},
+		return appruntime.CampaignView{Scenario: &s, Campaign: domain.Campaign{ID: id, Status: domain.CampaignCompleted, ScenarioID: s.ID, ScenarioHash: s.Hash()},
 			Events: []domain.CampaignEvent{{Sequence: 1, Type: precheckEventType, Detail: d}}}, nil
 	}
 	if c, ok := f.campaigns[id]; ok {
-		return appruntime.CampaignView{Campaign: c, Options: f.options[id]}, nil
+		s, _ := campaignscenario.ByHash(c.ScenarioHash)
+		return appruntime.CampaignView{Scenario: &s, Campaign: c, Options: f.options[id]}, nil
 	}
 	return appruntime.CampaignView{}, appruntime.ErrCampaignNotFound
 }
@@ -133,7 +134,7 @@ func TestStopButtonPostsStop(t *testing.T) {
 }
 
 func cardJSON(hash, runBy string, comparable bool, v float64) json.RawMessage {
-	b, _ := json.Marshal(score.Scorecard{ScenarioHash: hash, RunBy: runBy, Comparable: comparable, CleanupClean: true, Verdict: "PASS",
+	b, _ := json.Marshal(score.Scorecard{ObserverConfig: "fixture", ScenarioHash: hash, RunBy: runBy, Comparable: comparable, CleanupClean: true, Verdict: "PASS",
 		Headlines: []score.Headline{{Name: "queue_peak", Value: v, Pass: true}}})
 	return b
 }

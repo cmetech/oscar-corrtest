@@ -179,7 +179,7 @@ with complete lifecycles only. Alternating slots use no policy or the escalation
 policy. Additionally, a repeat-only and escalating subject run throughout
 each ten-minute segment. The full campaign expects 15 segments per policy,
 including the last segment. Their source raises/clears and all functional
-inputs are additional traffic. D3 calculates the selected share and stores
+inputs are additional traffic. CorrTest calculates the selected share and stores
 the effective scenario hash, requested and actual delivery rates. Record
 all offered PDUs, written, definitely unentered, unknown, downstream
 observed and provider outcome counts separately.
@@ -216,9 +216,11 @@ replacement tickets or restart the device replay to manufacture proof.
 ## Operator commands
 
 Run after all reviewed sources have merged and the target is patched.
-These commands and fixtures are UNRUN. D1's selector guard remains until
-D3 wires aggregate evidence and enables each selector. Source review alone
-does not qualify any combination.
+These commands and fixtures are UNRUN. Source review does not establish target qualification.
+For the complete sequence, observer input and evidence contract see OSCAR
+`docs/testing/native-alert-actions-qualification.md`. For either mixed V3 selector,
+pass `--managed-share 0.10` to reserve 10% of baseline plus mixed-rate PDUs
+during load. Leave it unset to retain 0.2 additional wire PDUs/s.
 
 ```sh
 go test ./internal/campaign/managed ./internal/campaign/targetops ./internal/campaign/lane ./internal/campaign/engine ./internal/campaign/resend ./internal/campaign/score -count=1

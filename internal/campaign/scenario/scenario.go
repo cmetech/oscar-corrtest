@@ -180,6 +180,7 @@ type NativeWorkloadSpec struct {
 	ManagedRepeat     *PolicySpec    `json:"managedRepeat,omitempty"`
 	ManagedSegment    time.Duration  `json:"managedSegment,omitempty"`
 	ManagedPriorities map[string]int `json:"managedPriorities,omitempty"`
+	ManagedShare      float64        `json:"managedShare,omitempty"`
 	ManagedRate       float64        `json:"managedRate,omitempty"`
 }
 

@@ -48,11 +48,12 @@ type AlertAttemptFact struct {
 }
 
 type AlertResolutionFact struct {
-	AlertName      string `json:"alertName"`
-	Fingerprint    string `json:"fingerprint"`
-	InjectionClass string `json:"injectionClass"`
-	StatusCode     int    `json:"statusCode"`
-	Accepted       bool   `json:"accepted"`
+	OfferedAt      time.Time `json:"offeredAt,omitzero"`
+	AlertName      string    `json:"alertName"`
+	Fingerprint    string    `json:"fingerprint"`
+	InjectionClass string    `json:"injectionClass"`
+	StatusCode     int       `json:"statusCode"`
+	Accepted       bool      `json:"accepted"`
 }
 
 func (facts ExecutionFacts) Validate() error {

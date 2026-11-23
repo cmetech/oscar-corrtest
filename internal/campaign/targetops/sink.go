@@ -27,6 +27,7 @@ type SinkAlert struct {
 
 type Receipt struct {
 	ID         int64       `json:"receipt_id"`
+	Receiver   string      `json:"receiver"`
 	Notifier   string      `json:"notifier"`
 	ReceivedAt time.Time   `json:"received_at"`
 	Alerts     []SinkAlert `json:"alerts"`
@@ -49,6 +50,10 @@ func NewSink(baseURL, tokenFile, caFile string) (*Sink, error) {
 // used: it only knows a few label names and the capture URL's ?run=, never campaign_run. A zero since means no lower bound.
 func (s *Sink) Receipts(ctx context.Context, capture, campaignRun string, since time.Time) ([]Receipt, error) {
 	return s.receiptsByLabel(ctx, capture, "campaign_run", campaignRun, since)
+}
+
+func (s *Sink) ManagedConditionReceipts(ctx context.Context, condition string, since time.Time) ([]Receipt, error) {
+	return s.receiptsByLabel(ctx, "campaign", "condition", condition, since)
 }
 
 func (s *Sink) ManagedReceipts(ctx context.Context, aid string, since time.Time) ([]Receipt, error) {

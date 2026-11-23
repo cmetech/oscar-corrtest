@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/campaign/lane"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/resend"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
@@ -191,12 +192,13 @@ func TestRegressionTwentyPercent(t *testing.T) {
 
 func identifiedScorecard(id string, role domain.CampaignRole, quality scenario.Scenario, p95 float64, at time.Time) IdentifiedScorecard {
 	card := cardWith(p95)
+	card.ObserverConfig = "fixture"
 	card.ScenarioHash, card.RegressionPct = quality.Hash(), quality.Limits.RegressionPct
 	build := "oscar-after"
 	if role == domain.CampaignPreChangeControl {
 		build = "oscar-before"
 	}
-	return IdentifiedScorecard{
+	return IdentifiedScorecard{Scenario: quality,
 		RunID: id, ScenarioHash: card.ScenarioHash,
 		Provenance: domain.CampaignProvenance{Role: role, TargetBuild: build, CorrTestBuild: "corrtest-sha", WorkloadConfig: "test-pack-digest"},
 		Status:     domain.CampaignCompleted, Cleanup: domain.CleanupClean, Comparable: true, FullLoadCompleted: true,
@@ -485,5 +487,31 @@ func TestResendUnreadIsUnknownAndViolationFails(t *testing.T) {
 	})
 	if r.Unknown != 1 || r.Failed != 1 || r.Succeeded != 1 {
 		t.Fatalf("got %+v", r)
+	}
+}
+
+func TestConfiguredComparisonRequiresSavedShareAndSameObserver(t *testing.T) {
+	share := 0.1
+	s, err := lane.ConfigureShare(scenario.AlertingDayV3(), &share)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Unix(1800000000, 0)
+	ref := identifiedScorecard("r", domain.CampaignConfiguredPolicyReference, s, 100, at)
+	cand := identifiedScorecard("c", domain.CampaignConfiguredPolicyCandidate, s, 112, at.Add(4*time.Hour))
+	ref.Scorecard.Headlines[0].Name = "native.segment_POL.dispatch_lag.p99"
+	cand.Scorecard.Headlines[0].Name = ref.Scorecard.Headlines[0].Name
+	got, err := CompareCompatible([]IdentifiedScorecard{ref}, []IdentifiedScorecard{cand}, s.Hash(), ConfiguredPolicy)
+	if err != nil || !got.Items[0].RegressionFailed {
+		t.Fatal(got, err)
+	}
+	cand.Scorecard.ObserverConfig = "different"
+	if _, err = CompareCompatible([]IdentifiedScorecard{ref}, []IdentifiedScorecard{cand}, s.Hash(), ConfiguredPolicy); err == nil {
+		t.Fatal("mixed observer")
+	}
+	cand.Scorecard.ObserverConfig = ref.Scorecard.ObserverConfig
+	cand.Scenario = scenario.AlertingDayV3()
+	if _, err = CompareCompatible([]IdentifiedScorecard{ref}, []IdentifiedScorecard{cand}, s.Hash(), ConfiguredPolicy); err == nil {
+		t.Fatal("forged effective workload hash")
 	}
 }

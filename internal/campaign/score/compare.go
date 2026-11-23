@@ -3,8 +3,10 @@ package score
 import (
 	"errors"
 	"fmt"
+	"github.com/cmetech/oscar-corrtest/internal/campaign/lane"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
@@ -16,6 +18,7 @@ type Delta struct {
 	Value     float64
 	Ref       float64
 	WorsePct  float64
+	Undefined bool `json:",omitempty"`
 	Regressed bool // more than RegressionPct (default 20) worse than the reference
 }
 
@@ -35,6 +38,7 @@ var (
 
 // IdentifiedScorecard binds the scorecard to its stored campaign and start declaration.
 type IdentifiedScorecard struct {
+	Scenario                              scenario.Scenario
 	RunID, ScenarioHash                   string
 	Provenance                            domain.CampaignProvenance
 	Status                                domain.CampaignStatus
@@ -58,12 +62,13 @@ type RunProvenance struct {
 
 type ComparisonItem struct {
 	RunProvenance
-	Deltas []Delta
+	RegressionFailed bool
+	Deltas           []Delta
 }
 
 type ReferenceVariation struct {
-	Name, Unit string
-	Min, Max   float64
+	Name, Unit       string
+	Min, Max, Median float64
 }
 
 type Comparison struct {
@@ -96,6 +101,9 @@ func CompareCompatible(references []IdentifiedScorecard, candidates []Identified
 		refRole, candidateRole = domain.CampaignConfiguredPolicyReference, domain.CampaignConfiguredPolicyCandidate
 	default:
 		return Comparison{}, fmt.Errorf("%w: select control_before_after or configured_policy mode", ErrIncompatibleComparison)
+	}
+	if s := references[0].Scenario; s.ID == workload.ID && s.Version == workload.Version && lane.RegisteredWorkload(s, scenarioHash) {
+		workload = s
 	}
 	if workload.Hash() != scenarioHash {
 		return Comparison{}, fmt.Errorf("%w: scenario hash does not match %s@%s for %s", ErrIncompatibleComparison, workload.ID, workload.Version, mode)
@@ -133,7 +141,14 @@ func CompareCompatible(references []IdentifiedScorecard, candidates []Identified
 	for _, c := range candidates {
 		card := c.Scorecard
 		card.RegressionPct = workload.Limits.RegressionPct
-		res.Items = append(res.Items, ComparisonItem{RunProvenance: c.summary(), Deltas: CompareTo(card, res.Reference)})
+		item := ComparisonItem{RunProvenance: c.summary(), Deltas: CompareTo(card, res.Reference)}
+		for _, d := range item.Deltas {
+			latency := strings.HasSuffix(d.Name, "p99") || mode == ControlBeforeAfter && strings.HasSuffix(d.Name, "p95")
+			if latency && d.Regressed {
+				item.RegressionFailed = true
+			}
+		}
+		res.Items = append(res.Items, item)
 	}
 	return res, nil
 }
@@ -148,7 +163,7 @@ func validateComparableRun(r IdentifiedScorecard, role domain.CampaignRole, base
 	switch {
 	case r.RunID == "" || seen[r.RunID]:
 		return fmt.Errorf("%w: missing or repeated run ID %q", ErrIncompatibleComparison, r.RunID)
-	case r.ScenarioHash != hash || card.ScenarioHash != hash:
+	case !lane.RegisteredWorkload(r.Scenario, hash) || r.ScenarioHash != hash || card.ScenarioHash != hash:
 		return fmt.Errorf("%w: run %q has a different workload hash", ErrIncompatibleComparison, r.RunID)
 	case r.Status != domain.CampaignCompleted || r.StartedAt.IsZero() || !r.EndedAt.After(r.StartedAt) ||
 		!r.FullLoadCompleted || card.EvidenceIncomplete || r.PrecheckOnly || (card.Verdict != domain.VerdictPass && card.Verdict != domain.VerdictFail):
@@ -158,6 +173,8 @@ func validateComparableRun(r IdentifiedScorecard, role domain.CampaignRole, base
 		return fmt.Errorf("%w: run %q must be clean and comparable", ErrIncompatibleComparison, r.RunID)
 	case p.Role != role || p.TargetBuild == "" || p.CorrTestBuild == "" || p.WorkloadConfig == "":
 		return fmt.Errorf("%w: run %q lacks recorded build/configuration provenance for role %s", ErrIncompatibleComparison, r.RunID, role)
+	case card.ObserverConfig == "" || card.ObserverConfig != base.Scorecard.ObserverConfig:
+		return fmt.Errorf("%w: observer configuration differs or is missing", ErrIncompatibleComparison)
 	case p.CorrTestBuild != base.Provenance.CorrTestBuild || p.WorkloadConfig != base.Provenance.WorkloadConfig:
 		return fmt.Errorf("%w: run %q must share the reference CorrTest build and workload configuration", ErrIncompatibleComparison, r.RunID)
 	}
@@ -202,6 +219,7 @@ func referenceMedian(runs []IdentifiedScorecard, regressionPct float64) (Scoreca
 		if len(vs) == 2 {
 			h.Value = (vs[0] + vs[1]) / 2
 		}
+		variation[len(variation)-1].Median = h.Value
 		ref.Headlines = append(ref.Headlines, h)
 	}
 	return ref, variation
@@ -218,7 +236,11 @@ func CompareTo(card, ref Scorecard) []Delta {
 	var out []Delta
 	for _, h := range card.Headlines {
 		for _, r := range ref.Headlines {
-			if r.Name != h.Name || r.Value <= 0 {
+			if r.Name != h.Name {
+				continue
+			}
+			if r.Value <= 0 {
+				out = append(out, Delta{Name: h.Name, Value: h.Value, Ref: r.Value, Undefined: true})
 				continue
 			}
 			// both directions use the reference as the base

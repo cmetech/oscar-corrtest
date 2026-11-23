@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -169,6 +170,8 @@ func (a *App) campaignStart(ctx context.Context, name string, args []string, pre
 	flags.SetOutput(a.stderr)
 	cf := addCampaignFlags(flags)
 	scenario := flags.String("scenario", "alerting-day@v1", "built-in scenario id@version (see campaign help)")
+	var share *float64
+	flags.Func("managed-share", "fraction of planned baseline plus mixed TL1 source posts", func(raw string) error { v, err := strconv.ParseFloat(raw, 64); share = &v; return err })
 	ack := flags.String("ack", "", "comma-separated acknowledged warnings, e.g. A1,A3")
 	runBy := flags.String("run-by", "human", "agent or human")
 	wait := flags.Bool("wait", false, "follow status until the campaign finishes")
@@ -193,6 +196,9 @@ func (a *App) campaignStart(ctx context.Context, name string, args []string, pre
 		return a.commandUsageError(name, err.Error())
 	}
 	body := map[string]any{"scenario": *scenario, "acknowledged": []string{}, "runBy": *runBy}
+	if share != nil {
+		body["managedShare"] = *share
+	}
 	if provenance != (domain.CampaignProvenance{}) {
 		body["provenance"] = provenance
 	}
@@ -393,10 +399,22 @@ func (a *App) campaignCompare(ctx context.Context, args []string) int {
 		}
 		return a.campaignFail("campaign compare", err)
 	}
-	if *cf.output == "json" {
-		return a.writeJSON(out)
+	var compared score.Comparison
+	if json.Unmarshal(out, &compared) != nil {
+		return a.campaignFail("campaign compare", errors.New("invalid comparison result"))
 	}
-	fmt.Fprintln(a.stdout, string(out))
+	if *cf.output == "json" {
+		if code := a.writeJSON(out); code != 0 {
+			return code
+		}
+	} else {
+		fmt.Fprintln(a.stdout, string(out))
+	}
+	for _, item := range compared.Items {
+		if item.RegressionFailed || item.Verdict == domain.VerdictFail {
+			return 4
+		}
+	}
 	return 0
 }
 

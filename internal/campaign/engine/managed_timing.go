@@ -81,7 +81,11 @@ func (m *managedLane) waitActions(ctx context.Context, f NativeEpisodeFixture, m
 				ordinary = true
 			}
 			seen[e.Child] = true
-			if err = m.save(until, "native.timer_due", map[string]any{"history": f.History.ID, "expectedKind": kind, "expectedDue": due, "expectedSeverity": severity, "binding": binding, "effect": e, "dispatch": window, "confirmed": model.last, "queryDuration": snap.QueryDuration}); err != nil {
+			monotonic, er := timerOffsets(m.run.monoStart, snap, due, window, e)
+			if er != nil {
+				return false, er
+			}
+			if err = m.save(until, "native.timer_due", map[string]any{"history": f.History.ID, "expectedKind": kind, "expectedDue": due, "monotonicNs": monotonic, "expectedSeverity": severity, "binding": binding, "effect": e, "dispatch": window, "confirmed": model.last, "queryDuration": snap.QueryDuration}); err != nil {
 				return false, err
 			}
 		}
@@ -270,4 +274,26 @@ func (m *managedLane) afterAck(ctx context.Context, f NativeEpisodeFixture) erro
 		}
 		return false, nil
 	})
+}
+
+// Map the target's UTC timestamps to intervals on one controller monotonic
+// clock. The DB clock was sampled inside the measured read. Keep the full
+// bracket. A remote provider has no shared process-local monotonic origin.
+func timerOffsets(origin time.Time, s managed.Snapshot, due time.Time, w dispatchWindow, e managed.Effect) (map[string][2]time.Duration, error) {
+	if origin.IsZero() || s.LocalReadEnd.IsZero() || s.MeasuredAt.IsZero() {
+		return nil, errors.New("missing controller/target clock observation")
+	}
+	provider, err := time.Parse(time.RFC3339Nano, e.EnteredAt)
+	if err != nil {
+		provider, err = time.Parse(time.RFC3339Nano, e.EnteredAt+"Z")
+	}
+	if err != nil {
+		return nil, err
+	}
+	high := s.LocalReadEnd.Sub(origin)
+	low := high - s.QueryDuration
+	interval := func(a, b time.Time) [2]time.Duration {
+		return [2]time.Duration{low + a.Sub(s.MeasuredAt), high + b.Sub(s.MeasuredAt)}
+	}
+	return map[string][2]time.Duration{"due": interval(due, due), "admission": interval(w.Before, w.By), "providerEntry": interval(provider, provider)}, nil
 }

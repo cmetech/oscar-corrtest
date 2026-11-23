@@ -95,9 +95,12 @@ configuration, backup, and uninstall.
 | `alerting-day-smoke@v3` | Short mixed-workload smoke. |
 | `managed-alerts-smoke@v1` | Dedicated managed TL1 functional smoke for lifecycle, resend, escalation, acknowledgement and ticket flows. |
 
-These selectors are registered and CorrTest currently refuses their pre-checks
-and runs pending real native ingress and evidence support. The smoke plans are
-non-comparable. Existing campaign selectors retain their original definitions.
+Both smoke selectors are non-comparable. The mixed V3 selectors accept
+`--managed-share 0.10` (10% of baseline plus mixed-rate PDUs during load).
+The dedicated smoke uses the controlled probe, signed operator session and
+independent provider receipts. Full performance runs also use the commissioned
+per-run observer capture. See [managed qualification](docs/managed-native-campaign.md)
+and [controlled fixtures](test-packs/native-alert-actions-v1/README.md).
 
 A full qualification run records an operator-declared OSCAR build manifest ID,
 CorrTest binary ID and frozen workload configuration digest at start. The
@@ -118,7 +121,7 @@ metadata and does not verify deployments or discover hashes from OSCAR.
   runs on the same `alerting-day@v3` workload. Track added configured sends and
   managed source cost separately from the ordinary before/after control.
 
-Once native qualification support is available, declare full-run provenance with
+Declare full-run provenance with
 `--comparison-role`, `--target-build`, `--corrtest-build` and
 `--workload-config`. The API accepts these as `provenance.role`,
 `provenance.targetBuild`, `provenance.corrTestBuild` and

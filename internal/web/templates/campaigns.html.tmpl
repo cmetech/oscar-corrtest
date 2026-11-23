@@ -4,6 +4,7 @@
 {{with .Campaign}}
 <form method="post" action="/campaigns/prechecks"><input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
   {{$sel := .Selected}}<label>Scenario <select name="scenario">{{range .Scenarios}}<option value="{{.}}"{{if eq . $sel}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+  <label>Mixed V3 TL1 share (optional fraction) <input name="managed_share" type="number" min="0" max="1" step="any"></label>
   <button class="primary-button" type="submit">Run pre-checks</button></form>
 {{if .Pending}}<p data-autoreload="3000">Pre-checks for <code>{{.PrecheckID}}</code> are running. This page refreshes.</p>{{end}}
 {{if .Checks}}

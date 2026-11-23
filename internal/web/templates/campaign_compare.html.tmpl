@@ -17,14 +17,14 @@
 <p>{{.ReferenceCount}} reference runs for <code>{{.Mode}}</code> and workload <code>{{.ScenarioHash}}</code>.{{if .Provisional}} A single reference is provisional.{{end}}</p>
 <ul>{{range .References}}<li><code>{{.RunID}}</code> ({{.RunBy}}), OSCAR build <code>{{.TargetBuild}}</code></li>{{end}}</ul>
 <p>CorrTest binary <code>{{(index .References 0).CorrTestBuild}}</code> and workload configuration <code>{{(index .References 0).WorkloadConfig}}</code></p>
-<div class="data-table-wrapper"><table><caption>Reference variation</caption><thead><tr><th>Headline</th><th>Minimum</th><th>Maximum</th><th>Unit</th></tr></thead><tbody>
-{{range .Variation}}<tr><td>{{.Name}}</td><td>{{.Min}}</td><td>{{.Max}}</td><td>{{.Unit}}</td></tr>{{end}}
+<div class="data-table-wrapper"><table><caption>Reference variation</caption><thead><tr><th>Headline</th><th>Minimum</th><th>Median</th><th>Maximum</th><th>Unit</th></tr></thead><tbody>
+{{range .Variation}}<tr><td>{{.Name}}</td><td>{{.Min}}</td><td>{{.Median}}</td><td>{{.Max}}</td><td>{{.Unit}}</td></tr>{{end}}
 </tbody></table></div></section>
 {{range .Items}}
 <section><h2><code>{{.RunID}}</code> <span class="status-pill">{{.RunBy}}</span></h2>
-<p>OSCAR build <code>{{.TargetBuild}}</code></p>
+<p>OSCAR build <code>{{.TargetBuild}}</code>{{if .RegressionFailed}} · latency regression limit exceeded{{end}}</p>
 <div class="data-table-wrapper"><table><caption>Headlines against reference median</caption><thead><tr><th>Headline</th><th>Value</th><th>Reference</th><th>Worse by</th><th>Result</th></tr></thead><tbody>
-{{range .Deltas}}<tr><td>{{.Name}}</td><td>{{.Value}}</td><td>{{.Ref}}</td><td>{{printf "%.1f" .WorsePct}}%</td><td>{{if .Regressed}}worse{{else if lt .WorsePct 0.0}}better{{else}}ok{{end}}</td></tr>{{end}}
+{{range .Deltas}}<tr><td>{{.Name}}</td><td>{{.Value}}</td><td>{{.Ref}}</td><td>{{if .Undefined}}unavailable{{else}}{{printf "%.1f" .WorsePct}}%{{end}}</td><td>{{if .Undefined}}no positive reference{{else if .Regressed}}worse{{else if lt .WorsePct 0.0}}better{{else}}ok{{end}}</td></tr>{{end}}
 </tbody></table></div></section>
 {{end}}{{end}}{{end}}
 {{end}}

@@ -245,6 +245,7 @@ func (r *run) withRevision(ctx context.Context, nid, action string, op func(rev 
 // startLane starts the remote baseline lane at T0.
 func (r *run) startLane(ctx context.Context) error {
 	stable := context.WithoutCancel(ctx)
+	r.monoStart = time.Now()
 	r.t0 = r.now()
 	r.lastHeartbeat = r.t0
 	r.event(stable, "campaign.t0", "info", "campaign T0", map[string]time.Time{"T0": r.t0})

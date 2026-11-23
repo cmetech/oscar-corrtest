@@ -50,8 +50,13 @@ func (m *managedLane) sustained(ctx context.Context, p *policyState, span time.D
 		// Leave a bounded readback interval before the next source starts. The
 		// remaining tail is explicitly reported for D3's final closure accounting.
 		var timing dispatchSamples
+		timing.ValidUntil, _ = time.Parse(time.RFC3339Nano, f.Source.RefreshDeadline)
 		cut := until.Add(-8 * time.Second)
 		for r.now().Before(cut) {
+			if err := m.validity(ctx, f, &timing, until); err != nil {
+				r.noteMissing(fmt.Sprintf("segment lifetime %s/%d: %v", scope, i, err))
+				break
+			}
 			sample, er := m.config.RootSamples(ctx, f.History.ID)
 			if er != nil {
 				r.noteMissing("sustained dispatch observation unavailable")
@@ -65,6 +70,16 @@ func (m *managedLane) sustained(ctx context.Context, p *policyState, span time.D
 			if !r.e.clock.SleepUntil(ctx, next) {
 				return
 			}
+		}
+		rows, err := m.rows(ctx, aid)
+		sameCount := false
+		for _, row := range rows {
+			if row.ID == f.History.ID && row.Status != "resolved" && row.EpisodeNumber == f.History.EpisodeNumber && row.OccurrenceCount == f.History.OccurrenceCount {
+				sameCount = true
+			}
+		}
+		if err != nil || !sameCount {
+			r.noteMissing(fmt.Sprintf("segment %s/%d original source count changed or unavailable", scope, i))
 		}
 		snap, err := m.config.Snapshot(ctx, f.History.ID)
 		if err != nil {
@@ -90,7 +105,7 @@ func (m *managedLane) sustained(ctx context.Context, p *policyState, span time.D
 		}
 		timing.add(snap)
 
-		err = segmentEvidence(p, f, snap, owned, timing)
+		err = segmentEvidence(p, f, snap, owned, timing, snap.MeasuredAt)
 		reason := ""
 		if err != nil {
 			reason = err.Error()
@@ -99,10 +114,20 @@ func (m *managedLane) sustained(ctx context.Context, p *policyState, span time.D
 		if err = m.save(ctx, "native.managed.segment", map[string]any{"index": i, "lane": scope, "start": at, "end": until, "expectedPolicy": p.id, "interval": p.spec.Interval, "escalation": p.spec.Escalation, "fixture": f, "snapshot": snap, "dispatch": timing, "receipts": owned, "reason": reason}); err != nil {
 			r.noteMissing(err.Error())
 		}
+		m.tails.Add(1)
+		go func() {
+			defer m.tails.Done()
+			tail, stop := context.WithDeadline(context.WithoutCancel(ctx), until.Add(90*time.Second))
+			defer stop()
+			if err := m.segmentTail(tail, p, f, aid, i, scope, at, until, timing); err != nil {
+				r.noteMissing(fmt.Sprintf("segment tail %s/%d: %v", scope, i, err))
+			}
+		}()
+
 	}
 	// clearOwned sends the final run-owned clear in the drain, even on stop.
 }
-func segmentEvidence(p *policyState, f NativeEpisodeFixture, s managed.Snapshot, receipts []targetops.Receipt, timing dispatchSamples) error {
+func segmentEvidence(p *policyState, f NativeEpisodeFixture, s managed.Snapshot, receipts []targetops.Receipt, timing dispatchSamples, activeThrough time.Time) error {
 	b, err := ownedBinding(p, s.Bindings)
 	if err != nil {
 		return err
@@ -151,7 +176,7 @@ func segmentEvidence(p *policyState, f NativeEpisodeFixture, s managed.Snapshot,
 		}
 	}
 	due, _, _ := clock.next(p)
-	if s.MeasuredAt.After(due.Add(30 * time.Second)) {
+	if activeThrough.After(due.Add(30 * time.Second)) {
 		return errors.New("sustained policy has an overdue unobserved action")
 	}
 	if low < 1 || p.spec.Escalation != nil && (esc != 1 || higher < 1) {
@@ -165,4 +190,36 @@ func segmentEvidence(p *policyState, f NativeEpisodeFixture, s managed.Snapshot,
 		return errors.New("controlled sink reconciliation incomplete")
 	}
 	return nil
+}
+
+// Check each observed expiry before trusting the next refresh. A later healthy
+// member cannot fill an expired interval or substitute another generation.
+func (m *managedLane) validity(ctx context.Context, f NativeEpisodeFixture, t *dispatchSamples, until time.Time) error {
+	now := m.run.now()
+	if !t.ValidUntil.After(now) {
+		return errors.New("sentinel source validity expired before refresh observation")
+	}
+	if t.ValidUntil.After(until) || t.ValidUntil.Sub(now) > 15*time.Second {
+		return nil
+	}
+	reader, ok := m.run.e.d.nativeSender.(nativeReader)
+	if !ok {
+		return errors.New("native lifetime reader unavailable")
+	}
+	live, err := reader.Members(ctx, map[string]string{"aid": f.History.Labels["aid"], "source_id": f.Source.SourceID, "node": f.Source.TID})
+	if err != nil {
+		return err
+	}
+	now = m.run.now()
+	if !t.ValidUntil.After(now) {
+		return errors.New("unobserved sentinel source lifetime interval")
+	}
+	for _, v := range live {
+		if (observedMember(v, f.Source, "major", now) || observedMember(v, f.Source, "critical", now)) && len(v.Receivers) == 1 && v.Receivers[0].Name == f.Source.Receiver {
+			t.ValidUntil = v.EndsAt
+			t.ValiditySamples++
+			return nil
+		}
+	}
+	return errors.New("sentinel original source unavailable")
 }

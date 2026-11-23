@@ -10,10 +10,12 @@ import (
 
 type dispatchWindow struct{ Before, By time.Time }
 type dispatchSamples struct {
-	Previous time.Time
-	Windows  map[string]dispatchWindow
-	Queries  int
-	Elapsed  time.Duration
+	Previous        time.Time
+	Windows         map[string]dispatchWindow
+	ValidUntil      time.Time
+	ValiditySamples int
+	Queries         int
+	Elapsed         time.Duration
 }
 
 func (d *dispatchSamples) add(s managed.Snapshot) {

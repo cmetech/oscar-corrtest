@@ -68,15 +68,11 @@ func TestStartCampaignWithoutEngine(t *testing.T) {
 	}
 }
 
-func TestNativeCampaignSelectorsRefuseBeforeStarting(t *testing.T) {
-	for _, scenario := range []campaignscenario.Scenario{campaignscenario.AlertingDayControlV1(),
-		campaignscenario.AlertingDayV3(), campaignscenario.AlertingDaySmokeV3(), campaignscenario.ManagedAlertsSmokeV1()} {
-		r := &Runtime{} // refusal precedes database access and engine dispatch
-		for _, precheck := range []bool{true, false} {
-			if _, err := r.StartCampaign(context.Background(), CampaignOptions{Scenario: scenario, PrecheckOnly: precheck}); !errors.Is(err, ErrNativeCampaignPending) {
-				t.Fatalf("%s@%s precheck=%t: %v", scenario.ID, scenario.Version, precheck, err)
-			}
-		}
+func TestNativeCampaignPrecheckRejectsEditedWorkload(t *testing.T) {
+	s := campaignscenario.AlertingDayV3()
+	s.LoadEnd = time.Minute
+	if _, err := (&Runtime{}).StartCampaign(context.Background(), CampaignOptions{Scenario: s, PrecheckOnly: true}); !errors.Is(err, ErrCampaignWorkload) {
+		t.Fatal(err)
 	}
 }
 

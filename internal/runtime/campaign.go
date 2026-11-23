@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/campaign/lane"
 	campaignscenario "github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/evidence"
@@ -26,8 +27,7 @@ var ErrCampaignNotActive = errors.New("campaign is not active in this process")
 // ErrCampaignNotFound is returned by CampaignStatus for an unknown id.
 var ErrCampaignNotFound = errors.New("campaign not found")
 
-// ErrNativeCampaignPending protects the native plans until their source and evidence lanes are wired.
-var ErrNativeCampaignPending = errors.New("this campaign is awaiting native source and evidence support")
+var ErrCampaignWorkload = errors.New("invalid effective native workload")
 
 var ErrCampaignProvenance = errors.New("invalid campaign provenance")
 
@@ -56,6 +56,7 @@ type CampaignOptions struct {
 type CampaignView struct {
 	Campaign domain.Campaign                 `json:"campaign"`
 	Events   []domain.CampaignEvent          `json:"events"`
+	Scenario *campaignscenario.Scenario      `json:"scenario,omitempty"`
 	Options  *domain.CampaignRecordedOptions `json:"options,omitempty"`
 }
 
@@ -92,8 +93,8 @@ func (r *Runtime) releaseCampaign() {
 
 // StartCampaign persists a PRECHECK campaign and runs the engine in the background.
 func (r *Runtime) StartCampaign(ctx context.Context, o CampaignOptions) (domain.Campaign, error) {
-	if o.Scenario.NativeWorkload != nil {
-		return domain.Campaign{}, ErrNativeCampaignPending
+	if o.Scenario.NativeWorkload != nil && !lane.RegisteredWorkload(o.Scenario, o.Scenario.Hash()) {
+		return domain.Campaign{}, ErrCampaignWorkload
 	}
 	if err := validateCampaignProvenance(&o); err != nil {
 		return domain.Campaign{}, err
@@ -219,6 +220,17 @@ func (r *Runtime) CampaignStatus(ctx context.Context, id string) (CampaignView, 
 		if err := json.Unmarshal(options.Detail, &view.Options); err != nil {
 			return CampaignView{}, fmt.Errorf("read campaign options: %w", err)
 		}
+	}
+	ev, ok, err := r.database.FirstCampaignEvent(ctx, id, "campaign.scenario")
+	if err != nil {
+		return CampaignView{}, err
+	}
+	if ok {
+		var stored campaignscenario.Scenario
+		if err = json.Unmarshal(ev.Detail, &stored); err != nil {
+			return CampaignView{}, err
+		}
+		view.Scenario = &stored
 	}
 	return view, nil
 }

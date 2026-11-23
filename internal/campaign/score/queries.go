@@ -26,3 +26,11 @@ var Queries = map[string]string{
 	"mysql_max_conn_errors": `mysql_global_status_connection_errors_total{error="max_connections"}`,
 	"redis_rejected_cmds":   `sum(redis_commands_rejected_calls_total)`,
 }
+
+// The native qualification reads these separately from the frozen q1/q2 sets.
+var NativeResourceQueries = map[string]string{
+	"cpu": Queries["container_cpu"], "working_set": Queries["container_workingset"],
+	"db_data_bytes":    "sum(mysql_info_schema_table_size{component=~\"data_length|index_length\"})",
+	"db_written_bytes": "sum(mysql_global_status_innodb_data_written)",
+	"broker_pending":   "sum(nats_core_jetstream_api_pending)", "broker_filestore": "sum(nats_core_jetstream_filestore_used_bytes)",
+}

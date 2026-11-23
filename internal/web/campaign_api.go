@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/campaign/lane"
 	campaignscenario "github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/score"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/workerapi"
@@ -81,6 +82,7 @@ func registerCampaignRoutes(mux *http.ServeMux, data DataSource, workerMode bool
 		start := func(precheckOnly bool) func(http.ResponseWriter, *http.Request, string) {
 			return func(w http.ResponseWriter, r *http.Request, identity string) {
 				var body struct {
+					ManagedShare *float64                   `json:"managedShare,omitempty"`
 					Scenario     string                     `json:"scenario"`
 					Acknowledged []string                   `json:"acknowledged"`
 					RunBy        string                     `json:"runBy"`
@@ -92,6 +94,11 @@ func registerCampaignRoutes(mux *http.ServeMux, data DataSource, workerMode bool
 				s, ok := campaignscenario.Lookup(body.Scenario)
 				if !ok {
 					apiError(w, http.StatusBadRequest, "unknown_scenario", "scenario must be a registered id@version selector")
+					return
+				}
+				s, err := lane.ConfigureShare(s, body.ManagedShare)
+				if err != nil {
+					apiError(w, http.StatusBadRequest, "invalid_share", err.Error())
 					return
 				}
 				if body.RunBy == "" {
@@ -111,8 +118,8 @@ func registerCampaignRoutes(mux *http.ServeMux, data DataSource, workerMode bool
 					apiError(w, http.StatusConflict, "campaign_active", err.Error())
 					return
 				}
-				if errors.Is(err, appruntime.ErrNativeCampaignPending) {
-					apiError(w, http.StatusConflict, "scenario_pending", err.Error())
+				if errors.Is(err, appruntime.ErrCampaignWorkload) {
+					apiError(w, http.StatusBadRequest, "invalid_workload", err.Error())
 					return
 				}
 				if errors.Is(err, appruntime.ErrCampaignProvenance) {

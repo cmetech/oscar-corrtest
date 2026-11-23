@@ -148,6 +148,7 @@ type Deps struct {
 	FrontOfficeURL   string
 	FrontOfficeHTTP  *http.Client
 	FrontOfficeUsers []frontoffice.User
+	ObserverDir      string
 	ReportDir        string // ledger files; default os.TempDir()
 	// ExportRun writes a correlation run's standard bundle (Runtime.ExportRun).
 	ExportRun func(ctx context.Context, runID, destination string) (evidence.Result, error)
@@ -173,13 +174,15 @@ func New(d Deps, clock lane.Clock) *Engine {
 
 // run is the state of one campaign execution.
 type run struct {
-	managed *managedLane
-	e       *Engine
-	id      string
-	s       scenario.Scenario
-	opts    runtime.CampaignOptions
-	t0      time.Time
-	laneID  string
+	monoStart    time.Time
+	sourceTotals map[string]sourceOffers
+	managed      *managedLane
+	e            *Engine
+	id           string
+	s            scenario.Scenario
+	opts         runtime.CampaignOptions
+	t0           time.Time
+	laneID       string
 
 	comparable bool
 	sinkID     string
@@ -265,7 +268,9 @@ func (e *Engine) Run(ctx context.Context, id string, o runtime.CampaignOptions) 
 	stable := context.WithoutCancel(ctx)
 	r := &run{e: e, id: id, s: o.Scenario, opts: o, laneID: id + "-baseline", cohorts: map[string]*cohortMember{}, fo: map[string][]score.FOSample{}}
 	sc, _ := json.Marshal(o.Scenario)
-	_ = e.d.Store.AppendCampaignEvent(stable, id, scenarioEvent, "info", "campaign scenario recorded", sc, r.now())
+	if err := e.d.Store.AppendCampaignEvent(stable, id, scenarioEvent, "info", "campaign scenario recorded", sc, r.now()); err != nil {
+		return err
+	}
 
 	results := e.d.Precheck(context.WithValue(ctx, campaignIDKey{}, id), o.Scenario)
 	ok, comparable, reason := precheck.Startable(results, o.Acknowledged)
@@ -406,6 +411,7 @@ func (r *run) execute(ctx context.Context) error {
 		if err = r.prepareManaged(ctx); err != nil {
 			return r.abort(ctx, err.Error())
 		}
+		r.monoStart = time.Now()
 		r.t0 = r.now()
 		if err = r.store().AppendCampaignEvent(ctx, r.id, "campaign.t0", "info", "managed lifecycle started", mustJSON(map[string]time.Time{"T0": r.t0}), r.t0); err != nil {
 			return r.abort(ctx, err.Error())

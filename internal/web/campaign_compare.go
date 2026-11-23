@@ -56,6 +56,9 @@ func compareCampaigns(ctx context.Context, ctl campaignController, req campaignC
 				Comparable: c.Comparable, Custom: c.Custom, FullLoadCompleted: report.FullLoadCompleted,
 				StartedAt: c.StartedAt, EndedAt: c.EndedAt, Scorecard: card,
 			}
+			if view.Scenario != nil {
+				run.Scenario = *view.Scenario
+			}
 			if view.Options != nil {
 				run.Acknowledged, run.PrecheckOnly = view.Options.Acknowledged, view.Options.PrecheckOnly
 				if view.Options.Provenance != nil {

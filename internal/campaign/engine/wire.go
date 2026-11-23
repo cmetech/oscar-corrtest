@@ -107,7 +107,7 @@ func NewFromConfig(ctx context.Context, cfg campaign.Config, host Host) (*Engine
 	if err := os.MkdirAll(reportDir, 0o700); err != nil {
 		return nil, fmt.Errorf("campaign report directory: %w", err)
 	}
-	d := Deps{ReportDir: reportDir, Store: db, Worker: wc, Target: oscarTarget{oc}, SNOW: snow, Sink: sink, Metrics: metrics, Probe: probe,
+	d := Deps{ObserverDir: cfg.NativeObserverDir, ReportDir: reportDir, Store: db, Worker: wc, Target: oscarTarget{oc}, SNOW: snow, Sink: sink, Metrics: metrics, Probe: probe,
 		Correlate: host.ExecuteScenarioForCampaign, ExportRun: host.ExportRun, TargetID: target.ID, IngestURL: root, CampaignNotifier: notifier,
 		FrontOfficeURL: root, FrontOfficeHTTP: targetHTTP, FrontOfficeUsers: users, Fingerprint: targetops.FingerprintPolicies{C: oc}}
 	d.nativeSender, err = lane.NewAlertmanagerSender(root+ingestPath, target.TLS.CAPath, 10*time.Second)

@@ -32,7 +32,7 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 	report := map[string]any{"campaign": r.id, "t0": r.t0, "end": end, "laneId": r.laneID}
 	if r.t0.IsZero() || len(r.s.Phases) == 0 { // never reached traffic, or scenario unknown
 		card := score.Scorecard{ScenarioHash: r.s.Hash(), Trigger: r.opts.Trigger, RunBy: r.opts.RunBy, CleanupClean: clean,
-			Verdict: forced, Reasons: []string{why}}
+			EvidenceIncomplete: true, Verdict: forced, Reasons: []string{why}}
 		if card.Verdict == "" {
 			card.Verdict = domain.VerdictInconclusive
 		}
@@ -40,18 +40,16 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 		return card, mustJSON(report)
 	}
 	if r.managedOnly() {
-		ev, ok, err := r.store().FirstCampaignEvent(ctx, r.id, "native.managed.functional")
-		card := score.Scorecard{ScenarioHash: r.s.Hash(), Trigger: r.opts.Trigger, RunBy: r.opts.RunBy, CleanupClean: clean, Verdict: domain.VerdictInconclusive}
-		card.Reasons = append(card.Reasons, r.missing...)
-		if err != nil || !ok {
-			card.Reasons = append(card.Reasons, "managed functional evidence incomplete")
-		} else {
-			report["managedLifecycle"] = ev.Detail
+		card := score.Scorecard{ScenarioHash: r.s.Hash(), Trigger: r.opts.Trigger, RunBy: r.opts.RunBy, CleanupClean: clean, Verdict: domain.VerdictPass}
+		r.nativeScore(ctx, &card, score.Inputs{}, end, report)
+		judge(&card, nil, r.missing)
+		if !clean {
+			judge(&card, nil, []string{"managed cleanup not CLEAN"})
 		}
-		// D3 also gates full physical provider reconciliation, exact cleanup and drain.
-		card.EvidenceIncomplete = true
-		card.Reasons = append(card.Reasons, "managed reconciliation gate pending")
+		report["fullLoadCompleted"] = false
+
 		if forced != "" {
+			card.EvidenceIncomplete = true
 			card.Verdict = forced
 			card.Reasons = append(card.Reasons, why)
 		}
@@ -86,6 +84,8 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 	}
 	if snap, err := r.e.d.Metrics.Snapshot(ctx, score.Queries, r.t0, end, metricStep); err == nil {
 		report["metrics"] = snap
+	} else if r.s.NativeWorkload != nil {
+		r.noteMissing("metrics snapshot: " + err.Error())
 	}
 	in.Tickets, in.PlannedTickets = r.ticketInputs(ledger, in.History, incidents)
 	if resendIncon == "" {
@@ -115,21 +115,32 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 		fails, incon := score.JudgeFingerprint(fp, f.Repeats)
 		judge(&card, fails, incon)
 	}
+	if r.s.NativeWorkload != nil {
+		r.nativeScore(ctx, &card, in, end, report)
+	}
 	r.mu.Lock()
 	missing, stopped, open, corrT, normalEnd := append([]string{}, r.missing...), r.stopped, r.openIncidents, r.corrTickets, r.normalEnd
 	r.mu.Unlock()
 	report["correlationTickets"] = corrT
 	if len(open) > 0 {
+		card.EvidenceIncomplete = true
 		card.Reasons = append(card.Reasons, "incidents still open: "+strings.Join(open, ","))
 		if card.Verdict == domain.VerdictPass {
 			card.Verdict = domain.VerdictInconclusive
 		}
 	}
-	for _, m := range missing { // no PASS on missing evidence
+	for _, m := range missing {
+		card.EvidenceIncomplete = true // no PASS on missing evidence
 		card.Reasons = append(card.Reasons, "missing evidence: "+m)
 		if card.Verdict == domain.VerdictPass {
 			card.Verdict = domain.VerdictInconclusive
 		}
+	}
+	if stopped || lost || forced != "" || resendIncon != "" || !normalEnd {
+		card.EvidenceIncomplete = true
+	}
+	if resendIncon != "" {
+		judge(&card, nil, []string{resendIncon})
 	}
 	switch {
 	case forced != "":
@@ -140,8 +151,6 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 		card.Verdict, card.Reasons = domain.VerdictFail, append([]string{"guard:" + trip}, card.Reasons...)
 	case stopped:
 		card.Verdict, card.Reasons = domain.VerdictInconclusive, append([]string{"stopped: operator stop"}, card.Reasons...)
-	case resendIncon != "" && card.Verdict == domain.VerdictPass:
-		card.Verdict, card.Reasons = domain.VerdictInconclusive, []string{resendIncon}
 	}
 	report["fullLoadCompleted"] = normalEnd && !stopped && trip == "" && !lost && forced == "" && resendIncon == "" &&
 		len(missing) == 0 && len(in.NotRun) == 0 && len(open) == 0 &&
@@ -152,6 +161,9 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 
 // judge applies a facet's verdict: any failure FAILs, missing evidence keeps a PASS from passing.
 func judge(card *score.Scorecard, fails, incon []string) {
+	if len(incon) > 0 {
+		card.EvidenceIncomplete = true
+	}
 	if len(fails) > 0 {
 		card.Verdict = domain.VerdictFail
 	} else if len(incon) > 0 && card.Verdict == domain.VerdictPass {
@@ -253,9 +265,10 @@ func readLedger(path string) ([]domain.LaneRow, error) {
 	sc.Buffer(make([]byte, 64<<10), 1<<20)
 	for sc.Scan() {
 		var row domain.LaneRow
-		if json.Unmarshal(sc.Bytes(), &row) == nil {
-			rows = append(rows, row)
+		if err := json.Unmarshal(sc.Bytes(), &row); err != nil {
+			return rows, fmt.Errorf("ledger row %d: %w", len(rows)+1, err)
 		}
+		rows = append(rows, row)
 	}
 	return rows, sc.Err()
 }
