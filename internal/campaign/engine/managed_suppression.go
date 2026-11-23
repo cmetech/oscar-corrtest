@@ -296,7 +296,7 @@ func (m *managedLane) suppression(ctx context.Context) error {
 				if er != nil || at.Before(end) || e.Notifier != m.policy.notifierID || e.Action != "notification" {
 					continue
 				}
-				if e.BindingID != binding.ID || e.Revision != binding.Revision || e.Receiver != f.Source.Receiver || e.ScopeNotifier != m.policy.notifierID {
+				if e.BindingID != binding.ID || e.Revision != binding.Revision || e.Receiver != f.Source.Receiver || !routedScope(e, m.policy.notifierID, m.policy.spec.Action) {
 					return false, errors.New("released target binding mismatch")
 				}
 				effects = append(effects, e)

@@ -22,6 +22,28 @@ func (t *nativeTally) functional(ev domain.CampaignEvent) bool {
 	case "native.tl1.closed":
 		var d struct{ Verified bool }
 		return json.Unmarshal(ev.Detail, &d) == nil && d.Verified
+	case "native.cross_route.confirmed":
+		var d struct {
+			Source           NativeEpisodeFixture
+			CriticalReceiver string
+			SourceWrites     []managed.SourceReceipt
+			Binding          managed.Binding
+			Effect           managed.Effect
+			Dispatches       []managed.Dispatch
+			Captured         []targetops.Receipt
+		}
+		if json.Unmarshal(ev.Detail, &d) != nil || d.Source.History.Labels["aid"] != managed.AID(r.id, "CROSS", 0) ||
+			d.CriticalReceiver == "" || d.CriticalReceiver == d.Source.Source.Receiver || d.Effect.Receiver != d.CriticalReceiver ||
+			d.Effect.Kind != "escalate" || d.Effect.SourceWrite == "" || !routedScope(d.Effect, "", "") || d.Effect.BindingID != d.Binding.ID ||
+			d.Effect.Revision != d.Binding.Revision || d.Effect.Severity != "critical" || d.Effect.Child == "" || len(d.Captured) == 0 {
+			return false
+		}
+		hit, err := crossRouteEffect(d.Source, managed.Snapshot{Source: d.SourceWrites, Effects: []managed.Effect{d.Effect}, Dispatches: d.Dispatches}, d.Binding, d.CriticalReceiver, d.Effect.Notifier)
+		if err != nil || hit.Child == "" {
+			return false
+		}
+		t.receipts(d.Captured, d.Source.History.Labels["aid"])
+		return true
 	case "native.managed.functional":
 		var d struct{ Completed bool }
 		return json.Unmarshal(ev.Detail, &d) == nil && d.Completed

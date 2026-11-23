@@ -74,9 +74,16 @@ func (c slotClock) next(p *policyState) (time.Time, string, string) {
 	}
 	return due, "resend", sev
 }
+func routedScope(e managed.Effect, notifier, action string) bool {
+	if e.Kind == "escalate" {
+		return e.CommandScopeSize != nil && *e.CommandScopeSize == 0 && e.ScopeSize != nil && *e.ScopeSize == 0
+	}
+	return e.ScopeNotifier == notifier && e.ScopeAction == action
+}
+
 func (c *slotClock) accept(p *policyState, b managed.Binding, e managed.Effect, d dispatchWindow) error {
 	due, kind, sev := c.next(p)
-	if e.ScheduleRoot == "" || e.ScheduleRoot != e.Logical || e.Target == "" || c.receiver == "" || e.Receiver != c.receiver || e.ScopeNotifier != p.notifierID || e.ScopeAction != p.spec.Action || e.Callback == "" || e.Operation == "" || e.ChildState != "sent" || e.Child == "" || e.TargetState != "confirmed" || e.Action != p.spec.Action || e.Notifier != p.notifierID || e.BindingID != b.ID || e.Revision != b.Revision || e.Kind != kind || e.Severity != sev {
+	if e.ScheduleRoot == "" || e.ScheduleRoot != e.Logical || e.Target == "" || c.receiver == "" || e.Receiver != c.receiver || !routedScope(e, p.notifierID, p.spec.Action) || e.Callback == "" || e.Operation == "" || e.ChildState != "sent" || e.Child == "" || e.TargetState != "confirmed" || e.Action != p.spec.Action || e.Notifier != p.notifierID || e.BindingID != b.ID || e.Revision != b.Revision || e.Kind != kind || e.Severity != sev {
 		return errors.New("scheduled effect differs from expected kind, severity, target or immutable binding")
 	}
 	if d.Before.IsZero() || d.Before.Before(due) || d.By.Before(d.Before) {

@@ -31,7 +31,8 @@ type Config struct {
 	MySQLDefaultsFile string
 	SessionCookieFile string
 	// Exact values expected at the test ticket provider for this site's handler.
-	TicketPriority string
+	TicketPriority     string
+	CrossRouteReceiver string
 }
 
 var token = regexp.MustCompile("^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$")
@@ -68,6 +69,9 @@ func (c Config) Validate() error {
 	}
 	if _, err := c.Cookie(); err != nil {
 		return err
+	}
+	if c.CrossRouteReceiver != "" && !token.MatchString(c.CrossRouteReceiver) {
+		return errors.New("cross-route qualification requires a valid Critical receiver name")
 	}
 	if !token.MatchString(c.TicketPriority) {
 		return errors.New("expected mapped test ticket priority required")

@@ -263,6 +263,9 @@ func (t *nativeTally) finish() {
 	if t.Facets["native.drain.idle"] != 1 {
 		t.miss("no final queue drain observation")
 	}
+	if r.managedOnly() && t.Facets["native.cross_route.requested"] > 0 && t.Facets["native.cross_route.confirmed"] != 1 {
+		t.miss("commissioned Major-A/Critical-B physical evidence")
+	}
 	if w.ManagedTL1 {
 		if t.initial.History.ID == "" || t.changed.History.ID == "" || t.fresh.History.ID == "" {
 			t.miss("managed original/variant/refire proof")

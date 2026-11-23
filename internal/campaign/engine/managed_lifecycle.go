@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
+	"time"
+
 	"github.com/cmetech/oscar-corrtest/internal/campaign/managed"
 	"github.com/google/uuid"
 )
@@ -13,8 +16,35 @@ import (
 // The source may refresh its native validity while no ordinary callback occurs.
 // Only a new signed ordinary callback invalidates the quiet timer interval.
 func (m *managedLane) exercise(ctx context.Context) error {
+	var cross NativeEpisodeFixture
+	if m.run.managedOnly() {
+		if m.config.CrossRouteReceiver != "" {
+			aid := managed.AID(m.run.id, "CROSS", 0)
+			if err := m.save(ctx, "native.cross_route.requested", map[string]string{"aid": aid, "criticalReceiver": m.config.CrossRouteReceiver}); err != nil {
+				return err
+			}
+			if err := m.emit(ctx, aid, m.condition("POL"), "MJ"); err != nil {
+				return err
+			}
+			var err error
+			cross, err = m.observe(ctx, aid, "major", "")
+			if err != nil {
+				return err
+			}
+			if cross.Source.Receiver == m.config.CrossRouteReceiver {
+				return errors.New("cross-route fixture requires distinct Major and Critical receivers")
+			}
+		} else if err := m.save(ctx, "native.cross_route.uncommissioned", map[string]string{"case": "Major-A/Critical-B"}); err != nil {
+			return err
+		}
+	}
 	if err := exerciseManagedSubjects(ctx, m); err != nil {
 		return err
+	}
+	if cross.History.ID != "" {
+		if err := m.checkCrossRoute(ctx, cross); err != nil {
+			return err
+		}
 	}
 	var err error
 	if !m.run.managedOnly() && m.run.s.ID == "alerting-day" {
@@ -26,6 +56,92 @@ func (m *managedLane) exercise(ctx context.Context) error {
 		}
 	}
 	return m.save(ctx, "native.managed.functional", map[string]bool{"completed": true})
+}
+
+// The extra source shares the existing smoke window and controlled provider.
+func (m *managedLane) checkCrossRoute(ctx context.Context, f NativeEpisodeFixture) error {
+	aid := f.History.Labels["aid"]
+	active, err := time.Parse(time.RFC3339Nano, f.Source.ActiveSince)
+	if err != nil {
+		return err
+	}
+	wait, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	err = poll(wait, func() (bool, error) {
+		snap, err := m.config.Snapshot(wait, f.History.ID)
+		if err != nil {
+			return false, err
+		}
+		if err = m.holdUnknown(wait, f, snap); err != nil {
+			return false, err
+		}
+		binding, err := ownedBinding(m.policy, snap.Bindings)
+		if err != nil {
+			return false, err
+		}
+		effect, err := crossRouteEffect(f, snap, binding, m.config.CrossRouteReceiver, m.run.sinkID)
+		if err != nil || effect.Child == "" {
+			return false, err
+		}
+		receipts, err := m.sink.ManagedReceipts(wait, aid, active)
+		if err != nil {
+			return false, err
+		}
+		ok, err := matchProvider(snap.Effects, receipts, m.run.sinkID, f.Source.Correlation,
+			func(e managed.Effect, r targetops.Receipt, a targetops.SinkAlert) bool {
+				return r.Notifier == m.run.e.d.CampaignNotifier && selectedMember(f, a)
+			})
+		if err != nil || !ok {
+			return false, err
+		}
+		return true, m.save(wait, "native.cross_route.confirmed", map[string]any{
+			"source": f, "criticalReceiver": m.config.CrossRouteReceiver, "binding": binding,
+			"effect": effect, "sourceWrites": snap.Source, "dispatches": snap.Dispatches, "captured": receipts,
+		})
+	})
+	if err != nil {
+		return err
+	}
+	return m.clear(ctx, aid, m.condition("POL"))
+}
+
+func crossRouteEffect(f NativeEpisodeFixture, s managed.Snapshot, binding managed.Binding, receiver, notifier string) (managed.Effect, error) {
+	var hit managed.Effect
+	root := ""
+	for _, e := range s.Effects {
+		if e.Kind != "escalate" {
+			continue
+		}
+		if e.Target == "" {
+			continue
+		} // Reserved, prior to native plan.
+		if receiver == "" || f.Source.Receiver == "" || f.Source.Receiver == receiver || e.Receiver != receiver ||
+			!routedScope(e, notifier, "notification") || e.BindingID != binding.ID || e.Revision != binding.Revision ||
+			e.Logical == "" || e.ScheduleRoot != e.Logical || root != "" && e.Logical != root {
+			return hit, errors.New("escalation differs from commissioned Critical-only route or original binding")
+		}
+		root = e.Logical
+		if e.Notifier != notifier || e.Action != "notification" || e.ConfirmedAt == "" {
+			continue
+		}
+		if hit.Child != "" || e.Child == "" || e.ChildState != "sent" || e.TargetState != "confirmed" ||
+			e.Callback == "" || e.Operation == "" || e.Variant != f.Source.Variant || e.Severity != "critical" {
+			return hit, errors.New("ambiguous cross-route physical notification")
+		}
+		for _, src := range s.Source {
+			if src.WriteID != "" && e.SourceWrite == src.WriteID && src.History == f.History.ID && src.Episode == f.Source.Episode &&
+				src.Authority == f.Source.Authority && src.Generation == f.Source.Generation && src.Variant == e.Variant &&
+				src.Receiver == f.Source.Receiver && src.SourceSeverity == "major" && src.Floor == "critical" {
+				hit = e
+			}
+		}
+	}
+	for _, d := range s.Dispatches {
+		if d.Root == root && d.Attempt == hit.Operation && d.Kind == "escalate" && (d.State == "confirmed" || d.State == "partial") {
+			return hit, nil
+		}
+	}
+	return managed.Effect{}, nil
 }
 
 // Each step consumes the verified original subject. Refire and bulk use the

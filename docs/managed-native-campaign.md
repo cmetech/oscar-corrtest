@@ -63,6 +63,18 @@ leaves the before/after baseline missing.
    Route each managed subject to exactly one commissioned canonical receiver,
    preserve individual AID/startsAt/correlation identity in sink payloads and
    retain native group/repeat intervals in the configuration digest.
+   For the additional Major-A/Critical-B case, set `ManagedTL1.CrossRouteReceiver` to the
+   alternate canonical receiver name in the CorrTest server configuration. Commission a dedicated
+   AID matcher `aid=~"CT-[0-9a-f]{24}-CROSS-000000"` on this test source. Route its Major
+   label to the normal receiver A and its effective Critical label exclusively to B. Both canonical
+   receivers must sign their own receiver identity and reach the controlled campaign sink.
+   Keep the other AIDs on their existing routes. The extra Major starts inside the dedicated
+   smoke window and shares its policy, TL1 peer, collector and cleanup. The case requires
+   one logical escalation, the Major History write, Critical-only B target, empty normal scopes,
+   a settled root, a confirmed child and matching sink capture. The run records
+   `native.cross_route.confirmed` only on that evidence. A standard smoke records
+   `native.cross_route.uncommissioned` when the alternate receiver is unset. It gives no
+   cross-route qualification. Mixed and sustained runs keep their original workloads.
 5. Route independent ordinary native v2 `campaign_lane=native-direct` offers
    to a dedicated directly captured receiver, and `native-canonical` to the
    canonical OSCAR receiver with CAMPAIGN_SINK delivery. Keep direct and
@@ -216,7 +228,7 @@ replacement tickets or restart the device replay to manufacture proof.
 ## Operator commands
 
 Run after all reviewed sources have merged and the target is patched.
-These commands and fixtures are UNRUN. Source review does not establish target qualification.
+With the alternate receiver commissioned above, the same `managed-alerts-smoke@v1` precheck and run commands select the additional case. Retain its separate evidence event. These commands and fixtures are UNRUN. Source review does not establish target qualification.
 For the complete sequence, observer input and evidence contract see OSCAR
 `docs/testing/native-alert-actions-qualification.md`. For either mixed V3 selector,
 pass `--managed-share 0.10` to reserve 10% of baseline plus mixed-rate PDUs

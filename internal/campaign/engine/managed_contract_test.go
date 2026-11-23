@@ -330,3 +330,28 @@ func TestLabelDrivenTicketRequiresOriginalWorkflowAndAudit(t *testing.T) {
 		}
 	}
 }
+
+func TestCrossRouteEscalationRequiresOriginalMajorWriteAndCriticalB(t *testing.T) {
+	zero := 0
+	f := NativeEpisodeFixture{History: observedHistory{ID: "h"}, Source: managed.SourceReceipt{Episode: "ep", Authority: "am", Generation: 1, Variant: 2, Receiver: "A"}}
+	b := managed.Binding{ID: "p", Revision: "p1", Notifier: "old-A", Action: "notification"}
+	e := managed.Effect{Kind: "escalate", Receiver: "B", ScopeSize: &zero, CommandScopeSize: &zero, Target: "target", TargetState: "confirmed", Operation: "op",
+		Callback: "callback", Child: "child", ConfirmedAt: "present", ChildState: "sent", SourceWrite: "write", Logical: "op", ScheduleRoot: "op", BindingID: "p", Revision: "p1", Severity: "critical", Variant: 2, Notifier: "controlled-B", Action: "notification"}
+	s := managed.Snapshot{Effects: []managed.Effect{e}, Dispatches: []managed.Dispatch{{Root: "op", Attempt: "op", State: "confirmed", Kind: "escalate"}},
+		Source: []managed.SourceReceipt{{History: "h", Receiver: "A", WriteID: "write", Episode: "ep", Authority: "am", Generation: 1, Variant: 2, SourceSeverity: "major", Floor: "critical"}}}
+	hit, err := crossRouteEffect(f, s, b, "B", "controlled-B")
+	if err != nil || hit.Child != "child" {
+		t.Fatal("Critical receiver/child unproved", err)
+	}
+	for _, alter := range []func(*managed.Effect){
+		func(e *managed.Effect) { e.Receiver = "A" }, func(e *managed.Effect) { e.SourceWrite = "other" },
+		func(e *managed.Effect) { one := 1; e.CommandScopeSize = &one }, func(e *managed.Effect) { e.ChildState = "unknown_requires_reconciliation" },
+	} {
+		s.Effects[0] = e
+		alter(&s.Effects[0])
+		hit, err = crossRouteEffect(f, s, b, "B", "controlled-B")
+		if err == nil && hit.Child != "" {
+			t.Fatal("invalid cross-route evidence accepted")
+		}
+	}
+}
