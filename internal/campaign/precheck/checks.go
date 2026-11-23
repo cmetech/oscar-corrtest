@@ -50,7 +50,8 @@ type probeData struct {
 	err error
 }
 
-// compareVersion compares PEP 440 release segments numerically; a local label (+main.<sha>) is ignored.
+// compareVersion compares PEP 440 release segments numerically; a local label (+main.<sha>) and a
+// pre-release suffix (26.4.6-rc1, 26.4.6b2) are ignored, so a candidate counts as a build of its release.
 func compareVersion(a, b string) (int, error) {
 	pa, err := parseRelease(a)
 	if err != nil {
@@ -78,9 +79,14 @@ func compareVersion(a, b string) (int, error) {
 	return 0, nil
 }
 
+var preRelease = regexp.MustCompile(`(?i)[-_.]?(?:a|b|c|rc|alpha|beta|pre|preview)[-_.]?[0-9]*$`)
+
 func parseRelease(v string) ([]int, error) {
 	rel, _, _ := strings.Cut(strings.TrimSpace(v), "+")
 	rel = strings.TrimPrefix(rel, "v")
+	if m := preRelease.FindStringSubmatchIndex(rel); m != nil {
+		rel = rel[:m[0]]
+	}
 	var out []int
 	for _, p := range strings.Split(rel, ".") {
 		n, err := strconv.Atoi(p)
