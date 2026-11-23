@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
-	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/managed"
 	"github.com/google/uuid"
