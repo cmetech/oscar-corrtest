@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Source `39fae89` removes a duplicate standard-library import from the managed escalation smoke. Build and behavioral qualification remain UNRUN.
+
 - Source `21796ca` checks normal routing scope for escalations and supports a commissioned
   Major-A/Critical-B case inside `managed-alerts-smoke@v1`. Set `ManagedTL1.CrossRouteReceiver`
   after installing both controlled routes. Standard smoke records the case as uncommissioned.
