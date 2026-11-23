@@ -13,8 +13,8 @@ import (
 const kindManagedOwner = "managed_provider_owner"
 
 type originalOwner struct {
-	Kind, History, Request, Operation, Target, Child, AID string
-	Episode                                               int
+	Kind, History, Request, Root, Operation, Target, Child, AID string
+	Episode                                                     int
 }
 
 func unknownEffect(e managed.Effect) bool {
@@ -27,7 +27,7 @@ func (m *managedLane) holdUnknown(ctx context.Context, f NativeEpisodeFixture, s
 			continue
 		}
 		unknown = true
-		o := originalOwner{Kind: "effect", History: f.History.ID, Operation: e.Operation, Target: e.Target, Child: e.Child}
+		o := originalOwner{Kind: "effect", History: f.History.ID, Episode: f.History.EpisodeNumber, Root: e.Logical, Operation: e.Operation, Target: e.Target, Child: e.Child}
 		key := o.Operation + "/" + o.Target + "/" + o.Child
 		if _, err := m.run.record(context.WithoutCancel(ctx), kindManagedOwner, key, o); err != nil {
 			return err
@@ -38,30 +38,30 @@ func (m *managedLane) holdUnknown(ctx context.Context, f NativeEpisodeFixture, s
 	}
 	return nil
 }
-func terminalEffect(o originalOwner, s managed.Snapshot) bool {
-	found := false
-	for _, e := range s.Effects {
-		if e.Operation != o.Operation || e.Target != o.Target || o.Child != "" && e.Child != o.Child {
-			continue
-		}
-		found = true
-		if unknownEffect(e) {
-			return false
-		}
-		if e.TargetState == "no_effect" && e.Callback == "" && e.Child == "" {
-			continue
-		}
-		if e.TargetState != "confirmed" || e.Callback == "" {
-			return false
-		}
-		if e.CallbackOutcome == "no_effect" && (e.Child == "" || e.ChildState == "suppressed" || e.ChildState == "failed") {
-			continue
-		}
-		if e.Child == "" || e.ConfirmedAt == "" || e.ChildState != "sent" || e.CallbackOutcome != "confirmed" {
-			return false
+func terminalEffect(o originalOwner, r managed.OriginalReceipt) bool {
+	root := o.Root
+	episode := o.Episode
+	// Older mutation entries have only the immutable History/operation pair.
+	// Recover their recorded root and episode through that exact operation.
+	for _, c := range r.Children {
+		if c.Operation == o.Operation && c.History == o.History && c.Target == o.Target {
+			if root == "" {
+				root = c.Root
+			}
+			if episode == 0 {
+				episode = c.Episode
+			}
 		}
 	}
-	return found
+	if _, ok := r.Settlement(o.History, episode, root); !ok {
+		return false
+	}
+	for _, c := range r.Children {
+		if c.Operation == o.Operation && c.Target == o.Target && (o.Child == "" || c.Child == o.Child) {
+			return true
+		}
+	}
+	return false
 }
 
 // Cleanup only reads original evidence. A request without an attributable
@@ -76,15 +76,24 @@ func (r *run) recoverOriginal(ctx context.Context, mut domain.CampaignMutation) 
 		return errors.New("original effect reader unavailable")
 	}
 	if o.Kind == "effect" {
-		s, err := deps.config.Snapshot(ctx, o.History)
+		if deps.originals == nil {
+			return errors.New("original child reader unavailable")
+		}
+		s, err := deps.originals.Original(ctx, o.History, o.Operation)
 		if err != nil {
 			return err
 		}
 		if terminalEffect(o, s) {
-			return nil
+			return (&managedLane{run: r}).save(ctx, "native.original.settled", map[string]any{"owner": o, "receipt": s})
 		}
 	}
 	if o.Kind == "manual_resend" {
+		if deps.actor == nil {
+			return errors.New("original signed resend status reader unavailable")
+		}
+		if deps.originals == nil {
+			return errors.New("original child reader unavailable")
+		}
 		op, err := deps.config.ResendOperation(ctx, o.History, o.Request)
 		if err != nil {
 			return err
@@ -93,8 +102,21 @@ func (r *run) recoverOriginal(ctx context.Context, mut domain.CampaignMutation) 
 		if err != nil {
 			return err
 		}
-		if status.RequestID == o.Request && terminalResend(status) {
-			return nil
+		receipt, err := deps.originals.Original(ctx, o.History, op)
+		if err != nil {
+			return err
+		}
+		episode := o.Episode
+		if episode == 0 {
+			for _, c := range receipt.Children {
+				if c.Operation == op && c.History == o.History {
+					episode = c.Episode
+					break
+				}
+			}
+		}
+		if _, ok := receipt.Resend(status, o.History, episode, o.Request, op); ok {
+			return (&managedLane{run: r}).save(ctx, "native.original.settled", map[string]any{"owner": o, "status": status, "receipt": receipt})
 		}
 	}
 	if o.Kind == "acknowledge" || o.Kind == "manual_ticket" {
@@ -144,17 +166,4 @@ func (r *run) closeOriginalTicket(ctx context.Context, aid, number string) error
 		return nil
 	}
 	return r.resolveIncident(ctx, number)
-}
-func terminalResend(r managed.CommandReceipt) bool {
-	if r.Operation == "" || r.Operation != r.ResendID || r.NativeState != "confirmed" || r.TargetCounts["confirmed"] < 1 || r.Counts["confirmed"] < 1 {
-		return false
-	}
-	for _, counts := range []map[string]int{r.TargetCounts, r.Counts} {
-		for state, n := range counts {
-			if n > 0 && state != "confirmed" && state != "no_effect" {
-				return false
-			}
-		}
-	}
-	return true
 }

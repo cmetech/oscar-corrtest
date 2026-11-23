@@ -9,10 +9,10 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
 )
 
-func (m *managedLane) waitActions(ctx context.Context, f NativeEpisodeFixture, manualID string) error {
+func (m *managedLane) waitActions(ctx context.Context, f NativeEpisodeFixture, manualID string) (string, error) {
 	active, err := time.Parse(time.RFC3339Nano, f.Source.ActiveSince)
 	if err != nil {
-		return errors.New("invalid native active age")
+		return "", errors.New("invalid native active age")
 	}
 	model := slotClock{receiver: f.Source.Receiver, active: active, source: f.Source.SourceSeverity}
 	// Policy clock is measured on the same target as native active age. Use zero
@@ -24,7 +24,8 @@ func (m *managedLane) waitActions(ctx context.Context, f NativeEpisodeFixture, m
 	seenSource := map[string]bool{}
 
 	var ordinary, higher, escalated bool
-	return poll(until, func() (bool, error) {
+	var manualChild string
+	err = poll(until, func() (bool, error) {
 		snap, err := m.config.Snapshot(until, f.History.ID)
 		if err != nil {
 			return false, err
@@ -99,14 +100,16 @@ func (m *managedLane) waitActions(ctx context.Context, f NativeEpisodeFixture, m
 				if alert.Labels["source_id"] != m.config.SourceID || alert.Labels["node"] != m.config.TID || alert.Labels["correlation_key"] != f.History.Labels["correlation_key"] || alert.Status != "firing" {
 					continue
 				}
+
 				if receipt.ID <= 0 {
 					return false, errors.New("provider receipt ID unavailable")
 				}
 
 				selected = append(selected, receipt)
+				break
 			}
 		}
-		ok, err := matchSink(snap.Effects, selected, m.policy.notifierID, f.History.Labels["correlation_key"])
+		ok, err := matchOriginalSink(snap.Effects, selected, m.policy.notifierID, f.History.Labels["correlation_key"], manual.Child, f)
 		if err != nil || !ok {
 			return false, err
 		}
@@ -157,8 +160,10 @@ func (m *managedLane) waitActions(ctx context.Context, f NativeEpisodeFixture, m
 		if err = m.save(until, "native.managed.effects", map[string]any{"history": f.History.ID, "source": snap.Source, "effects": snap.Effects, "sink": selected, "queryDuration": snap.QueryDuration}); err != nil {
 			return false, err
 		}
+		manualChild = manual.Child
 		return true, nil
 	})
+	return manualChild, err
 }
 
 // The acknowledgement is a local action. The next physical notification is

@@ -18,12 +18,15 @@ import (
 )
 
 type managedDeps struct {
-	setupErr error
-	config   managed.Config
-	actor    *managed.Actor
-	oscar    *oscar.Client
-	sink     *targetops.Sink
-	snow     *targetops.SNOW
+	setupErr  error
+	originals interface {
+		Original(context.Context, string, string) (managed.OriginalReceipt, error)
+	}
+	config managed.Config
+	actor  *managed.Actor
+	oscar  *oscar.Client
+	sink   *targetops.Sink
+	snow   *targetops.SNOW
 }
 
 func (d *managedDeps) precheck(ctx context.Context) precheck.Result {

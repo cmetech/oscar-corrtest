@@ -92,7 +92,15 @@ leaves the before/after baseline missing.
    so its original flow, associated History episode, operation and success
    audit can be joined. The adapter reads five fixed SELECT projections per
    full snapshot. Recovery and the manual ticket check use separate fixed
-   SELECT projections of the issued request and controlled History. The
+   SELECT projections of the issued request and controlled History. Manual/bulk
+   settlement reads the original logical operation and its physical successors
+   with MySQL 8+ `JSON_TABLE`. It projects up to 512 expected frozen callback
+   children with their original provider outcomes. A sent sink child and a
+   definitively suppressed ALERTHISTORY ticket can form a terminal partial
+   callback. The workload also matches the selected firing payload at the sink.
+   Missing children and uncertain provider outcomes retain the original request.
+   Cleanup needs the protected operator session to read signed resend status.
+   Other original receipt reads use the read-only DB account independently. The
    all-zero UUID precheck verifies access without selecting a live test alert.
    Receipt reads are controller measurement traffic. Record their elapsed
    durations and include the measurement load in the configuration manifest.

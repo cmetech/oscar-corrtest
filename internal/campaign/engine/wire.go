@@ -116,7 +116,7 @@ func NewFromConfig(ctx context.Context, cfg campaign.Config, host Host) (*Engine
 	}
 	if cfg.ManagedTL1 != nil {
 		actor, err := managed.NewActor(*cfg.ManagedTL1, root, targetHTTP)
-		d.managed = &managedDeps{setupErr: err, config: *cfg.ManagedTL1, actor: actor, oscar: oc, sink: sink, snow: snow}
+		d.managed = &managedDeps{setupErr: err, originals: *cfg.ManagedTL1, config: *cfg.ManagedTL1, actor: actor, oscar: oc, sink: sink, snow: snow}
 	}
 	d.TaskRuns = func(ctx context.Context, start, end time.Time) ([]targetops.TaskRun, error) {
 		return targetops.TaskRuns(ctx, oc, precheck.HomelabJobs, start, end)

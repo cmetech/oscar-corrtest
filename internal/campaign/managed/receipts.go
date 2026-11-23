@@ -109,7 +109,7 @@ func (c Config) RootSamples(ctx context.Context, id string) (Snapshot, error) {
 	s.DispatchRoots, s.Dispatches, err = decodeRoots(parts[1])
 	return s, err
 }
-func (c Config) read(ctx context.Context, id string, queries []string) (string, time.Duration, error) {
+func (c Config) read(ctx context.Context, id string, queries []string, operation ...string) (string, time.Duration, error) {
 
 	u, err := uuid.Parse(id)
 	if err != nil || u.String() != id {
@@ -121,11 +121,20 @@ func (c Config) read(ctx context.Context, id string, queries []string) (string, 
 	if _, err := privateFile(c.MySQLDefaultsFile); err != nil {
 		return "", 0, err
 	}
-	// PREPARE performs parameter binding; the single UUID variable is populated
-	// from hexadecimal UUID bytes. SQL text and identifiers are constants.
-	sql := "SET @owned=CONVERT(UNHEX('" + fmt.Sprintf("%x", []byte(u.String())) + "') USING ascii);\nSET TRANSACTION ISOLATION LEVEL REPEATABLE READ; START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY; SELECT DATE_FORMAT(UTC_TIMESTAMP(6),'%Y-%m-%dT%H:%i:%s.%fZ'); SELECT '---';\n"
+	// Only canonical UUIDs populate bound variables. SQL identifiers are fixed.
+	variables := "@owned"
+	sql := "SET @owned=CONVERT(UNHEX('" + fmt.Sprintf("%x", []byte(u.String())) + "') USING ascii);\n"
+	if len(operation) > 0 {
+		op, err := uuid.Parse(operation[0])
+		if len(operation) != 1 || err != nil || op.String() != operation[0] {
+			return "", 0, errors.New("invalid original operation ID")
+		}
+		variables += ",@operation"
+		sql += "SET @operation=CONVERT(UNHEX('" + fmt.Sprintf("%x", []byte(op.String())) + "') USING ascii);\n"
+	}
+	sql += "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ; START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY; SELECT DATE_FORMAT(UTC_TIMESTAMP(6),'%Y-%m-%dT%H:%i:%s.%fZ'); SELECT '---';\n"
 	for _, q := range queries {
-		sql += "PREPARE q FROM '" + strings.ReplaceAll(q, "'", "''") + "'; EXECUTE q USING @owned; DEALLOCATE PREPARE q; SELECT '---';\n"
+		sql += "PREPARE q FROM '" + strings.ReplaceAll(q, "'", "''") + "'; EXECUTE q USING " + variables + "; DEALLOCATE PREPARE q; SELECT '---';\n"
 	}
 	sql += "COMMIT;"
 	qctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -312,5 +321,8 @@ const actorSelect = `SELECT JSON_OBJECT('History',e.original_alert_id,'Episode',
 
 func (c Config) CheckAccess(ctx context.Context) error {
 	_, _, err := c.read(ctx, uuid.Nil.String(), []string{sourceSelect, effectSelect, dispatchSelect, bindingSelect, ticketSelect, actorSelect, resendSelect})
+	if err == nil {
+		_, err = c.Original(ctx, uuid.Nil.String(), uuid.Nil.String())
+	}
 	return err
 }

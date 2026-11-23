@@ -12,6 +12,10 @@ import (
 // Match physical provider entries one to one, including ordinary deliveries.
 // An extra receipt or overlapping candidate windows cannot be accepted as proof.
 func matchSink(effects []managed.Effect, receipts []targetops.Receipt, notifier, correlation string) (bool, error) {
+	return matchOriginalSink(effects, receipts, notifier, correlation, "", NativeEpisodeFixture{})
+}
+
+func matchOriginalSink(effects []managed.Effect, receipts []targetops.Receipt, notifier, correlation, originalChild string, selected NativeEpisodeFixture) (bool, error) {
 	claimed := map[int64]bool{}
 	children := map[string]bool{}
 	for _, effect := range effects {
@@ -40,6 +44,9 @@ func matchSink(effects []managed.Effect, receipts []targetops.Receipt, notifier,
 			}
 			for _, a := range receipt.Alerts {
 				if a.Status == "firing" && a.Labels["severity"] == effect.Severity && a.Labels["correlation_key"] == correlation {
+					if effect.Child == originalChild && !selectedMember(selected, a) {
+						return false, errors.New("provider receipt differs from selected original")
+					}
 					if hit != 0 || claimed[receipt.ID] {
 						return false, errors.New("ambiguous provider receipt identity")
 					}
@@ -58,11 +65,17 @@ func matchSink(effects []managed.Effect, receipts []targetops.Receipt, notifier,
 	return len(claimed) > 0, nil
 }
 
-func bulkIsolation(f, sibling NativeEpisodeFixture, root, notifier string, effects []managed.Effect, selected, other []targetops.Receipt) (bool, error) {
+func selectedMember(f NativeEpisodeFixture, a targetops.SinkAlert) bool {
+	start, err := time.Parse(time.RFC3339Nano, f.Source.Starts)
+	got, er := time.Parse(time.RFC3339Nano, a.StartsAt)
+	return err == nil && er == nil && start.Equal(got) && (a.HistoryID == "" || a.HistoryID == f.History.ID) && a.Labels["aid"] == f.History.Labels["aid"] && a.Labels["source_id"] == f.Source.SourceID && a.Labels["node"] == f.Source.TID && a.Labels["correlation_key"] == f.Source.Correlation
+}
+
+func bulkIsolation(f, sibling NativeEpisodeFixture, root, notifier, originalChild string, effects []managed.Effect, selected, other []targetops.Receipt) (bool, error) {
 	var mine []managed.Effect
 	for _, e := range effects {
 		if e.Logical == root && e.Notifier == notifier && e.Action == "notification" {
-			if e.Kind != "resend" || e.Target == "" || e.Child == "" || e.Operation == "" || e.ConfirmedAt == "" {
+			if e.Kind != "resend" || e.Child != originalChild || e.Target == "" || e.Child == "" || e.Operation == "" || e.ConfirmedAt == "" {
 				return false, nil
 			}
 			mine = append(mine, e)
@@ -78,18 +91,13 @@ func bulkIsolation(f, sibling NativeEpisodeFixture, root, notifier string, effec
 			}
 		}
 	}
-	start, err := time.Parse(time.RFC3339Nano, f.Source.Starts)
-	if err != nil {
-		return false, err
-	}
 	var firing []targetops.Receipt
 	for _, r := range selected {
 		for _, a := range r.Alerts {
 			if a.Status != "firing" {
 				continue
 			}
-			got, err := time.Parse(time.RFC3339Nano, a.StartsAt)
-			if err != nil || !got.Equal(start) || a.HistoryID != "" && a.HistoryID != f.History.ID || a.Labels["aid"] != f.History.Labels["aid"] || a.Labels["source_id"] != f.Source.SourceID || a.Labels["node"] != f.Source.TID || a.Labels["correlation_key"] != f.Source.Correlation {
+			if !selectedMember(f, a) {
 				return false, errors.New("bulk payload differs from selected episode")
 			}
 			firing = append(firing, r)

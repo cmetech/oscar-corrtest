@@ -89,7 +89,8 @@ func (m *managedLane) timedAndResolve(ctx context.Context, changed NativeEpisode
 	if manual.ResendID == "" || manual.AlertID != changed.History.ID {
 		return errors.New("manual resend admission unverified")
 	}
-	if err = m.waitActions(ctx, changed, manual.ResendID); err != nil {
+	manualChild, err := m.waitActions(ctx, changed, manual.ResendID)
+	if err != nil {
 		return err
 	}
 	// Read the original user operation, even after the timed operation has run.
@@ -97,8 +98,16 @@ func (m *managedLane) timedAndResolve(ctx context.Context, changed NativeEpisode
 	if err != nil {
 		return err
 	}
-	if !terminalResend(status) || status.RequestID != manual.IssuedRequest {
+	original, err := m.config.Original(ctx, changed.History.ID, manual.ResendID)
+	if err != nil {
+		return err
+	}
+	proof, ok := original.Resend(status, changed.History.ID, changed.History.EpisodeNumber, manual.IssuedRequest, manual.ResendID)
+	if !ok || manualChild == "" || proof.DisabledTicketNotification(m.policy.notifierID) != manualChild {
 		return errors.New("manual native target confirmation missing")
+	}
+	if err = m.save(ctx, "native.action.children", original); err != nil {
+		return err
 	}
 	if err = m.save(ctx, "native.action.status", status); err != nil {
 		return err
@@ -176,8 +185,9 @@ func (m *managedLane) refireBulk(ctx context.Context, changed NativeEpisodeFixtu
 		return err
 	}
 	var owners []int64
+	episodes := []int{changed.History.EpisodeNumber, fresh.History.EpisodeNumber}
 	for i, id := range ids {
-		owner, er := m.run.record(ctx, kindManagedOwner, requests[i], originalOwner{Kind: "manual_resend", History: id, Request: requests[i]})
+		owner, er := m.run.record(ctx, kindManagedOwner, requests[i], originalOwner{Kind: "manual_resend", History: id, Episode: episodes[i], Request: requests[i]})
 		if er != nil {
 			return er
 		}
@@ -204,7 +214,13 @@ func (m *managedLane) refireBulk(ctx context.Context, changed NativeEpisodeFixtu
 		if err != nil {
 			return false, err
 		}
-		if !terminalResend(stat) || stat.RequestID != requests[1] {
+		original, err := m.config.Original(wait, ids[1], yes.ResendID)
+		if err != nil {
+			return false, err
+		}
+		proof, ok := original.Resend(stat, ids[1], fresh.History.EpisodeNumber, requests[1], yes.ResendID)
+		child := proof.DisabledTicketNotification(m.policy.notifierID)
+		if !ok || child == "" {
 			return false, nil
 		}
 		snap, err := m.config.Snapshot(wait, fresh.History.ID)
@@ -222,11 +238,11 @@ func (m *managedLane) refireBulk(ctx context.Context, changed NativeEpisodeFixtu
 		if err != nil {
 			return false, err
 		}
-		ok, err := bulkIsolation(fresh, sib, yes.ResendID, m.policy.notifierID, snap.Effects, selected, other)
+		ok, err = bulkIsolation(fresh, sib, yes.ResendID, m.policy.notifierID, child, snap.Effects, selected, other)
 		if err != nil || !ok {
 			return false, err
 		}
-		return true, m.save(wait, "native.bulk.isolation", map[string]any{"original": stat, "refused": no, "selected": fresh, "sibling": sib, "effects": snap.Effects, "since": bulkStart, "selectedReceipts": selected, "siblingReceipts": other})
+		return true, m.save(wait, "native.bulk.isolation", map[string]any{"original": stat, "children": original, "refused": no, "selected": fresh, "sibling": sib, "effects": snap.Effects, "since": bulkStart, "selectedReceipts": selected, "siblingReceipts": other})
 	})
 	cancel()
 	if err != nil {

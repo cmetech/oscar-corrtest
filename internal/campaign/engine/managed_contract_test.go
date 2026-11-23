@@ -142,7 +142,7 @@ func TestBulkChecksSelectedAndUnselectedPhysicalPayloads(t *testing.T) {
 	e := managed.Effect{Kind: "resend", Logical: "root", Operation: "original", Child: "C", Callback: "cb", Target: "target", TargetState: "confirmed", Notifier: "sink", Action: "notification", Severity: "major", EnteredAt: start.Format(time.RFC3339Nano), ConfirmedAt: start.Add(time.Second).Format(time.RFC3339Nano)}
 	receipt := targetops.Receipt{ID: 1, ReceivedAt: start.Add(time.Millisecond), Alerts: []targetops.SinkAlert{{HistoryID: "h", StartsAt: f.Source.Starts, Status: "firing", Labels: map[string]string{"aid": "A", "node": "ne", "source_id": "s", "severity": "major", "correlation_key": "c"}}}}
 	check := func(mine, other []targetops.Receipt) bool {
-		ok, err := bulkIsolation(f, sibling, "root", "sink", []managed.Effect{e}, mine, other)
+		ok, err := bulkIsolation(f, sibling, "root", "sink", "C", []managed.Effect{e}, mine, other)
 		return ok && err == nil
 	}
 	if !check([]targetops.Receipt{receipt}, nil) {
@@ -155,6 +155,9 @@ func TestBulkChecksSelectedAndUnselectedPhysicalPayloads(t *testing.T) {
 	receipt.Alerts[0].StartsAt = start.Add(time.Millisecond).Format(time.RFC3339Nano)
 	if check([]targetops.Receipt{receipt}, nil) {
 		t.Fatal("replacement episode payload")
+	}
+	if ok, _ := matchOriginalSink([]managed.Effect{e}, []targetops.Receipt{receipt}, "sink", "c", "C", f); ok {
+		t.Fatal("manual original child accepted another episode's payload")
 	}
 }
 
@@ -221,14 +224,55 @@ func TestOriginalUnknownSurvivesClosedSourceAndCleanupRerun(t *testing.T) {
 	if err != nil || len(open) != 1 || open[0].ObjectID != "original/target/child" {
 		t.Fatal(open, err)
 	}
-	o := originalOwner{Operation: "original", Target: "target", Child: "child"}
-	e := managed.Effect{Operation: "original", Target: "target", Child: "replacement", TargetState: "confirmed", ChildState: "sent", Callback: "cb", CallbackOutcome: "confirmed", ConfirmedAt: "2026-01-01T00:00:00Z"}
-	if terminalEffect(o, managed.Snapshot{Effects: []managed.Effect{e}}) {
-		t.Fatal("replacement settled original")
+
+}
+
+type originalReaderFixture struct {
+	rows  managed.OriginalReceipt
+	reads int
+}
+
+func (f *originalReaderFixture) Original(_ context.Context, history, op string) (managed.OriginalReceipt, error) {
+	f.reads++
+	if history != "history" || op != "original" {
+		return managed.OriginalReceipt{}, errors.New("foreign owner read")
 	}
-	e.Child = "child"
-	if !terminalEffect(o, managed.Snapshot{Effects: []managed.Effect{e}}) {
-		t.Fatal("exact settlement lost")
+	return f.rows, nil
+}
+func TestMissingActorRetainsManualAndSettlesExactSQLChild(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	one := managed.OriginalChild{History: "history", Episode: 3, Root: "original", Operation: "original", Kind: "resend", OpState: "confirmed", Target: "target", TargetState: "confirmed", ManifestOwned: 1, Expected: 2, Reported: 2, Aggregate: "partial", Callback: "callback", Name: "sink", Action: "notification", Notifier: "sink-id", PolicyReceipt: "physical-sink", Child: "physical-sink", ReceiptType: "NotificationDelivery", State: "sent", ProviderAction: "notification", ProviderOutcome: "sent", ProviderConfirmed: "2026-11-22T00:00:01Z"}
+	two := one
+	two.Name, two.Notifier, two.Action, two.Child, two.PolicyReceipt, two.State, two.ProviderOutcome, two.ProviderConfirmed = "ALERTHISTORY", "history-id", "ticket", "physical-ticket", "physical-ticket", "suppressed", "suppressed", ""
+	two.ProviderAction = "ticket"
+	reader := &originalReaderFixture{rows: managed.OriginalReceipt{Children: []managed.OriginalChild{one, two}}}
+	h.deps.managed = &managedDeps{setupErr: errors.New("operator session unavailable"), originals: reader}
+	r := &run{id: h.id, e: New(h.deps, h.clock), s: scenario.ManagedAlertsSmokeV1()}
+	owner := originalOwner{Kind: "effect", History: "history", Episode: 3, Root: "original", Operation: "original", Target: "target", Child: "physical-sink"}
+	if !terminalEffect(owner, reader.rows) {
+		t.Fatal("original sent child in settled partial unrecoverable")
+	}
+	owner.Child = "replacement"
+	if terminalEffect(owner, reader.rows) {
+		t.Fatal("foreign child settled original")
+	}
+	owner.Child = "physical-sink"
+	if _, err := r.record(ctx, kindManagedOwner, "sql-child", owner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.record(ctx, kindManagedOwner, "request", originalOwner{Kind: "manual_resend", History: "history", Episode: 3, Request: "request"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.cleanup(ctx); got != domain.CleanupDirty {
+		t.Fatal(got)
+	}
+	open, err := h.db.OpenMutations(ctx, h.id)
+	if err != nil || len(open) != 1 || open[0].ObjectID != "request" || reader.reads != 1 {
+		t.Fatal(open, err, reader.reads)
+	}
+	if err := r.recoverOriginal(ctx, open[0]); err == nil || !strings.Contains(err.Error(), "signed resend status reader unavailable") {
+		t.Fatal(err)
 	}
 }
 func TestManagedEventExportOmitsSignedHistoryAndArbitraryLabels(t *testing.T) {
