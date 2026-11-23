@@ -49,7 +49,7 @@ func (m *managedLane) sustained(ctx context.Context, p *policyState, span time.D
 		}
 		// Leave a bounded readback interval before the next source starts. The
 		// remaining tail is explicitly reported for D3's final closure accounting.
-		var timing dispatchSamples
+		timing := dispatchSamples{ExpectedDue: map[string]time.Time{}}
 		timing.ValidUntil, _ = time.Parse(time.RFC3339Nano, f.Source.RefreshDeadline)
 		cut := until.Add(-8 * time.Second)
 		for r.now().Before(cut) {
@@ -105,7 +105,7 @@ func (m *managedLane) sustained(ctx context.Context, p *policyState, span time.D
 		}
 		timing.add(snap)
 
-		err = segmentEvidence(p, f, snap, owned, timing, snap.MeasuredAt)
+		err = segmentEvidence(p, f, snap, owned, timing, snap.MeasuredAt, m.run.e.d.CampaignNotifier)
 		reason := ""
 		if err != nil {
 			reason = err.Error()
@@ -127,7 +127,7 @@ func (m *managedLane) sustained(ctx context.Context, p *policyState, span time.D
 	}
 	// clearOwned sends the final run-owned clear in the drain, even on stop.
 }
-func segmentEvidence(p *policyState, f NativeEpisodeFixture, s managed.Snapshot, receipts []targetops.Receipt, timing dispatchSamples, activeThrough time.Time) error {
+func segmentEvidence(p *policyState, f NativeEpisodeFixture, s managed.Snapshot, receipts []targetops.Receipt, timing dispatchSamples, activeThrough time.Time, captureName string) error {
 	b, err := ownedBinding(p, s.Bindings)
 	if err != nil {
 		return err
@@ -164,9 +164,11 @@ func segmentEvidence(p *policyState, f NativeEpisodeFixture, s managed.Snapshot,
 			return errors.New("duplicate scheduled recipient")
 		}
 		seen[e.ScheduleRoot] = true
+		due, _, _ := clock.next(p)
 		if err = clock.accept(p, b, e, timing.Windows[e.Logical]); err != nil {
 			return err
 		}
+		timing.ExpectedDue[e.Operation] = due
 		if e.Kind == "escalate" {
 			esc++
 		} else if clock.raised {
@@ -182,7 +184,7 @@ func segmentEvidence(p *policyState, f NativeEpisodeFixture, s managed.Snapshot,
 	if low < 1 || p.spec.Escalation != nil && (esc != 1 || higher < 1) {
 		return errors.New("required repeat/escalation evidence absent")
 	}
-	ok, err := matchSink(s.Effects, receipts, p.notifierID, f.Source.Correlation)
+	ok, err := matchManagedSink(s, receipts, p.notifierID, captureName, f)
 	if err != nil {
 		return err
 	}

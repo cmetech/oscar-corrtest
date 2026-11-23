@@ -14,19 +14,29 @@ import (
 
 // The workload hash fixes the relative schedule. Count actual sends against
 // that plan; HTTP writes, accepted source identities and sink members differ.
+func withinLoadOffer(t0 time.Time, load, offset time.Duration, at time.Time) bool {
+	due := t0.Add(offset)
+	return !at.Before(due) && !at.After(due.Add(2*time.Second)) && at.Before(t0.Add(load))
+}
+
+func inLoadResponse(t0 time.Time, load, offset time.Duration, sent, done time.Time) bool {
+	return !done.Before(sent) && !done.After(t0.Add(offset+4*time.Second)) && !done.After(t0.Add(load+2*time.Second))
+}
 func (r *run) nativeLoad(ctx context.Context, t *nativeTally, c *score.Scorecard, in score.Inputs, end time.Time, report map[string]any) {
 	plan := lane.Compile(r.id, r.s.Seed, r.s.Baseline, r.s.LoadEnd)
 	seen := make(map[int]bool, len(plan.Events))
 	accepted := map[string]bool{}
-	t.LoadedSeconds = r.s.LoadEnd.Seconds()
+	t.ScheduledLoadSeconds = r.s.LoadEnd.Seconds()
 	if !r.normalEnd || end.Before(r.t0.Add(r.s.LoadEnd)) {
 		t.miss("loaded interval incomplete")
 	}
 	offered := 0
-	minutes := int(r.s.LoadEnd / time.Minute)
+	minutes := int((r.s.LoadEnd + time.Minute - 1) / time.Minute)
+	t.LoadMinutes = make([]loadMinute, minutes)
 	plannedMinutes, acceptedMinutes := make([]int, minutes), make([]int, minutes)
 	for _, e := range plan.Events {
-		if i := int(e.At / time.Minute); i < minutes {
+		if i := int(e.At / time.Minute); e.At < r.s.LoadEnd {
+			t.LoadMinutes[i].BaselinePlanned++
 			plannedMinutes[i]++
 		}
 	}
@@ -42,11 +52,17 @@ func (r *run) nativeLoad(ctx context.Context, t *nativeTally, c *score.Scorecard
 		p := plan.Events[row.Seq]
 		if row.Identity != p.Identity || row.Kind != string(p.Kind) || row.Ticket != p.Ticket {
 			t.fail("baseline plan member mismatch")
+			t.miss("expected baseline member unverified")
 			continue
 		}
 		if row.Missed || row.SentAt.IsZero() || !row.Done || row.ErrorClass != "" || row.Status/100 != 2 {
 			t.miss("scheduled baseline member not accepted")
 			continue
+		}
+		if p.At < r.s.LoadEnd && (!withinLoadOffer(r.t0, r.s.LoadEnd, p.At, row.SentAt) || !inLoadResponse(r.t0, r.s.LoadEnd, p.At, row.SentAt, row.SentAt.Add(time.Duration(row.LatencyMillis)*time.Millisecond))) {
+			t.miss("baseline offer/acceptance outside scheduled load interval")
+		} else if p.At < r.s.LoadEnd {
+			t.LoadMinutes[int(p.At/time.Minute)].BaselineOnTime++
 		}
 		if p.Kind == lane.Firing {
 			accepted[p.Identity] = true
@@ -73,7 +89,7 @@ func (r *run) nativeLoad(ctx context.Context, t *nativeTally, c *score.Scorecard
 		}
 	}
 	report["baselineMinutes"] = map[string][]int{"planned": plannedMinutes, "accepted": acceptedMinutes}
-	t.OfferedBaselinePerSecond = float64(offered) / t.LoadedSeconds
+	t.OfferedBaselinePerSecond = float64(offered) / t.ScheduledLoadSeconds
 	if len(seen) != len(plan.Events) || c.Baseline.Accepted != len(plan.Events) {
 		t.miss("incomplete seeded baseline workload")
 	}
@@ -106,6 +122,7 @@ func (r *run) nativeLoad(ctx context.Context, t *nativeTally, c *score.Scorecard
 			c.Headlines = append(c.Headlines, score.Headline{Name: "latency." + h.name + "_p99", Value: h.p.P99, Unit: "s", Pass: true})
 		}
 	}
+	baselineEpisodes(t, plan, in)
 	r.childOffers(ctx, t)
 	r.ordinaryScore(t, in.Receipts)
 	r.resources(ctx, t, end, report)
@@ -139,13 +156,21 @@ func (r *run) nativeLoad(ctx context.Context, t *nativeTally, c *score.Scorecard
 		}
 	}
 
-	if !r.s.Custom {
-		capture, err := r.costCapture(t, in.Receipts)
+	{
+		capture, err := r.costCapture(t, in.Receipts, end)
 		if err != nil {
-			t.miss("ordinary cost capture: " + err.Error())
+			if r.s.Custom {
+				t.miss("ordinary route/attempt capture: " + err.Error())
+			} else {
+				t.miss("ordinary cost capture: " + err.Error())
+			}
 		} else {
-			c.ObserverConfig = capture.ObserverConfig
-			report["ordinaryCost"] = capture
+			if r.s.Custom {
+				report["ordinaryRouteAttempts"] = map[string]any{"captureSHA256": capture.CaptureSHA256, "routeObserverDigest": capture.ComparisonConfig, "physicalAttempts": capture.PhysicalAttempts, "outcomes": capture.Outcomes}
+			} else {
+				c.ObserverConfig = capture.ComparisonConfig
+				report["ordinaryCost"] = capture
+			}
 			for _, h := range capture.Headlines {
 				c.Headlines = append(c.Headlines, h)
 			}

@@ -23,6 +23,17 @@ type suppressionClient interface {
 const kindSilence = "native_owned_silence"
 const kindInhibitor = "native_owned_inhibitor"
 
+func (r *run) inhibitorPost(ctx context.Context, c suppressionClient, s lane.SuppressionSubject, clear bool) error {
+	at := r.now()
+	err := c.Inhibitor(ctx, s, clear)
+	status := 200
+	if err != nil {
+		status = 0
+	}
+	r.sourceOffer("native_inhibitor", at, status)
+	return err
+}
+
 func (r *run) restoreSuppression(ctx context.Context, mut domain.CampaignMutation) error {
 	c, ok := r.e.d.nativeSender.(suppressionClient)
 	if !ok {
@@ -59,7 +70,7 @@ func (r *run) restoreSuppression(ctx context.Context, mut domain.CampaignMutatio
 		}
 		return nil
 	}
-	if err = c.Inhibitor(ctx, s, true); err != nil {
+	if err = r.inhibitorPost(ctx, c, s, true); err != nil {
 		return err
 	}
 	wait, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -81,7 +92,7 @@ func (m *managedLane) startSuppression(ctx context.Context, kind string, s lane.
 			return "", 0, err
 		}
 	} else {
-		if err = c.Inhibitor(ctx, s, false); err != nil {
+		if err = m.run.inhibitorPost(ctx, c, s, false); err != nil {
 			return "", 0, err
 		}
 		members, err := c.Members(ctx, map[string]string{"campaign_control": s.Owner, "aid": s.AID, "alertname": "CorrTestNativeInhibitor"})

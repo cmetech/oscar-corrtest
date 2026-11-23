@@ -13,6 +13,12 @@ import (
 func (t *nativeTally) functional(ev domain.CampaignEvent) bool {
 	r := t.run
 	switch ev.Type {
+	case "native.unexpected_ticket":
+		var o originalOwner
+		if json.Unmarshal(ev.Detail, &o) != nil || o.History == "" || o.Episode < 1 || o.Child == "" || o.Root == "" || o.Operation == "" {
+			return false
+		}
+		t.fail("confirmed ticket on no-ticket subject: " + o.History + "/" + o.Child)
 	case "native.tl1.closed":
 		var d struct{ Verified bool }
 		return json.Unmarshal(ev.Detail, &d) == nil && d.Verified
@@ -66,6 +72,24 @@ func (t *nativeTally) functional(ev domain.CampaignEvent) bool {
 		}
 		deadline, err := time.Parse(time.RFC3339Nano, t.changed.Source.RefreshDeadline)
 		return err == nil && d.Member.EndsAt.After(deadline) && observedMember(d.Member, t.changed.Source, "critical", ev.OccurredAt)
+	case "native.managed.effects":
+		var d struct {
+			History string
+			Sink    []targetops.Receipt
+		}
+		if json.Unmarshal(ev.Detail, &d) != nil || d.History != t.changed.History.ID || len(d.Sink) == 0 {
+			return false
+		}
+		t.receipts(d.Sink, t.changed.History.Labels["aid"])
+	case "native.bulk.baseline":
+		var d struct {
+			Subject  NativeEpisodeFixture
+			Receipts []targetops.Receipt
+		}
+		if json.Unmarshal(ev.Detail, &d) != nil || d.Subject.History.ID == "" || len(d.Receipts) == 0 {
+			return false
+		}
+		t.receipts(d.Receipts, d.Subject.History.Labels["aid"])
 	case "native.acknowledged.repeat":
 		var d struct {
 			Subject NativeEpisodeFixture
@@ -104,7 +128,11 @@ func (t *nativeTally) functional(ev domain.CampaignEvent) bool {
 			return false
 		}
 		ok, err := bulkIsolation(d.Selected, d.Sibling, d.Original.ResendID, r.sinkID, child, d.Effects, d.SelectedReceipts, d.SiblingReceipts)
-		return ok && err == nil
+		if !ok || err != nil {
+			return false
+		}
+		t.receipts(d.SelectedReceipts, d.Selected.History.Labels["aid"])
+		return true
 	case "native.synthetic_ticket":
 		var d struct {
 			Run, History, Ticket, ProviderID string
@@ -127,6 +155,8 @@ func (t *nativeTally) functional(ev domain.CampaignEvent) bool {
 		}
 	case "native.suppression_released":
 		var d struct {
+			Subject                                    NativeEpisodeFixture
+			Receipts                                   []targetops.Receipt
 			Control                                    string
 			Binding                                    managed.Binding
 			ReleaseByNS, DispatchAfterNS, DispatchByNS int64
@@ -135,6 +165,7 @@ func (t *nativeTally) functional(ev domain.CampaignEvent) bool {
 		if json.Unmarshal(ev.Detail, &d) != nil || d.Control == "" || d.Binding.Revision == "" || len(d.Effects) == 0 {
 			return false
 		}
+		t.receipts(d.Receipts, d.Subject.History.Labels["aid"])
 		return d.ReleaseByNS >= 0 && d.DispatchAfterNS >= d.ReleaseByNS && d.DispatchByNS >= d.DispatchAfterNS && d.DispatchByNS <= int64(30*time.Second)
 	}
 	return true

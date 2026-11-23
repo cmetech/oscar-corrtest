@@ -75,7 +75,7 @@ func (r *run) recoverOriginal(ctx context.Context, mut domain.CampaignMutation) 
 	if deps == nil {
 		return errors.New("original effect reader unavailable")
 	}
-	if o.Kind == "effect" || o.Kind == "segment_root" {
+	if o.Kind == "effect" || o.Kind == "segment_root" || o.Kind == "unexpected_ticket" {
 		if deps.originals == nil {
 			return errors.New("original child reader unavailable")
 		}
@@ -83,7 +83,28 @@ func (r *run) recoverOriginal(ctx context.Context, mut domain.CampaignMutation) 
 		if err != nil {
 			return err
 		}
-		_, whole := s.Settlement(o.History, o.Episode, o.Root)
+		settle, whole := s.Settlement(o.History, o.Episode, o.Root)
+		if whole && (o.Kind == "unexpected_ticket" || o.Kind == "segment_root") {
+			matched := false
+			for _, c := range settle.Children {
+				if c.Action != "ticket" || c.State != "sent" || o.Kind == "unexpected_ticket" && (c.Child != o.Child || c.Operation != o.Operation || c.Target != o.Target) {
+					continue
+				}
+				matched = true
+				if o.Kind == "segment_root" {
+					ticket := originalOwner{Kind: "unexpected_ticket", History: o.History, Episode: o.Episode, AID: o.AID, Root: o.Root, Operation: c.Operation, Child: c.Child, Target: c.Target}
+					if err := (&managedLane{run: r}).save(ctx, "native.unexpected_ticket", ticket); err != nil {
+						return err
+					}
+				}
+				if err := r.verifyUnexpectedTicket(ctx, o, c); err != nil {
+					return err
+				}
+			}
+			if o.Kind == "unexpected_ticket" && matched {
+				return (&managedLane{run: r}).save(ctx, "native.original.settled", map[string]any{"owner": o, "receipt": s})
+			}
+		}
 		if o.Kind == "segment_root" && whole || o.Kind == "effect" && terminalEffect(o, s) {
 			return (&managedLane{run: r}).save(ctx, "native.original.settled", map[string]any{"owner": o, "receipt": s})
 		}
@@ -155,6 +176,33 @@ func (r *run) recoverOriginal(ctx context.Context, mut domain.CampaignMutation) 
 	}
 	return errors.New("original provider ownership unresolved: " + mut.ObjectID)
 }
+
+// An unintended incident is never modified here. Its original flow, successful
+// create audit and the operator-closed incident must all refer to this episode.
+func (r *run) verifyUnexpectedTicket(ctx context.Context, o originalOwner, c managed.OriginalChild) error {
+	deps := r.e.d.managed
+	if c.ProviderFlow == "" || o.AID == "" || deps.snow == nil {
+		return errors.New("unexpected ticket original flow or provider reader unavailable")
+	}
+	s, err := deps.config.Snapshot(ctx, o.History)
+	if err != nil {
+		return err
+	}
+	for _, p := range s.Tickets {
+		if p.Flow != c.ProviderFlow || p.History != o.History || p.Episode != o.Episode || p.System != "snow" || p.AuditSystem != "snow" || p.Operation == "" || p.Operation != p.Audit || p.AuditStatus != "success" || p.Incident == "" || p.Incident != p.AuditIncident {
+			continue
+		}
+		inc, err := deps.snow.Incident(ctx, p.Incident)
+		if err != nil {
+			return err
+		}
+		if inc.Number == p.Incident && inc.SysID != "" && strings.Contains(inc.ShortDescription, o.AID) && (inc.State == "6" || inc.State == "7") {
+			return nil
+		}
+	}
+	return errors.New("unexpected ticket requires independent original incident closure")
+}
+
 func (r *run) closeOriginalTicket(ctx context.Context, aid, number string) error {
 	inc, err := r.e.d.managed.snow.Incident(ctx, number)
 	if err != nil {

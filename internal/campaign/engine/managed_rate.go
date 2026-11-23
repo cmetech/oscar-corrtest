@@ -62,7 +62,9 @@ func (m *managedLane) rateSlot(ctx context.Context, slot int) error {
 			return false, errors.New("mixed firing input and source occurrence counts differ")
 		}
 		f := NativeEpisodeFixture{History: historyEvidence(h), Source: major}
-		if err = m.holdUnknown(wait, f, snap); err != nil {
+		originals, err := m.proveClosedRoots(wait, f, snap, m.policy.notifierID)
+		m.rememberClosed(aid, h.Labels["condition"], f, originals, nil)
+		if err != nil {
 			return false, err
 		}
 		if slot%2 != 0 {
@@ -97,16 +99,12 @@ func (m *managedLane) rateSlot(ctx context.Context, slot int) error {
 				break
 			}
 		}
-		ok, err := matchSink(snap.Effects, firing, m.policy.notifierID, major.Correlation)
+		ok, err := matchManagedSink(snap, firing, m.policy.notifierID, m.run.e.d.CampaignNotifier, f)
 		if err != nil || !ok {
 			return false, err
 		}
-		originals, err := m.proveClosedRoots(wait, f, snap, m.policy.notifierID)
-		if err != nil {
-			return false, err
-		}
-		m.rememberClosed(aid, h.Labels["condition"], h.ID, snap, firing, false)
-		return true, m.save(wait, "native.managed.rate_slot", map[string]any{"slot": slot, "aid": aid, "history": historyEvidence(h), "minor": minor, "major": major, "bindings": snap.Bindings, "effects": snap.Effects, "originals": originals, "receipts": firing, "queryDuration": snap.QueryDuration})
+		m.rememberClosed(aid, h.Labels["condition"], f, originals, firing)
+		return true, m.save(wait, "native.managed.rate_slot", map[string]any{"slot": slot, "aid": aid, "history": historyEvidence(h), "minor": minor, "major": major, "bindings": snap.Bindings, "effects": snap.Effects, "originals": originals, "receipts": rs, "queryDuration": snap.QueryDuration})
 	})
 }
 

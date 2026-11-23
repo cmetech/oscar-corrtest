@@ -15,19 +15,21 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 )
 
+type loadMinute struct{ BaselinePlanned, BaselineOnTime, RatePlanned, RateOnTime int }
 type wireCounts struct{ Offered, Written, Unknown, NotEntered, DuringLoad int }
 type nativeEvidence struct {
 	SourceOffers                               map[string]sourceOffers
 	TotalOfferedInLoad                         int
 	OverallOfferedRate, OverallTL1OfferedShare float64
 
-	Facets                                                            map[string]int
-	Wire                                                              map[string]*wireCounts
-	PhysicalRequests, ProviderMemberReceipts, RateSlots               int
-	PlannedBaselineInLoad, PlannedRatePDUs, AcceptedBaselineInLoad    int
-	RequestedShare, ConfiguredShare, AchievedShare                    float64
-	LoadedSeconds, OfferedBaselinePerSecond, WrittenRatePDUsPerSecond float64
-	Missing, Failures                                                 []string
+	Facets                                                                                  map[string]int
+	Wire                                                                                    map[string]*wireCounts
+	PhysicalRequests, ProviderMemberReceipts, RateSlots                                     int
+	PlannedBaselineInLoad, PlannedRatePDUs, AcceptedBaselineInLoad                          int
+	RequestedShare, ConfiguredShare, AchievedShare                                          float64
+	ScheduledLoadSeconds, LoadedSeconds, OfferedBaselinePerSecond, WrittenRatePDUsPerSecond float64
+	LoadMinutes                                                                             []loadMinute
+	Missing, Failures                                                                       []string
 }
 type nativeTally struct {
 	timing                  map[string][]float64
@@ -41,13 +43,15 @@ type nativeTally struct {
 	slots           map[int]bool
 	segments        map[string]bool
 	ordinary        map[string]lane.NativeMember
+	wireTimes       map[[3]string]dispatchWindow
+	clearAt         map[string]time.Time
 	wireOrdinary    map[[3]string]int
 	physical        map[int64]bool
 	members         map[string]bool
 }
 
 func newNativeTally(r *run) *nativeTally {
-	return &nativeTally{timing: map[string][]float64{}, run: r, nativeEvidence: nativeEvidence{SourceOffers: map[string]sourceOffers{}, Facets: map[string]int{}, Wire: map[string]*wireCounts{}}, intents: map[[3]string]int{}, writes: map[[3]string]int{}, sequences: map[uint64]bool{}, slots: map[int]bool{}, segments: map[string]bool{}, ordinary: map[string]lane.NativeMember{}, wireOrdinary: map[[3]string]int{}, physical: map[int64]bool{}, members: map[string]bool{}}
+	return &nativeTally{timing: map[string][]float64{}, run: r, nativeEvidence: nativeEvidence{SourceOffers: map[string]sourceOffers{}, Facets: map[string]int{}, Wire: map[string]*wireCounts{}}, intents: map[[3]string]int{}, writes: map[[3]string]int{}, sequences: map[uint64]bool{}, slots: map[int]bool{}, segments: map[string]bool{}, ordinary: map[string]lane.NativeMember{}, wireTimes: map[[3]string]dispatchWindow{}, clearAt: map[string]time.Time{}, wireOrdinary: map[[3]string]int{}, physical: map[int64]bool{}, members: map[string]bool{}}
 }
 func (t *nativeTally) miss(what string) {
 	if !slices.Contains(t.Missing, what) {
@@ -111,6 +115,9 @@ func (t *nativeTally) consume(ev domain.CampaignEvent) {
 				t.fail("duplicate/empty wire sequence")
 			}
 			t.sequences[e.Sequence] = true
+			if cohort == "mixed_rate" {
+				t.wireTimes[k] = dispatchWindow{e.At, e.FinishedAt}
+			}
 			if !e.At.Before(r.t0) && e.At.Before(r.t0.Add(r.s.LoadEnd)) {
 				counts.DuringLoad++
 			}
@@ -135,6 +142,9 @@ func (t *nativeTally) consume(ev domain.CampaignEvent) {
 		counts.Offered++
 		if d.HTTPStatus/100 == 2 {
 			counts.Written++
+			if d.Cohort == "source_resolve" {
+				t.clearAt[d.Source.Identity] = d.OfferedAt
+			}
 			t.wireOrdinary[[3]string{d.Source.Identity, d.Route, d.Cohort}]++
 		} else {
 			t.miss("ordinary PDU unaccepted")
@@ -170,19 +180,7 @@ func (t *nativeTally) consume(ev domain.CampaignEvent) {
 				return
 			}
 			t.receipts(d.Receipts, d.Fixture.History.Labels["aid"])
-			for _, dispatch := range d.Snapshot.Dispatches {
-				for _, e := range d.Snapshot.Effects {
-					if e.ScheduleRoot != dispatch.Root || e.Notifier != r.sinkID || e.ChildState != "sent" {
-						continue
-					}
-					due, err := time.Parse(time.RFC3339Nano, dispatch.DueAt)
-					if err != nil {
-						t.miss("segment timer due timestamp")
-						continue
-					}
-					t.timed("segment_"+d.Lane, due, d.Dispatch.Windows[e.Logical], e)
-				}
-			}
+			t.segmentTimes(d.Lane, d.Snapshot, d.Dispatch)
 		}
 		key := fmt.Sprintf("%s/%s/%d", ev.Type, d.Lane, d.Index)
 		if t.segments[key] {
@@ -239,6 +237,10 @@ func (t *nativeTally) consume(ev domain.CampaignEvent) {
 	t.Facets[ev.Type]++
 }
 func (t *nativeTally) receipts(rs []targetops.Receipt, aid string) {
+	if aid == "" {
+		t.miss("missing observed member identity")
+		return
+	}
 	for _, r := range rs {
 		if r.ID <= 0 {
 			t.miss("missing physical sink receipt ID")
@@ -246,8 +248,11 @@ func (t *nativeTally) receipts(rs []targetops.Receipt, aid string) {
 		}
 		for _, a := range r.Alerts {
 			if a.Labels["aid"] == aid || a.AlertName == aid {
+				if a.StartsAt == "" || a.Status == "" {
+					t.miss("captured member lacks source start/status")
+				}
 				t.physical[r.ID] = true
-				t.members[fmt.Sprintf("%d/%s", r.ID, aid)] = true
+				t.members[fmt.Sprintf("%d/%s/%s/%s", r.ID, aid, a.StartsAt, a.Status)] = true
 			}
 		}
 	}
@@ -315,12 +320,22 @@ func (t *nativeTally) finish() {
 				break
 			}
 			t.PlannedRatePDUs++
+			minute := int(offer.At / time.Minute)
+			if minute < len(t.LoadMinutes) {
+				t.LoadMinutes[minute].RatePlanned++
+			}
 			scope := "POL"
 			if offer.Slot%2 == 0 {
 				scope = "PLAIN"
 			}
 			if t.writes[[3]string{managed.AID(r.id, "mixed", offer.Slot), managed.AID(r.id, scope, 0), offer.Code}] != 1 {
 				t.miss("mixed scheduled input missing or duplicated")
+			}
+			wrote := t.wireTimes[[3]string{managed.AID(r.id, "mixed", offer.Slot), managed.AID(r.id, scope, 0), offer.Code}]
+			if !withinLoadOffer(r.t0, r.s.LoadEnd, offer.At, wrote.Before) || !inLoadResponse(r.t0, r.s.LoadEnd, offer.At, wrote.Before, wrote.By) {
+				t.miss("mixed rate write outside its scheduled load interval")
+			} else if minute < len(t.LoadMinutes) {
+				t.LoadMinutes[minute].RateOnTime++
 			}
 			if !t.slots[offer.Slot] {
 				t.miss("mixed rate slot lacks downstream proof")
@@ -341,6 +356,16 @@ func (t *nativeTally) finish() {
 			t.AchievedShare = float64(c.DuringLoad) / float64(n)
 		}
 		t.WrittenRatePDUsPerSecond = float64(c.DuringLoad) / r.s.LoadEnd.Seconds()
+	}
+	for i, m := range t.LoadMinutes {
+		if m.BaselinePlanned != m.BaselineOnTime || m.RatePlanned != m.RateOnTime {
+			t.miss("scheduled load interval incomplete")
+		}
+		if r.normalEnd {
+			if m.BaselinePlanned > 0 && m.BaselinePlanned == m.BaselineOnTime && m.RatePlanned == m.RateOnTime {
+				t.LoadedSeconds += min(time.Minute, r.s.LoadEnd-time.Duration(i)*time.Minute).Seconds()
+			}
+		}
 	}
 	tl1 := 0
 	for k, v := range t.SourceOffers {
@@ -395,6 +420,33 @@ func (r *run) nativeScore(ctx context.Context, card *score.Scorecard, in score.I
 	}
 	judge(card, t.Failures, t.Missing)
 	report["nativeQualification"] = t.nativeEvidence
+	report["providerReceiptCoverage"] = "unique observed sink requests and their (receipt, member, source start, status) projections for baseline, ordinary native, managed functional, suppression, bulk, mixed rate and segments"
+}
+
+func (t *nativeTally) segmentTimes(lane string, s managed.Snapshot, d dispatchSamples) {
+	observed := map[string]bool{}
+	for _, row := range s.Dispatches {
+		matches := 0
+		for _, effect := range s.Effects {
+			if effect.ScheduleRoot != row.Root || effect.Action != "notification" || effect.Notifier != t.run.sinkID || effect.ChildState != "sent" {
+				continue
+			}
+			matches++
+			due := d.ExpectedDue[effect.Operation]
+			if due.IsZero() || observed[effect.Operation] {
+				t.miss("missing or ambiguous segment oracle deadline")
+				continue
+			}
+			observed[effect.Operation] = true
+			t.timed("segment_"+lane, due, d.Windows[row.Root], effect)
+		}
+		if matches != 1 {
+			t.miss("segment dispatch lacks unique confirmed sink timing")
+		}
+	}
+	if len(observed) == 0 || len(observed) != len(d.ExpectedDue) {
+		t.miss("segment oracle operation population incomplete")
+	}
 }
 
 func (t *nativeTally) timed(cohort string, due time.Time, w dispatchWindow, e managed.Effect) {
@@ -403,7 +455,7 @@ func (t *nativeTally) timed(cohort string, due time.Time, w dispatchWindow, e ma
 		entered, err = time.Parse(time.RFC3339Nano, e.EnteredAt+"Z")
 	}
 	confirmed, er := time.Parse(time.RFC3339Nano, e.ConfirmedAt)
-	if err != nil || er != nil || w.By.IsZero() || confirmed.Before(entered) || entered.Before(due) || w.By.Before(due) {
+	if err != nil || er != nil || w.Before.Before(due) || w.By.Before(w.Before) || w.By.After(due.Add(30*time.Second)) || confirmed.Before(entered) || entered.Before(due) || w.By.Before(due) {
 		t.miss("invalid timer/provider timestamps for " + cohort)
 		return
 	}

@@ -17,11 +17,11 @@ func (m *managedLane) segmentTail(ctx context.Context, p *policyState, f NativeE
 			return false, err
 		}
 		timing.add(snap)
-		if err = m.holdUnknown(ctx, f, snap); err != nil {
-			return false, err
-		}
 		cleared, ok := m.clearsAt.Load(aid)
 		if !ok {
+			if err = m.holdUnknown(ctx, f, snap); err != nil {
+				return false, err
+			}
 			return false, m.validity(ctx, f, &timing, end.Add(10*time.Second))
 		}
 		clearAt := cleared.(time.Time)
@@ -44,6 +44,13 @@ func (m *managedLane) segmentTail(ctx context.Context, p *policyState, f NativeE
 		if !closed {
 			return false, nil
 		}
+		// Include operations without a callback or target, and schedule roots that
+		// never reached native admission. Settlement cannot infer a successful call.
+		originals, err := m.proveClosedRoots(ctx, f, snap, p.notifierID)
+		m.rememberClosed(aid, m.condition(lane), f, originals, nil)
+		if err != nil {
+			return false, err
+		}
 		rs, err := m.sink.ManagedReceipts(ctx, aid, start)
 		if err != nil {
 			return false, err
@@ -60,16 +67,10 @@ func (m *managedLane) segmentTail(ctx context.Context, p *policyState, f NativeE
 				}
 			}
 		}
-		if err = segmentEvidence(p, f, snap, firing, timing, clearAt); err != nil {
+		if err = segmentEvidence(p, f, snap, firing, timing, clearAt, m.run.e.d.CampaignNotifier); err != nil {
 			return false, err
 		}
-		// Include operations without a callback or target, and schedule roots that
-		// never reached native admission. Settlement cannot infer a successful call.
-		originals, err := m.proveClosedRoots(ctx, f, snap, p.notifierID)
-		if err != nil {
-			return false, err
-		}
-		m.rememberClosed(aid, m.condition(lane), f.History.ID, snap, rs, true)
+		m.rememberClosed(aid, m.condition(lane), f, originals, rs)
 		return true, m.save(ctx, "native.managed.segment_closed", map[string]any{"index": index, "lane": lane, "start": start, "end": end, "clearedAt": clearAt, "fixture": f, "snapshot": snap, "dispatch": timing, "originals": originals, "receipts": rs})
 	})
 }

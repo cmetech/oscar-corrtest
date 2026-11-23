@@ -11,6 +11,7 @@ import (
 type dispatchWindow struct{ Before, By time.Time }
 type dispatchSamples struct {
 	Previous        time.Time
+	ExpectedDue     map[string]time.Time
 	Windows         map[string]dispatchWindow
 	ValidUntil      time.Time
 	ValiditySamples int

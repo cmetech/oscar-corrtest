@@ -22,6 +22,7 @@ type SourceReceipt struct {
 	Generation, Variant                                                                                                                                     int64
 }
 type Effect struct {
+	Variant                                                                                                                                                              int64
 	Operation, Logical, Kind, Target, TargetState, Callback, CallbackOutcome, SourceWrite, Child, Notifier, Action, ChildState, Severity, ScheduleRoot, Reason, Revision string
 	Receiver, ScopeNotifier, ScopeAction, BindingID, ReceivedAt, EnteredAt, ConfirmedAt                                                                                  string
 }
@@ -65,7 +66,7 @@ const ticketSelect = `SELECT JSON_OBJECT('Flow',w.flow_id,'History',w.history_id
  FROM AM_AlertTicketWorkflow w JOIN TKT_Ticketing_Audit a ON a.id=w.ticket_audit_id AND a.ticket_workflow_id=w.flow_id AND a.operation_type='create'
  WHERE w.history_id=? AND w.provider_confirmed_at IS NOT NULL LIMIT 257`
 const dispatchSelect = `SELECT JSON_OBJECT('Root',d.root_id,'Attempt',d.current_attempt_id,'Binding',d.binding_id,'Revision',d.command->>'$.policy_binding.revision_id','Kind',d.command->>'$.kind','DueAt',DATE_FORMAT(d.due_at,'%Y-%m-%dT%H:%i:%s.%fZ'),'State',d.state) FROM TM_ResendScheduleDispatch d JOIN TM_ResendEpisodeState b ON d.binding_id=b.id WHERE b.history_id=? AND d.id=d.root_id ORDER BY d.id LIMIT 257`
-const effectSelect = `SELECT JSON_OBJECT('Operation',o.id,'Logical',o.logical_action_id,'Kind',o.request->>'$.kind',
+const effectSelect = `SELECT JSON_OBJECT('Operation',o.id,'Logical',o.logical_action_id,'Variant',o.variant_revision,'Kind',o.request->>'$.kind',
  'Target',t.target_key,'Receiver',t.configuration->>'$.receiver_id','ScopeNotifier',t.configuration->>'$.scope[0].notifier_id','ScopeAction',t.configuration->>'$.scope[0].action','TargetState',t.state,'Callback',c.delivery_id,'CallbackOutcome',c.outcomes->>'$.state',
  'SourceWrite',c.source->>'$.delivery_id','ReceivedAt',DATE_FORMAT(c.received_at,'%Y-%m-%dT%H:%i:%s.%fZ'),
  'Child',d.id,'Notifier',d.notifier_id,'Action',d.native_effect->>'$.action','ChildState',d.delivery_state,

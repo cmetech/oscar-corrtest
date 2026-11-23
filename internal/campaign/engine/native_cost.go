@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/score"
@@ -25,32 +24,35 @@ type traceSpan struct {
 	OffsetNS, DurationNS int64
 }
 type attemptTrace struct {
-	TraceID, OriginalDispatch, Receiver, Notifier string
-	ReceiptID                                     int64
-	Members                                       []string
-	Started, Finished                             time.Time
-	SQLSeen, HTTPSeen, Dropped                    *int
-	Spans                                         []traceSpan
+	TraceID, RequestID         string
+	Started, Finished          time.Time
+	SQLSeen, HTTPSeen, Dropped *int
+	Spans                      []traceSpan
 }
 type costFile struct {
 	Run, Hash, TargetBuild, CorrTestBuild, WorkloadConfig, ObserverConfig string
 	From, Through                                                         time.Time
 	SamplingFraction, ObserverCPUSeconds                                  *float64
+	Routes                                                                map[string]captureRoute
+	Decisions                                                             []routeDecision
+	Requests                                                              []capturedRequest
 	Attempts                                                              []attemptTrace
 }
 type costStats struct {
-	CaptureSHA256, ObserverConfig string
-	ObserverCPUSeconds            float64
-	Attempts                      map[string]int
-	Counts                        map[string]map[string]int
-	Seconds                       map[string]map[string]float64
-	Headlines                     []score.Headline
+	CaptureSHA256, ObserverConfig, ComparisonConfig string
+	Outcomes                                        map[string]int
+	PhysicalAttempts                                int
+	ObserverCPUSeconds                              float64
+	Attempts                                        map[string]int
+	Counts                                          map[string]map[string]int
+	Seconds                                         map[string]map[string]float64
+	Headlines                                       []score.Headline
 }
 
-func (r *run) costCapture(t *nativeTally, rs []targetops.Receipt) (costStats, error) {
+func (r *run) costCapture(t *nativeTally, rs []targetops.Receipt, end time.Time) (costStats, error) {
 	var out costStats
-	if r.e.d.ObserverDir == "" || r.opts.Provenance == nil {
-		return out, errors.New("independent ordinary request/SQL observer not commissioned")
+	if r.e.d.ObserverDir == "" {
+		return out, errors.New("ordinary capture directory unavailable")
 	}
 	root, err := os.OpenRoot(r.e.d.ObserverDir)
 	if err != nil {
@@ -81,75 +83,47 @@ func (r *run) costCapture(t *nativeTally, rs []targetops.Receipt) (costStats, er
 		return out, errors.New("invalid trace capture format")
 	}
 	p := r.opts.Provenance
-	if c.Run != r.id || c.Hash != r.s.Hash() || c.TargetBuild != p.TargetBuild || c.CorrTestBuild != p.CorrTestBuild || c.WorkloadConfig != p.WorkloadConfig || !digest(c.ObserverConfig, 32) || c.From.IsZero() || c.From.After(r.t0) || c.Through.Before(r.t0.Add(r.s.LoadEnd)) || c.SamplingFraction == nil || *c.SamplingFraction != 1 || c.ObserverCPUSeconds == nil || !finite(*c.ObserverCPUSeconds) || *c.ObserverCPUSeconds < 0 {
-		return out, errors.New("trace provenance, observer coverage or measured overhead incomplete")
+	if c.Run != r.id || c.Hash != r.s.Hash() || !digest(c.ObserverConfig, 32) || c.From.IsZero() || c.From.After(r.t0) || c.Through.Before(end) || end.Before(r.t0.Add(r.s.LoadEnd)) || c.SamplingFraction == nil || *c.SamplingFraction != 1 {
+		return out, errors.New("capture run, hash, observed window or lossless coverage incomplete")
 	}
 	sum := sha256.Sum256(raw)
-	out = costStats{CaptureSHA256: hex.EncodeToString(sum[:]), ObserverConfig: c.ObserverConfig, ObserverCPUSeconds: *c.ObserverCPUSeconds, Attempts: map[string]int{}, Counts: map[string]map[string]int{}, Seconds: map[string]map[string]float64{}}
-	byReceipt := map[int64]attemptTrace{}
-	seen := map[string]bool{}
-	dispatches := map[[2]string]bool{}
-	for _, a := range c.Attempts {
-		key := [2]string{a.OriginalDispatch, a.Notifier}
-		if !digest(a.OriginalDispatch, 32) || dispatches[key] {
-			return out, errors.New("missing or duplicate original physical dispatch")
-		}
-		dispatches[key] = true
-		if a.ReceiptID <= 0 || seen[a.TraceID] || !digest(a.TraceID, 16) || byReceipt[a.ReceiptID].ReceiptID != 0 {
-			return out, errors.New("duplicate or missing original trace identity")
-		}
-		seen[a.TraceID] = true
-		byReceipt[a.ReceiptID] = a
+	out = costStats{CaptureSHA256: hex.EncodeToString(sum[:]), ObserverConfig: c.ObserverConfig, Outcomes: map[string]int{}, Attempts: map[string]int{}, Counts: map[string]map[string]int{}, Seconds: map[string]map[string]float64{}}
+	out.ComparisonConfig = configurationDigest(c.ObserverConfig, c.Routes)
+	contacts, err := r.ordinaryContacts(t, c, rs)
+	if err != nil {
+		return out, err
 	}
-	seenMember := map[string]bool{}
+	for _, q := range c.Requests {
+		out.Outcomes[q.Outcome]++
+	}
+	out.PhysicalAttempts = len(c.Requests)
+	if r.s.Custom {
+		return out, nil
+	}
+	if p == nil || c.TargetBuild != p.TargetBuild || c.CorrTestBuild != p.CorrTestBuild || c.WorkloadConfig != p.WorkloadConfig || c.ObserverCPUSeconds == nil || !finite(*c.ObserverCPUSeconds) || *c.ObserverCPUSeconds < 0 {
+		return out, errors.New("full-cost provenance or measured overhead unavailable")
+	}
+	out.ObserverCPUSeconds = *c.ObserverCPUSeconds
+	traces := map[string]attemptTrace{}
+	seen := map[string]bool{}
+	for _, a := range c.Attempts {
+		if !digest(a.TraceID, 16) || seen[a.TraceID] || !digest(a.RequestID, 32) || traces[a.RequestID].TraceID != "" {
+			return out, errors.New("missing or duplicate request/trace identity")
+		}
+		traces[a.RequestID] = a
+		seen[a.TraceID] = true
+	}
 	tails := map[string][]float64{}
-	ordered := append([]targetops.Receipt(nil), rs...)
-	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].ReceivedAt.Before(ordered[j].ReceivedAt) })
-	for _, rc := range ordered {
-		members := map[string]bool{}
-		cohorts := map[string]bool{}
-		receiver := ""
-		for _, a := range rc.Alerts {
-			m, ok := t.ordinary[a.AlertName]
-			if !ok || a.Status != "firing" {
-				continue
-			}
-			if len(m.Receivers) != 1 || receiver != "" && receiver != m.Receivers[0].Name {
-				return out, errors.New("ambiguous original receiver")
-			}
-			receiver = m.Receivers[0].Name
-			cohort := "direct"
-			if m.Labels["campaign_lane"] == "native-canonical" {
-				cohort = "canonical_first"
-				if seenMember[a.AlertName] {
-					cohort = "canonical_repeat"
-				}
-			}
-			cohorts[cohort] = true
-			members[a.AlertName] = true
-			seenMember[a.AlertName] = true
-		}
-		if len(members) == 0 {
+	for _, q := range c.Requests {
+		cohorts := contacts[q.RequestID]
+		if len(cohorts) == 0 {
 			continue
+		} // resolved-only group, outside cost cohort
+		a, ok := traces[q.RequestID]
+		if !ok || a.Started.Before(c.From) || a.Started.After(q.Started) || a.Finished.Before(q.Finished) || a.Finished.After(c.Through) {
+			return out, errors.New("request-side attempt lacks its complete attributable trace")
 		}
-		a, ok := byReceipt[rc.ID]
-		if !ok {
-			return out, errors.New("captured sink contact missing its complete trace")
-		}
-		delete(byReceipt, rc.ID)
-		recipient := rc.Notifier
-		if cohorts["direct"] && recipient == "" && rc.Receiver == receiver {
-			recipient = rc.Receiver
-		}
-		if a.Receiver != receiver || a.Notifier == "" || a.Notifier != recipient || len(a.Members) != len(members) || a.Started.Before(c.From) || a.Finished.After(c.Through) || rc.ReceivedAt.Before(a.Started) || rc.ReceivedAt.After(a.Finished) {
-			return out, errors.New("trace source/recipient/time differs from sink request")
-		}
-		for _, id := range a.Members {
-			if !members[id] {
-				return out, errors.New("trace group differs from original source members")
-			}
-			delete(members, id)
-		}
+		delete(traces, q.RequestID)
 		counts := map[string]int{}
 		times := map[string]float64{}
 		sql, http := 0, 0
@@ -215,8 +189,8 @@ func (r *run) costCapture(t *nativeTally, rs []targetops.Receipt) (costStats, er
 			t.miss("recurring canonical lifecycle/coverage cost missing")
 		}
 	}
-	if len(byReceipt) != 0 {
-		return out, errors.New("observer recorded extra physical contacts outside captured member set")
+	if len(traces) != 0 {
+		return out, errors.New("unmatched trace outside observed firing request population")
 	}
 	for _, cohort := range []string{"direct", "canonical_first", "canonical_repeat"} {
 		if len(tails[cohort]) == 0 {

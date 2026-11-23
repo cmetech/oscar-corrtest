@@ -13,6 +13,7 @@ import (
 // One projected row per expected frozen child. LEFT joins retain an unreserved
 // operation, an absent callback, and a manifest child with no reported effect.
 type OriginalChild struct {
+	ProviderFlow                                                                 string
 	History, Root, Operation, Parent, OpState, Kind                              string
 	Episode                                                                      int
 	Target, TargetState, Successor, Callback, Aggregate                          string
@@ -72,7 +73,7 @@ SELECT JSON_OBJECT('History',history_id,'Episode',episode_number,'Root',root,'Op
  'Expected',JSON_LENGTH(manifest,'$.targets'),'Held',JSON_LENGTH(manifest,'$.held'),'Reported',JSON_LENGTH(outcomes,'$.effects'),
  'Name',name,'Notifier',candidate->>'$.notifier_id','Action',candidate->>'$.action','PolicyReceipt',JSON_UNQUOTE(policy_id),
  'Child',effect->>'$.id','ReceiptType',effect->>'$.receipt_type','State',effect->>'$.state',
- 'ProviderAction',provider->>'$.action','ProviderOutcome',provider->>'$.outcome','ProviderConfirmed',provider->>'$.confirmed_at',
+ 'ProviderFlow',provider->>'$.evidence.flow_id','ProviderAction',provider->>'$.action','ProviderOutcome',provider->>'$.outcome','ProviderConfirmed',provider->>'$.confirmed_at',
  'ProviderPartial',provider->>'$.evidence.partial','Attempt',provider->>'$.attempt_id',
  'ProviderNoEffect',IF(provider->>'$.evidence.flow_status' IN ('completed','failed','cancelled','expired')
  AND provider->>'$.evidence.primary.performed'='false' AND provider->>'$.evidence.primary.state' IN ('skipped','failed')

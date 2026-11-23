@@ -137,6 +137,21 @@ func NewFromConfig(ctx context.Context, cfg campaign.Config, host Host) (*Engine
 			return append(results, check)
 		}
 		results := precheck.Run(ctx, a, s, MinVersion)
+		if s.NativeWorkload != nil && len(s.NativeWorkload.Cohorts) > 0 {
+			detail := "Scoring requires observed ordinary group decisions, request attempts and receipts."
+			if !s.Custom {
+				detail += " Full cost scoring also requires matched SQL/HTTP traces, overhead and build provenance."
+			}
+			check := precheck.Result{ID: "ordinary-capture-directory", Tier: precheck.Advisory, Detail: detail, Status: precheck.Pass, Measured: "observer directory readable"}
+			root, err := os.OpenRoot(d.ObserverDir)
+			if err != nil {
+				check.Status = precheck.Warn
+				check.Measured = "observer directory unavailable"
+			} else {
+				root.Close()
+			}
+			results = append(results, check)
+		}
 		if s.NativeWorkload != nil && s.NativeWorkload.ManagedTL1 {
 			results = append(results, d.managed.precheck(ctx))
 		}

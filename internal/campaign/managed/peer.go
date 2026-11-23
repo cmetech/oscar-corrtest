@@ -234,6 +234,7 @@ func (p *Peer) writeLocked(s string) error {
 }
 
 type WireEvent struct {
+	FinishedAt           time.Time
 	At                   time.Time
 	AID, Condition, Code string
 	Sequence             uint64
@@ -259,6 +260,7 @@ func (p *Peer) Emit(aid, condition, code string) (WireEvent, error) {
 		p.conn.Close()
 		return e, errors.New("TL1 write outcome unknown")
 	}
+	e.FinishedAt = time.Now().UTC()
 	e.Outcome = "written"
 	return e, nil
 }

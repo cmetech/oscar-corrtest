@@ -16,7 +16,41 @@ func matchSink(effects []managed.Effect, receipts []targetops.Receipt, notifier,
 }
 
 func matchOriginalSink(effects []managed.Effect, receipts []targetops.Receipt, notifier, correlation, originalChild string, selected NativeEpisodeFixture) (bool, error) {
-	claimed := map[int64]bool{}
+	return matchProvider(effects, receipts, notifier, correlation, func(e managed.Effect, r targetops.Receipt, a targetops.SinkAlert) bool {
+		return e.Child != originalChild || selectedMember(selected, a)
+	})
+}
+
+// The sink projection is per AID. A grouped request can witness another AID in
+// its own projection, even when only a single source variant generated a send.
+func matchManagedSink(s managed.Snapshot, receipts []targetops.Receipt, notifierID, captureName string, f NativeEpisodeFixture) (bool, error) {
+	return matchProvider(s.Effects, receipts, notifierID, f.Source.Correlation, func(e managed.Effect, r targetops.Receipt, a targetops.SinkAlert) bool {
+		if captureName == "" || r.Notifier != captureName || e.Variant < 1 {
+			return false
+		}
+		for _, src := range s.Source {
+			if src.History == f.History.ID && src.Authority == f.Source.Authority && src.Generation == f.Source.Generation && src.Episode == f.Source.Episode && src.Variant == e.Variant && src.Receiver != "" && src.Receiver == e.Receiver && selectedMember(NativeEpisodeFixture{History: f.History, Source: src}, a) {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func matchProvider(effects []managed.Effect, receipts []targetops.Receipt, notifier, correlation string, match func(managed.Effect, targetops.Receipt, targetops.SinkAlert) bool) (bool, error) {
+	type memberKey struct {
+		id    int64
+		index int
+	}
+	claimed := map[memberKey]bool{}
+	expected := 0
+	for _, r := range receipts {
+		for _, a := range r.Alerts {
+			if a.Status == "firing" {
+				expected++
+			}
+		}
+	}
 	children := map[string]bool{}
 	for _, effect := range effects {
 		if effect.Notifier != notifier || effect.Action != "notification" || effect.ConfirmedAt == "" {
@@ -37,29 +71,30 @@ func matchOriginalSink(effects []managed.Effect, receipts []targetops.Receipt, n
 		if err != nil || end.Before(start) {
 			return false, errors.New("provider confirmation time unavailable")
 		}
-		var hit int64
+		var hit memberKey
 		for _, receipt := range receipts {
 			if receipt.ReceivedAt.Before(start) || receipt.ReceivedAt.After(end) {
 				continue
 			}
-			for _, a := range receipt.Alerts {
+			for index, a := range receipt.Alerts {
 				if a.Status == "firing" && a.Labels["severity"] == effect.Severity && a.Labels["correlation_key"] == correlation {
-					if effect.Child == originalChild && !selectedMember(selected, a) {
-						return false, errors.New("provider receipt differs from selected original")
+					if receipt.ID <= 0 || !match(effect, receipt, a) {
+						continue
 					}
-					if hit != 0 || claimed[receipt.ID] {
+					key := memberKey{receipt.ID, index}
+					if hit.id != 0 || claimed[key] {
 						return false, errors.New("ambiguous provider receipt identity")
 					}
-					hit = receipt.ID
+					hit = key
 				}
 			}
 		}
-		if hit == 0 {
+		if hit.id == 0 {
 			return false, nil
 		}
 		claimed[hit] = true
 	}
-	if len(claimed) < len(receipts) {
+	if len(claimed) != expected {
 		return false, errors.New("unattributed controlled provider contact")
 	}
 	return len(claimed) > 0, nil
