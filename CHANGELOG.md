@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- CorrTest enables the dedicated TL1 managed smoke, mixed V3 smoke, same-work
+  ordinary control and 150-minute mixed V3 qualification selectors. Mixed runs
+  accept `--managed-share` as a fraction and compare the persisted effective
+  scenario. The score records separate source, episode, physical receipt and
+  provider evidence, per-segment closure, queue drain and cost observations.
+  Full comparable runs need a commissioned independent per-run trace in the
+  optional `NativeObserverDir`. Missing or sampled evidence prevents full
+  qualification. Comparison reports `Items[].RunID` and exits 4 on a measured
+  latency regression or failing candidate. No database migration is required.
+
 - CorrTest reconciles managed manual and bulk resends from the original
   callback child receipts. A confirmed sink notification and a definitively
   skipped ALERTHISTORY ticket can qualify together. Missing or ambiguous
