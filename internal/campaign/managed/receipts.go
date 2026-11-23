@@ -147,7 +147,7 @@ func (c Config) read(ctx context.Context, id string, queries []string, operation
 	sql += "COMMIT;"
 	qctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(qctx, "mysql", "--defaults-file="+c.MySQLDefaultsFile, "--ssl-mode=VERIFY_IDENTITY", "--batch", "--raw", "--skip-column-names", "--connect-timeout=3")
+	cmd := exec.CommandContext(qctx, "mysql", "--defaults-file="+c.MySQLDefaultsFile, "--ssl-mode=VERIFY_IDENTITY", "--batch", "--raw", "--skip-column-names", "--connect-timeout=3") // #nosec G204 -- fixed "mysql" binary; the defaults file is operator-configured, absolute and permission-checked by privateFile, and the SQL goes over stdin.
 	cmd.Stdin = strings.NewReader(sql)
 	var out cappedBuffer
 	cmd.Stdout = &out

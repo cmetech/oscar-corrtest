@@ -43,7 +43,7 @@ func privateFile(path string) ([]byte, error) {
 	if err != nil || !meta.Mode().IsRegular() {
 		return nil, errors.New("protected campaign file must be regular")
 	}
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- path is an operator-configured campaign secret file, validated as a regular file by the Lstat above.
 	if err != nil {
 		return nil, errors.New("protected campaign file unavailable")
 	}
@@ -137,11 +137,11 @@ func Open(c Config) (*Peer, error) {
 }
 func (p *Peer) Close() {
 	p.closeOnce.Do(func() {
-		p.listener.Close()
+		_ = p.listener.Close()
 		p.mu.Lock()
 		p.closing = true
 		if p.conn != nil {
-			p.conn.Close()
+			_ = p.conn.Close()
 		}
 		p.mu.Unlock()
 		<-p.done
@@ -169,19 +169,19 @@ func (p *Peer) serve(l login) {
 			return
 		}
 		if conn.RemoteAddr().(*net.TCPAddr).AddrPort().Addr().Unmap().String() != p.cfg.ProbeIP {
-			conn.Close()
+			_ = conn.Close()
 			continue
 		}
 		p.mu.Lock()
 		if p.closing {
 			p.mu.Unlock()
-			conn.Close()
+			_ = conn.Close()
 			return
 		}
 		p.conn = conn
 		p.mu.Unlock()
 		// The probe uses plain TCP for this fixture, with no Telnet negotiation.
-		conn.SetReadDeadline(time.Now().Add(20 * time.Second))
+		_ = conn.SetReadDeadline(time.Now().Add(20 * time.Second))
 		r := bufio.NewReaderSize(conn, 4096)
 		logged := false
 		for {
@@ -212,14 +212,14 @@ func (p *Peer) serve(l login) {
 				logged = true
 				p.authenticated = true
 				close(p.ready)
-				conn.SetReadDeadline(time.Time{})
+				_ = conn.SetReadDeadline(time.Time{})
 			}
 			p.mu.Unlock()
 			if !ok || err != nil || fields[0] == "CANC-USER" {
 				break
 			}
 		}
-		conn.Close()
+		_ = conn.Close()
 		p.mu.Lock()
 		p.authenticated = false
 		p.conn = nil
@@ -261,7 +261,7 @@ func (p *Peer) Emit(aid, condition, code string) (WireEvent, error) {
 	if err != nil {
 		e.Outcome = "unknown"
 		p.authenticated = false
-		p.conn.Close()
+		_ = p.conn.Close()
 		return e, errors.New("TL1 write outcome unknown")
 	}
 	e.FinishedAt = time.Now().UTC()

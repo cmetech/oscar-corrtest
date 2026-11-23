@@ -148,7 +148,7 @@ func NewFromConfig(ctx context.Context, cfg campaign.Config, host Host) (*Engine
 				check.Status = precheck.Warn
 				check.Measured = "observer directory unavailable"
 			} else {
-				root.Close()
+				_ = root.Close()
 			}
 			results = append(results, check)
 		}
