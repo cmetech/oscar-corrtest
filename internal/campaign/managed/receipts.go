@@ -48,6 +48,7 @@ type Snapshot struct {
 }
 
 const sourceSelect = `SELECT JSON_OBJECT('History',h.history_id,'WriteID',h.delivery_id,
+ 'Receiver',h.native_binding->>'$.receiver_id',
  'EventID',h.managed_binding->>'$.record.event_id','WireEpisode',h.managed_binding->>'$.record.identity.episode_id',
  'Locator',h.managed_binding->>'$.record.identity.locator','Handler',h.managed_binding->>'$.record.identity.handler',
  'MappingRevision',h.managed_binding->>'$.record.identity.revision','WireStart',h.managed_binding->>'$.record.identity.started_at',

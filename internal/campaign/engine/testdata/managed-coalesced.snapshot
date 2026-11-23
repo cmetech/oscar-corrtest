@@ -1,0 +1,10 @@
+2023-11-14T22:13:22Z
+---
+{"History":"0b94baac-3055-45be-9697-2dcd6fa35fa4","WriteID":"write-minor","EventID":"minor","Receiver":"canonical","Authority":"a","Episode":"episode","Generation":1,"Variant":1,"Starts":"2023-11-14T22:13:19Z","SourceSeverity":"minor","SourceID":"src","TID":"ne","Correlation":"key"}
+{"History":"0b94baac-3055-45be-9697-2dcd6fa35fa4","WriteID":"write-major","EventID":"major","Receiver":"canonical","Authority":"a","Episode":"episode","Generation":1,"Variant":2,"Starts":"2023-11-14T22:13:20Z","SourceSeverity":"major","SourceID":"src","TID":"ne","Correlation":"key"}
+---
+{"Child":"child","Callback":"cb","TargetState":"confirmed","Variant":2,"Receiver":"canonical","Notifier":"sid","Action":"notification","Severity":"major","EnteredAt":"2023-11-14T22:13:20Z","ConfirmedAt":"2023-11-14T22:13:21Z"}
+---
+---
+---
+---

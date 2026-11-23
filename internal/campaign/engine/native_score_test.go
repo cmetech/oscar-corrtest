@@ -176,12 +176,42 @@ func TestRequestCaptureIncludesFailedDirectAttemptAndActualRepeats(t *testing.T)
 
 func TestManagedRateOriginalVariantAndCapture(t *testing.T) {
 	at := time.Unix(1700000000, 0).UTC()
-	f := NativeEpisodeFixture{History: observedHistory{ID: "h", Labels: map[string]string{"aid": "A"}}, Source: managed.SourceReceipt{History: "h", Authority: "a", Generation: 1, Episode: "episode", Variant: 2, Receiver: "canonical", Starts: at.Format(time.RFC3339Nano), SourceID: "src", TID: "ne", Correlation: "key"}}
-	minor := f.Source
-	minor.Variant = 1
-	minor.Starts = at.Add(-time.Second).Format(time.RFC3339Nano)
-	snap := managed.Snapshot{Source: []managed.SourceReceipt{minor, f.Source}, Effects: []managed.Effect{{Child: "child", Callback: "cb", TargetState: "confirmed", Variant: 2, Receiver: "canonical", Notifier: "sid", Action: "notification", Severity: "major", EnteredAt: at.Format(time.RFC3339Nano), ConfirmedAt: at.Add(time.Second).Format(time.RFC3339Nano)}}}
-	a := targetops.SinkAlert{Status: "firing", StartsAt: f.Source.Starts, Labels: map[string]string{"aid": "A", "source_id": "src", "node": "ne", "correlation_key": "key", "severity": "major"}}
+	const historyID = "0b94baac-3055-45be-9697-2dcd6fa35fa4"
+	// Drive the production query builder and bounded reader with fixed mysql
+	// batch output. The temporary executable never connects to a database.
+	dir := t.TempDir()
+	queryPath := filepath.Join(dir, "prepared.sql")
+	t.Setenv("CORRTEST_FIXTURE_QUERY", queryPath)
+	t.Setenv("PATH", dir)
+	const stub = `#!/bin/sh
+/bin/cat > "$CORRTEST_FIXTURE_QUERY" || exit 1
+exec /bin/cat testdata/managed-coalesced.snapshot
+`
+	if err := os.WriteFile(filepath.Join(dir, "mysql"), []byte(stub), 0700); err != nil {
+		t.Fatal(err)
+	}
+	config := managed.Config{MySQLDefaultsFile: filepath.Join(dir, "client.cnf")}
+	if err := os.WriteFile(config.MySQLDefaultsFile, []byte("[client]"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := config.Snapshot(context.Background(), historyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query, err := os.ReadFile(queryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceQuery, _, found := strings.Cut(string(query), "DEALLOCATE PREPARE")
+	if !found || !strings.Contains(strings.ReplaceAll(sourceQuery, "''", "'"), "'Receiver',h.native_binding->>'$.receiver_id'") {
+		t.Fatal("source query must project the receiver from the original signed History binding")
+	}
+	if len(snap.Source) != 2 || len(snap.Effects) != 1 {
+		t.Fatalf("snapshot has %d source rows and %d effects", len(snap.Source), len(snap.Effects))
+	}
+	minor := snap.Source[0]
+	f := NativeEpisodeFixture{History: observedHistory{ID: historyID, Labels: map[string]string{"aid": "A"}}, Source: snap.Source[1]}
+	a := targetops.SinkAlert{Status: "firing", StartsAt: at.Format(time.RFC3339Nano), Labels: map[string]string{"aid": "A", "source_id": "src", "node": "ne", "correlation_key": "key", "severity": "major"}}
 	// Two native source variants may coalesce to this one physical contact.
 	rc := []targetops.Receipt{{ID: 1, ReceivedAt: at, Notifier: "CAMPAIGN_SINK", Alerts: []targetops.SinkAlert{a}}}
 	valid := func() bool { ok, _ := matchManagedSink(snap, rc, "sid", "CAMPAIGN_SINK", f); return ok }
@@ -202,6 +232,11 @@ func TestManagedRateOriginalVariantAndCapture(t *testing.T) {
 	}
 	snap.Effects = snap.Effects[:1]
 	rc[0].Alerts = rc[0].Alerts[:1]
+	snap.Effects[0].Receiver = "different-native-receiver"
+	if valid() {
+		t.Fatal("target receiver differs from source binding")
+	}
+	snap.Effects[0].Receiver = "canonical"
 	rc[0].Notifier = "other"
 	if valid() {
 		t.Fatal("wrong destination")
