@@ -615,9 +615,10 @@ func AlertingDayV4() Scenario {
 // drain): one set A and one ticketed set B document cycled at 0.2 alerts/s
 // (0.4/s in a spike), up to 8 in flight so 90 s runs (OSCAR slow) still hold
 // the spike rate (OSC-155). Both spikes end by T+8, when the cycling
-// documents stop (engine cycleMargin before the drain). R1 and the R5 escalation cohort (2 members
-// each, escalating after 2 minutes), fingerprint rounds of 6, two task runs
-// and one report; the worker lane fills the rest. Custom: never comparable.
+// documents stop (engine cycleMargin before the drain). R1 and the R5
+// escalation cohort (2 members each, escalating after 2 minutes),
+// fingerprint rounds of 6, two task runs and one report; the worker lane
+// fills the rest. Custom: never comparable.
 func AlertingDaySmokeV4() Scenario {
 	min := time.Minute
 	n := func(i int) *int { return &i }

@@ -14,6 +14,7 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/score"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
+	"github.com/cmetech/oscar-corrtest/internal/campaign/worker"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/runtime"
 	corr "github.com/cmetech/oscar-corrtest/internal/scenario"
@@ -277,21 +278,6 @@ func TestV4SkipReportLane(t *testing.T) {
 	})
 }
 
-// wallClock is the real clock; under synctest it runs on the bubble's fake time.
-type wallClock struct{}
-
-func (wallClock) Now() time.Time { return time.Now() }
-func (wallClock) SleepUntil(ctx context.Context, t time.Time) bool {
-	tm := time.NewTimer(time.Until(t))
-	defer tm.Stop()
-	select {
-	case <-tm.C:
-		return true
-	case <-ctx.Done():
-		return false
-	}
-}
-
 // linkStore accepts the run links a correlation run writes; nothing else is called.
 type linkStore struct{ Store }
 
@@ -327,7 +313,7 @@ func TestV4SmokeCorrelationHoldsPlanWithSlowRuns(t *testing.T) {
 					}
 					time.Sleep(d)
 					return domain.Run{ID: "crt_slow"}, nil
-				}}, wallClock{})}
+				}}, worker.RealClock{})} // under synctest, RealClock runs on the bubble's fake time
 				time.Sleep(s.Phase("correlation").Start) // the phase runner starts the lane here
 				r.cycleCorrelation(context.Background())
 				perMinute := map[int]int{}
