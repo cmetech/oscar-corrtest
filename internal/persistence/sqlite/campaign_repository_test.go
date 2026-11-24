@@ -3,8 +3,10 @@ package sqlite
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -557,5 +559,38 @@ func TestMigration0011AcceptsNativeOwners(t *testing.T) {
 	var ids string
 	if err := db.QueryRow(`SELECT group_concat(id || ':' || kind) FROM campaign_mutations ORDER BY id`).Scan(&ids); err != nil || ids != "1:fingerprint_policy_enable,2:managed_provider_owner,3:native_owned_silence,4:native_owned_inhibitor" {
 		t.Fatalf("rows %q err %v", ids, err)
+	}
+}
+
+// TestListCampaignsPagesWithOffset (OSC-154 AC-2): Offset skips the newest
+// campaigns, with or without a Limit.
+func TestListCampaignsPagesWithOffset(t *testing.T) {
+	ctx, t0 := context.Background(), time.Now()
+	d := openCampaignDB(t)
+	for i := range 5 {
+		if err := d.CreateCampaign(ctx, domain.Campaign{ID: fmt.Sprintf("c%d", i), ScenarioID: "s", ScenarioHash: "h", Trigger: "cli", RunBy: "agent",
+			Status: domain.CampaignPrecheck, StartedAt: t0.Add(time.Duration(i) * time.Minute)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ids := func(f domain.CampaignFilter) string {
+		cs, err := d.ListCampaigns(ctx, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, c := range cs {
+			out = append(out, c.ID)
+		}
+		return strings.Join(out, ",")
+	}
+	if got := ids(domain.CampaignFilter{Limit: 2, Offset: 1}); got != "c3,c2" {
+		t.Errorf("limit 2 offset 1: %s", got)
+	}
+	if got := ids(domain.CampaignFilter{Offset: 3}); got != "c1,c0" {
+		t.Errorf("offset 3: %s", got)
+	}
+	if got := ids(domain.CampaignFilter{Limit: 2, Offset: 9}); got != "" {
+		t.Errorf("past the end: %s", got)
 	}
 }

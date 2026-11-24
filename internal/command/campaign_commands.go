@@ -107,9 +107,12 @@ func (c *campaignClient) call(ctx context.Context, method, path string, body, ou
 		return err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<20+1))
 	if resp.StatusCode/100 != 2 {
 		return decodeAPIFailure(resp.StatusCode, raw)
+	}
+	if len(raw) > 16<<20 {
+		return errors.New("response exceeds 16 MiB")
 	}
 	var env struct {
 		Data json.RawMessage `json:"data"`
@@ -269,6 +272,8 @@ func (a *App) campaignStatusCmd(ctx context.Context, args []string) int {
 	flags := flag.NewFlagSet("campaign status", flag.ContinueOnError)
 	flags.SetOutput(a.stderr)
 	cf := addCampaignFlags(flags)
+	limit := flags.Int("limit", 20, "campaigns to list, 1-100 (without an id)")
+	offset := flags.Int("offset", 0, "newest campaigns to skip (without an id)")
 	pos, perr := parseLeading(flags, args)
 	if perr != nil {
 		return 2
@@ -276,20 +281,24 @@ func (a *App) campaignStatusCmd(ctx context.Context, args []string) int {
 	if len(pos) > 1 {
 		return a.commandUsageError("campaign status", "expected at most one campaign id")
 	}
+	if *limit < 1 || *limit > 100 || *offset < 0 {
+		return a.commandUsageError("campaign status", "--limit must be 1-100 and --offset at least 0")
+	}
 	c, err := a.newCampaignClient(cf)
 	if err != nil {
 		return a.commandUsageError("campaign status", err.Error())
 	}
 	if len(pos) == 0 {
-		var list []domain.Campaign
-		if err := c.call(ctx, http.MethodGet, "/api/v1/campaign/runs", nil, &list); err != nil {
+		var list []domain.CampaignSummary
+		query := url.Values{"limit": {strconv.Itoa(*limit)}, "offset": {strconv.Itoa(*offset)}}
+		if err := c.call(ctx, http.MethodGet, "/api/v1/campaign/runs?"+query.Encode(), nil, &list); err != nil {
 			return a.campaignFail("campaign status", err)
 		}
 		if *cf.output == "json" {
 			return a.writeJSON(list)
 		}
 		for _, x := range list {
-			fmt.Fprintf(a.stdout, "%s\t%s\t%s\n", x.ID, x.Status, displayEmpty(string(x.Verdict)))
+			fmt.Fprintf(a.stdout, "%s\t%s\t%s\t%s\t%s\n", x.ID, x.ScenarioID, x.Status, displayEmpty(string(x.Verdict)), x.StartedAt.Format(time.RFC3339))
 		}
 		return 0
 	}

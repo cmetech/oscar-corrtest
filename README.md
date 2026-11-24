@@ -129,7 +129,10 @@ Declare full-run provenance with
 `provenance.targetBuild`, `provenance.corrTestBuild` and
 `provenance.workloadConfig` on `POST /api/v1/campaign/runs`. Campaign status
 returns the start declaration in `options.provenance` and the frozen hash in
-`campaign.ScenarioHash`.
+`campaign.ScenarioHash`. `GET /api/v1/campaign/runs` lists campaign summaries
+(every campaign field except `Scorecard` and `Report`), newest first: `limit`
+(1-100, default 20) and `offset` page through them, as `campaign status`
+`--limit` and `--offset` do.
 
 ```bash
 oscar-corrtest campaign compare "$CANDIDATE_ID" \
