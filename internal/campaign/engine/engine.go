@@ -154,6 +154,8 @@ type Deps struct {
 	ExportRun func(ctx context.Context, runID, destination string) (evidence.Result, error)
 	// Fingerprint manages fingerprint policies; nil skips the fingerprint lane.
 	Fingerprint FingerprintPolicies
+	// UserOps runs v4 tasks and reports as a user account; nil leaves those lanes without evidence.
+	UserOps UserOps
 }
 
 // Engine implements runtime.CampaignEngine.
@@ -215,6 +217,10 @@ type run struct {
 	standing      score.StandingStats // v2 standing pool
 	breaker       score.BreakerStats  // v2 forced breaker window
 	fp            score.FingerprintStats
+	offers        []score.Offer       // controller-lane posts (the offered rate)
+	tasks         score.TaskExecStats // v4 on-demand task runs
+	reports       score.ReportStats   // v4 alert reports
+	laneStarts    []time.Time         // when the paced controller lanes reached full load (offered-rate warm-up)
 }
 
 type policyState struct {
@@ -232,6 +238,7 @@ type cohortMember struct {
 	policy     *policyState
 	origin     time.Time
 	deliveries []resend.Delivery
+	episodes   []score.EscalationEpisode // PolicySpec.Episode cohorts only
 	ambiguous  bool
 	recorded   bool
 }
@@ -272,9 +279,11 @@ func (e *Engine) Run(ctx context.Context, id string, o runtime.CampaignOptions) 
 		return err
 	}
 
-	results := e.d.Precheck(context.WithValue(ctx, campaignIDKey{}, id), o.Scenario)
+	pctx := context.WithValue(context.WithValue(ctx, campaignIDKey{}, id), skipLanesKey{}, o.SkipLanes)
+	results := e.d.Precheck(pctx, o.Scenario)
 	ok, comparable, reason := precheck.Startable(results, o.Acknowledged)
-	r.comparable = comparable && !o.Scenario.Custom // custom (incl. the smoke) never enters the reference
+	// Custom (incl. the smoke) never enters the reference, nor does a run with a lane skipped.
+	r.comparable = comparable && !o.Scenario.Custom && len(o.SkipLanes) == 0
 	detail, _ := json.Marshal(map[string]any{"results": results, "reason": reason, "comparable": comparable})
 	_ = e.d.Store.AppendCampaignEvent(stable, id, precheckEvent, "info", "pre-check results", detail, r.now())
 	if err := e.d.Store.RecordPrecheck(stable, id, domain.PrecheckResult{Passed: ok, Detail: detail, At: r.now()}); err != nil {
@@ -331,6 +340,12 @@ func (e *Engine) Recover(ctx context.Context, id string) error {
 		}
 	}
 	r.opts = runtime.CampaignOptions{Trigger: c.Trigger, RunBy: c.RunBy}
+	if ev, ok, err := r.store().FirstCampaignEvent(ctx, id, domain.CampaignOptionsEvent); err == nil && ok {
+		var rec domain.CampaignRecordedOptions
+		if json.Unmarshal(ev.Detail, &rec) == nil {
+			r.opts.SkipLanes = rec.SkipLanes // the recovered scorecard still shows a skipped lane
+		}
+	}
 	if s, ok := r.recordedScenario(ctx); ok {
 		r.s = s
 	}
@@ -468,13 +483,15 @@ func (r *run) execute(ctx context.Context) error {
 	go func() { defer bg.Done(); r.guards(phaseCtx, func() { stopPhases(); stopFO() }) }()
 
 	var work sync.WaitGroup
-	work.Add(6)
+	work.Add(8)
 	go func() { defer work.Done(); r.managedPhase(phaseCtx) }()
 	go func() { defer work.Done(); r.nativeOrdinaryPhase(phaseCtx) }()
 	go func() { defer work.Done(); r.correlation(phaseCtx) }()
 	go func() { defer work.Done(); r.resendPhase(phaseCtx) }()
 	go func() { defer work.Done(); r.standingPhase(phaseCtx) }()    // v2 only
 	go func() { defer work.Done(); r.fingerprintPhase(phaseCtx) }() // facet only
+	go func() { defer work.Done(); r.taskPhase(phaseCtx) }()        // v4 only
+	go func() { defer work.Done(); r.reportPhase(phaseCtx) }()      // v4 only
 	work.Wait()
 	// Firings end at the drain phase start (or earlier on a trip/stop).
 	if r.e.clock.SleepUntil(phaseCtx, r.at("drain", false)) {

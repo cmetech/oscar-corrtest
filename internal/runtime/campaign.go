@@ -50,6 +50,7 @@ type CampaignOptions struct {
 	Acknowledged    []string // advisory IDs
 	PrecheckOnly    bool
 	Provenance      *domain.CampaignProvenance
+	SkipLanes       []string // lanes switched off by option (scenario.SkippableLanes)
 }
 
 // CampaignView is a campaign plus its most recent events, for status endpoints.
@@ -127,7 +128,7 @@ func (r *Runtime) StartCampaign(ctx context.Context, o CampaignOptions) (domain.
 		return domain.Campaign{}, err
 	}
 	detail, _ := json.Marshal(domain.CampaignRecordedOptions{
-		Acknowledged: o.Acknowledged, PrecheckOnly: o.PrecheckOnly, RunBy: o.RunBy, Provenance: o.Provenance,
+		Acknowledged: o.Acknowledged, PrecheckOnly: o.PrecheckOnly, RunBy: o.RunBy, Provenance: o.Provenance, SkipLanes: o.SkipLanes,
 	})
 	if err := r.database.AppendCampaignEvent(ctx, c.ID, domain.CampaignOptionsEvent, "info", "campaign options recorded", detail, c.StartedAt); err != nil {
 		_ = r.database.TransitionCampaign(context.WithoutCancel(ctx), c.ID, domain.CampaignInterrupted, time.Now().UTC(), "options audit failed")
@@ -240,11 +241,18 @@ func (r *Runtime) ListCampaigns(ctx context.Context, f domain.CampaignFilter) ([
 	return r.database.ListCampaigns(ctx, f)
 }
 
-// executeScenarioForCampaign is the engine's internal scenario run: it bypasses the
-// campaign gate and takes runMu per call, so the campaign goroutine never holds it.
+// executeScenarioForCampaign is the engine's internal scenario run: it bypasses
+// the campaign gate. It waits out a synchronous run that took runMu before the
+// gate closed, then runs without holding runMu: once the gate is set every
+// synchronous run (Execute*, StartBuiltin/Scenario, trap checks, existing-feed
+// and installed-pack runs) refuses, so runMu only serialized the campaign's
+// own runs.
+// Campaign runs may now overlap (alerting-day@v4 runs correlation documents
+// concurrently); each run's alert, rule and parent names carry its own run
+// token, so they cannot match one another (compiler TestParallelRunsAreIsolated).
 func (r *Runtime) executeScenarioForCampaign(ctx context.Context, targetID string, s scenario.Scenario, mode string) (domain.Run, error) {
 	r.runMu.Lock()
-	defer r.runMu.Unlock()
+	r.runMu.Unlock() //nolint:staticcheck // a barrier, not a critical section
 	return r.executeScenarioLocked(ctx, targetID, s, mode)
 }
 

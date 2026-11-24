@@ -241,3 +241,15 @@ func TestCampaignRunSendsBuildProvenance(t *testing.T) {
 		t.Fatalf("code=%d err=%s", code, errs)
 	}
 }
+
+// TestSkippedLanesShowInStatus: a run with a lane skipped by option never
+// prints as a bare verdict.
+func TestSkippedLanesShowInStatus(t *testing.T) {
+	c := domain.Campaign{Scorecard: json.RawMessage(`{"Verdict":"PASS","SkippedLanes":["report: skipped (by option)"]}`)}
+	if got := skippedLanes(c); got != "\tskipped by option: report: skipped (by option)" {
+		t.Fatalf("got %q", got)
+	}
+	if skippedLanes(domain.Campaign{Scorecard: json.RawMessage(`{"Verdict":"PASS"}`)}) != "" || skippedLanes(domain.Campaign{}) != "" {
+		t.Fatal("no skipped lane prints nothing extra")
+	}
+}

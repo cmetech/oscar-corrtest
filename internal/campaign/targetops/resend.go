@@ -2,6 +2,7 @@ package targetops
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -54,6 +55,10 @@ type PolicyStatus struct {
 	Enrollment string `json:"enrollment"` // never_enrolled | preparing | enrolled | dormant | authority_unavailable
 	Revision   int    `json:"revision"`
 	Enabled    bool   `json:"enabled"`
+	// ActivationEnabled is RESEND_POLICY_ENABLED; ScheduleOperations is null
+	// unless RESEND_SCHEDULE_ENABLED (escalation and timed repeats need it).
+	ActivationEnabled  bool            `json:"activation_enabled"`
+	ScheduleOperations json.RawMessage `json:"schedule_operations"`
 	// Episodes counts every policy's open episodes on this notifier/action, not
 	// the selected policy's; RecentPolicyEpisodes is the policy's own (at most 10).
 	Episodes struct {

@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- New `alerting-day@v4` (comparable) and `alerting-day-smoke@v4` (about 15 minutes, never
+  comparable): the single-node mixed-load gate. Every lane runs at once for 150 minutes at a
+  total offered firing rate of 5/s over all lanes (10/s in 5-minute spikes at T+45 and T+105),
+  then a 30-minute drain. Correlation cycles set A and set B, up to 64 documents in flight paced to 1 alert/s (2/s in
+  a spike, 20%), and tickets the synthetic parents of flood and threshold (campaign
+  correlation runs no longer hold the runtime's run lock; each run's names carry its token); the fingerprint lane runs a verified round every minute under one
+  scoped policy (15 posts a minute, paced); R1-R4 plus an R5 escalation cohort (critical after 4 minutes, a new episode
+  every 15 minutes, posted through native Alertmanager because escalation acts on native
+  episodes) are scored, the latter per episode from sink receipts; a homelab task runs
+  through the task API every 5 minutes (gated on success and p95); alert reports at T+60 and
+  T+120 are read back from object storage and gated on History p95 while they run. v4
+  paces cohort and fingerprint posts so no minute exceeds the budget, reports offered posts per
+  minute by lane and is INCONCLUSIVE when a minute exceeds it by more than 5%. New blocking
+  v4 pre-checks: B12 (RESEND_SCHEDULE_ENABLED), B13 (alert report approved), B14 (fingerprint
+  policies commissioned) and B15 (one run of the homelab task succeeds as fo-01). `--skip-lane report` switches the report
+  lane off for one run: B13 reads skipped, the scorecard marks the lane "skipped (by option)" and
+  the run is not comparable. The worker must run the same
+  build (BaselineSpec gained `bursts`). Older scenario hashes are unchanged. Live runs UNRUN.
+
 - Source `39fae89` removes a duplicate standard-library import from the managed escalation smoke. Build and behavioral qualification remain UNRUN.
 
 - Source `21796ca` checks normal routing scope for escalations and supports a commissioned

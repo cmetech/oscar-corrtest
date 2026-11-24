@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign"
@@ -118,6 +120,9 @@ func NewFromConfig(ctx context.Context, cfg campaign.Config, host Host) (*Engine
 		actor, err := managed.NewActor(*cfg.ManagedTL1, root, targetHTTP)
 		d.managed = &managedDeps{setupErr: err, originals: *cfg.ManagedTL1, config: *cfg.ManagedTL1, actor: actor, oscar: oc, sink: sink, snow: snow}
 	}
+	if len(users) > 0 { // v4 tasks and reports refuse system-owned keys: use the first front-office user
+		d.UserOps = targetops.UserAPI{Root: root, Key: users[0].APIKey, HTTP: targetHTTP}
+	}
 	d.TaskRuns = func(ctx context.Context, start, end time.Time) ([]targetops.TaskRun, error) {
 		return targetops.TaskRuns(ctx, oc, precheck.HomelabJobs, start, end)
 	}
@@ -137,6 +142,7 @@ func NewFromConfig(ctx context.Context, cfg campaign.Config, host Host) (*Engine
 			return append(results, check)
 		}
 		results := precheck.Run(ctx, a, s, MinVersion)
+		results = append(results, v4Prechecks(ctx, d, s)...)
 		if s.NativeWorkload != nil && len(s.NativeWorkload.Cohorts) > 0 {
 			detail := "Scoring requires observed ordinary group decisions, request attempts and receipts."
 			if !s.Custom {
@@ -160,7 +166,90 @@ func NewFromConfig(ctx context.Context, cfg campaign.Config, host Host) (*Engine
 	return New(d, clock), nil
 }
 
+// v4Prechecks are the blocking v4 checks: B12 escalation scheduling, B14
+// fingerprint policies commissioned, B15 one task run succeeds, B13 alert
+// report approved; each only for a scenario with that lane.
+func v4Prechecks(ctx context.Context, d Deps, s scenario.Scenario) []precheck.Result {
+	var out []precheck.Result
+	if precheck.NeedsEscalation(s) {
+		st, err := func() (targetops.PolicyStatus, error) {
+			all, err := d.Target.Notifiers(ctx)
+			if err != nil {
+				return targetops.PolicyStatus{}, err
+			}
+			for _, n := range all {
+				if strings.EqualFold(n.Name, d.CampaignNotifier) {
+					return d.Target.PolicyStatus(ctx, n.ID, "notification", "")
+				}
+			}
+			return targetops.PolicyStatus{}, fmt.Errorf("notifier %s not found", d.CampaignNotifier)
+		}()
+		out = append(out, precheck.EscalationSchedule(st, err))
+	}
+	if f := s.Fingerprint; f != nil && f.Every > 0 {
+		why, err := "no fingerprint policy client", error(nil)
+		if d.Fingerprint != nil {
+			why, err = d.Fingerprint.Preflight(ctx)
+		}
+		out = append(out, precheck.FingerprintReady(why, err))
+	}
+	if t := s.Tasks; t != nil {
+		status, err := "", errors.New("no front-office user credential (campaign-fo)")
+		if d.UserOps != nil {
+			status, err = precheckTask(ctx, d.UserOps, t)
+		}
+		out = append(out, precheck.TaskRunnable(t.Job, status, err))
+	}
+	if r := s.Report; r != nil {
+		if skipped(ctx, "report") {
+			out = append(out, precheck.SkippedLane("B13", "report"))
+		} else if d.UserOps == nil {
+			out = append(out, precheck.ReportSetup(r.Key, targetops.ReportInfo{}, errors.New("no front-office user credential (campaign-fo)")))
+		} else {
+			info, err := d.UserOps.Report(ctx, r.Key)
+			out = append(out, precheck.ReportSetup(r.Key, info, err))
+		}
+	}
+	return out
+}
+
+// precheckTask runs the v4 task once (B15) on wall time and returns its
+// terminal status, or "timeout" after t.Timeout.
+func precheckTask(ctx context.Context, u UserOps, t *scenario.TaskExecSpec) (string, error) {
+	id, err := u.RunTask(ctx, t.Job)
+	if err != nil {
+		return "", err
+	}
+	deadline := time.Now().Add(t.Timeout)
+	for {
+		status, done, err := u.TaskResult(ctx, id)
+		if done {
+			return status, nil
+		}
+		if !time.Now().Before(deadline) {
+			if err != nil {
+				return "", err
+			}
+			return "timeout", nil
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(taskPoll):
+		}
+	}
+}
+
 type campaignIDKey struct{}
+
+// skipLanesKey carries the run's --skip-lane option to the pre-checks.
+type skipLanesKey struct{}
+
+// skipped reports whether the run on ctx skips lane.
+func skipped(ctx context.Context, lane string) bool {
+	lanes, _ := ctx.Value(skipLanesKey{}).([]string)
+	return slices.Contains(lanes, lane)
+}
 
 // campaignIDFrom returns the campaign id Run put on ctx for the pre-checks.
 func campaignIDFrom(ctx context.Context) string {

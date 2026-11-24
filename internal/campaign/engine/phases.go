@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/frontoffice"
@@ -145,6 +146,9 @@ func containsFold(list []string, s string) bool {
 func laneFor(p scenario.PolicySpec) string {
 	if p.Action == "ticket" {
 		return "resend-ticket"
+	}
+	if p.Escalation != nil { // its own lane, or a higher-priority policy on the same lane would win
+		return "native-escalate" // native-sourced: see deliverEpisode
 	}
 	switch p.Mode {
 	case "occurrences":
@@ -350,6 +354,10 @@ func (r *run) correlation(ctx context.Context) {
 	r.mu.Lock()
 	r.plannedCorr += len(setA)
 	r.mu.Unlock()
+	if r.s.Correlation.Cycle {
+		r.cycleCorrelation(ctx)
+		return
+	}
 	end := r.at("correlation", true)
 	for i, ref := range setA {
 		if ctx.Err() != nil || !r.now().Before(end) {
@@ -388,6 +396,116 @@ func (r *run) correlation(ctx context.Context) {
 	}
 }
 
+// cycleCorrelation (Correlation.Cycle, v4) starts set A then set B in a loop
+// from the correlation phase start until the drain, each case scored as in
+// v1. With Correlation.Rate it paces document starts by their firing source
+// alerts to about Rate/s (SpikeRate inside a baseline burst), up to Parallel
+// in flight; each run's names carry its own token, so parallel runs cannot
+// match each other (compiler TestParallelRunsAreIsolated). Set A cases the
+// first pass never started are not_run; later passes add to the plan as they
+// start, like set B, and stop cycleMargin before the drain.
+func (r *run) cycleCorrelation(ctx context.Context) {
+	c := r.s.Correlation
+	type item struct {
+		ref    scenario.CaseRef
+		kind   string
+		ticket bool
+		alerts float64
+	}
+	var items []item
+	for _, ref := range c.SetA {
+		items = append(items, item{ref: ref, kind: "setA"})
+	}
+	for _, ref := range c.SetB {
+		items = append(items, item{ref: ref, kind: "setB", ticket: containsFold(c.TicketedPatterns, ref.Pattern)})
+	}
+	for i := range items {
+		items[i].alerts = 1
+		if doc, err := caseDoc(items[i].ref); err == nil {
+			items[i].alerts = float64(docAlerts(doc))
+		}
+	}
+	slots := make(chan struct{}, max(c.Parallel, 1))
+	var inFlight sync.WaitGroup
+	defer inFlight.Wait() // the lane ends when its last run does
+	drain := r.at("drain", false)
+	credit, last, creditCap := 0.0, r.now(), 0.0
+	for _, it := range items {
+		creditCap = max(creditCap, it.alerts) // never more than one document of catch-up
+	}
+	for i := 0; ; i++ {
+		it, pass := items[i%len(items)], i/len(items)
+		stopAt := drain // the first pass runs as v1 would
+		if pass > 0 {
+			stopAt = drain.Add(-cycleMargin) // later ones never run into the drain
+		}
+		for {
+			now := r.now()
+			if ctx.Err() != nil || !now.Before(stopAt) {
+				if pass == 0 && it.kind == "setA" {
+					r.mu.Lock()
+					for _, rest := range items[i:len(c.SetA)] {
+						r.notRun = append(r.notRun, "setA "+refName(rest.ref))
+					}
+					r.mu.Unlock()
+				}
+				return
+			}
+			if c.Rate > 0 && len(slots) < cap(slots) { // no credit saved up while every slot is busy
+				credit = min(credit+r.correlationRate(now)*now.Sub(last).Seconds(), creditCap)
+			}
+			last = now
+			if (c.Rate <= 0 || credit >= it.alerts) && len(slots) < cap(slots) {
+				break
+			}
+			if !r.e.clock.SleepUntil(ctx, now.Add(correlationTick)) {
+				continue // ctx ended: the check above returns
+			}
+		}
+		credit -= it.alerts
+		if pass > 0 && it.kind == "setA" {
+			r.mu.Lock()
+			r.plannedCorr++
+			r.mu.Unlock()
+		}
+		slots <- struct{}{}
+		inFlight.Add(1)
+		go func() {
+			defer inFlight.Done()
+			defer func() { <-slots }()
+			if !r.correlate(ctx, it.ref, it.kind, it.ticket) {
+				r.e.clock.SleepUntil(ctx, r.now().Add(setBBackoff)) // a run that did not start must not spin
+			}
+		}()
+	}
+}
+
+// correlationRate is the paced correlation rate at t: SpikeRate inside a
+// baseline burst, Rate elsewhere.
+func (r *run) correlationRate(t time.Time) float64 {
+	c, b := r.s.Correlation, r.s.Baseline
+	if c.SpikeRate <= 0 {
+		return c.Rate
+	}
+	bursts := append([]scenario.BurstSpec(nil), b.Bursts...)
+	if b.Burst != nil {
+		bursts = append(bursts, *b.Burst)
+	}
+	for _, x := range bursts {
+		if at := t.Sub(r.t0); at >= x.At && at < x.At+x.For {
+			return c.SpikeRate
+		}
+	}
+	return c.Rate
+}
+
+// correlationTick is how often the pacer re-checks its credit and slots.
+const correlationTick = time.Second
+
+// cycleMargin is the longest cycling document: a 90 s run plus a ticketed
+// case's 150 s observation.
+const cycleMargin = 4 * time.Minute
+
 // setBBackoff spaces set B passes in which every run failed to start.
 const setBBackoff = 30 * time.Second
 
@@ -417,10 +535,15 @@ func (r *run) correlate(ctx context.Context, ref scenario.CaseRef, kind string, 
 	started := false
 	if err == nil {
 		if ticket {
-			ticketFirstTrigger(&doc)
+			if r.s.Correlation.ParentTickets {
+				ticketParent(&doc)
+			} else {
+				ticketFirstTrigger(&doc)
+			}
 			kind = setBTicketRun + ref.Pattern
 		}
 		var res domain.Run
+		r.offer("correlation", false, docAlerts(doc)) // ponytail: counted at the run start, not per injection
 		res, err = r.e.d.Correlate(ctx, r.e.d.TargetID, doc, correlationRun)
 		started = err == nil && res.ID != "" // a run that failed validation still has an ID
 		if res.ID != "" {
@@ -445,6 +568,19 @@ func (r *run) correlate(ctx context.Context, ref scenario.CaseRef, kind string, 
 // holds ticketed alerts (anti-flap), so their History rows land well after the
 // 45 s default (49-79 s at 5/s, max 91 s; Corey, 2026-11-18).
 const setBTicketObservation = 150 * time.Second
+
+// ticketParent (Correlation.ParentTickets) tickets the synthetic parent of
+// each trigger (positive) case instead of a source alert: the compiler puts
+// create_ticket=snow on the parent and its summary carries the run token.
+func ticketParent(doc *corr.Scenario) {
+	for i := range doc.Cases {
+		if c := &doc.Cases[i]; c.Polarity == "positive" {
+			c.ParentTicket = true
+			c.ObservationWindow = setBTicketObservation
+			doc.MaxDuration += setBTicketObservation
+		}
+	}
+}
 
 // ticketFirstTrigger labels the first firing event of each trigger
 // (positive) case with create_ticket=snow, lets that case observe for

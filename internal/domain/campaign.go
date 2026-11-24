@@ -59,6 +59,8 @@ type CampaignRecordedOptions struct {
 	PrecheckOnly bool                `json:"precheckOnly"`
 	RunBy        string              `json:"runBy"`
 	Provenance   *CampaignProvenance `json:"provenance,omitempty"`
+	// SkipLanes are lanes switched off for this run (--skip-lane, e.g. report).
+	SkipLanes []string `json:"skipLanes,omitempty"`
 }
 
 type CampaignFilter struct {

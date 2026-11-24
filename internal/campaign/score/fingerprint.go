@@ -11,37 +11,49 @@ import (
 // fingerprint a managed policy publication computed.
 const RevisionAnnotation = "oscar_fingerprint_policy_revision"
 
-// FingerprintStats is the fingerprint-policy lane: Repeats variants differing
-// only in the ignored label (merge device) and one differing in device (split
-// control), read back from History. Skipped (policies not commissioned) is
-// report-only: never PASS or FAIL.
-type FingerprintStats struct {
-	Skipped            string   `json:"skipped,omitempty"`
-	Inconclusive       string   `json:"inconclusive,omitempty"`
-	PublicationID      string   `json:"publicationId,omitempty"`
-	Sent               int      `json:"sent"` // accepted posts
+// FingerprintRound is one verification: the merge variants and the split
+// control of that round, read back from History.
+type FingerprintRound struct {
+	Sent               int      `json:"sent,omitempty"` // this round's accepted posts (multi-round lanes)
 	MergedRows         int      `json:"mergedRows"`
 	MergedFingerprints []string `json:"mergedFingerprints"`
 	SplitRows          int      `json:"splitRows"`
 	SplitFingerprints  []string `json:"splitFingerprints"`
-	NotInForce         []string `json:"notInForce,omitempty"` // History ids without the publication's revision annotation
-	Reverted           bool     `json:"reverted"`
 }
 
-// Observe reads the lane's History rows (alertname) by device.
+// FingerprintStats is the fingerprint-policy lane: per round, Repeats variants
+// differing only in the ignored label (merge device) and one differing in
+// device (split control), read back from History. The merged and split
+// counts and fingerprints are totals over Rounds. Skipped (policies not
+// commissioned) is report-only: never PASS or FAIL.
+type FingerprintStats struct {
+	Skipped            string             `json:"skipped,omitempty"`
+	Inconclusive       string             `json:"inconclusive,omitempty"`
+	PublicationID      string             `json:"publicationId,omitempty"`
+	Sent               int                `json:"sent"` // accepted posts
+	MergedRows         int                `json:"mergedRows"`
+	MergedFingerprints []string           `json:"mergedFingerprints"`
+	SplitRows          int                `json:"splitRows"`
+	SplitFingerprints  []string           `json:"splitFingerprints"`
+	NotInForce         []string           `json:"notInForce,omitempty"` // History ids without the publication's revision annotation
+	Rounds             []FingerprintRound `json:"rounds,omitempty"`
+	Reverted           bool               `json:"reverted"`
+}
+
+// Observe adds one round: the lane's History rows (alertname) by device.
 func (s *FingerprintStats) Observe(rows []oscar.HistoryRecord, alertname, merged, split string) {
 	m, sp := map[string]bool{}, map[string]bool{}
-	s.MergedRows, s.SplitRows, s.NotInForce = 0, 0, nil
+	var rd FingerprintRound
 	for _, r := range rows {
 		if r.AlertName != alertname {
 			continue
 		}
 		switch r.Labels["device"] {
 		case merged:
-			s.MergedRows++
+			rd.MergedRows++
 			m[r.Fingerprint] = true
 		case split:
-			s.SplitRows++
+			rd.SplitRows++
 			sp[r.Fingerprint] = true
 		default:
 			continue
@@ -50,7 +62,12 @@ func (s *FingerprintStats) Observe(rows []oscar.HistoryRecord, alertname, merged
 			s.NotInForce = append(s.NotInForce, r.ID)
 		}
 	}
-	s.MergedFingerprints, s.SplitFingerprints = keys(m), keys(sp)
+	rd.MergedFingerprints, rd.SplitFingerprints = keys(m), keys(sp)
+	s.Rounds = append(s.Rounds, rd)
+	s.MergedRows += rd.MergedRows
+	s.SplitRows += rd.SplitRows
+	s.MergedFingerprints = append(s.MergedFingerprints, rd.MergedFingerprints...)
+	s.SplitFingerprints = append(s.SplitFingerprints, rd.SplitFingerprints...)
 }
 
 func keys(m map[string]bool) []string {
@@ -62,33 +79,52 @@ func keys(m map[string]bool) []string {
 	return out
 }
 
-// JudgeFingerprint: FAIL when the merge variants are not one History row and
-// fingerprint, or the split control shares their fingerprint; INCONCLUSIVE
-// when the lane did not finish, a post was not accepted, a row is missing or
-// the policy is not proven in force on every row. Skipped adds nothing.
+// JudgeFingerprint: FAIL when a round's merge variants are not one History
+// row and fingerprint, or its split control shares their fingerprint;
+// INCONCLUSIVE when the lane did not finish, no round was verified, a post
+// was not accepted, a row is missing or the policy is not proven in force on
+// every row. Skipped adds nothing.
 func JudgeFingerprint(s FingerprintStats, repeats int) (fail, incon []string) {
 	switch {
 	case s.Skipped != "":
 		return nil, nil
 	case s.Inconclusive != "":
 		return nil, []string{"fingerprint: " + s.Inconclusive}
-	case s.Sent < repeats+1:
-		return nil, []string{fmt.Sprintf("fingerprint: %d of %d posts accepted", s.Sent, repeats+1)}
-	case s.MergedRows == 0:
-		return nil, []string{"fingerprint: no History row for the merge variants"}
-	case s.SplitRows == 0:
-		return nil, []string{"fingerprint: no History row for the split control"}
-	case len(s.NotInForce) > 0:
+	case len(s.Rounds) == 0:
+		return nil, []string{"fingerprint: no round verified"}
+	case s.Sent < len(s.Rounds)*(repeats+1):
+		return nil, []string{fmt.Sprintf("fingerprint: %d of %d posts accepted", s.Sent, len(s.Rounds)*(repeats+1))}
+	}
+	round := func(i int) string {
+		if len(s.Rounds) > 1 {
+			return fmt.Sprintf(" (round %d)", i+1)
+		}
+		return ""
+	}
+	for i, rd := range s.Rounds {
+		if rd.Sent != 0 && rd.Sent < repeats+1 {
+			return nil, []string{fmt.Sprintf("fingerprint: %d of %d posts accepted%s", rd.Sent, repeats+1, round(i))}
+		}
+		switch {
+		case rd.MergedRows == 0:
+			return nil, []string{"fingerprint: no History row for the merge variants" + round(i)}
+		case rd.SplitRows == 0:
+			return nil, []string{"fingerprint: no History row for the split control" + round(i)}
+		}
+	}
+	if len(s.NotInForce) > 0 {
 		return nil, []string{fmt.Sprintf("fingerprint: policy not proven in force: History %v lack %s=%s", s.NotInForce, RevisionAnnotation, s.PublicationID)}
 	}
-	if s.MergedRows > 1 || len(s.MergedFingerprints) > 1 {
-		fail = append(fail, fmt.Sprintf("fingerprint merge: %d History rows, %d fingerprints for %d variants differing only in the ignored label, want 1",
-			s.MergedRows, len(s.MergedFingerprints), repeats))
-	}
-	for _, f := range s.SplitFingerprints {
-		for _, g := range s.MergedFingerprints {
-			if f == g {
-				fail = append(fail, "fingerprint split: the control differing in device shares fingerprint "+f)
+	for i, rd := range s.Rounds {
+		if rd.MergedRows > 1 || len(rd.MergedFingerprints) > 1 {
+			fail = append(fail, fmt.Sprintf("fingerprint merge: %d History rows, %d fingerprints for %d variants differing only in the ignored label, want 1%s",
+				rd.MergedRows, len(rd.MergedFingerprints), repeats, round(i)))
+		}
+		for _, f := range rd.SplitFingerprints {
+			for _, g := range rd.MergedFingerprints {
+				if f == g {
+					fail = append(fail, "fingerprint split: the control differing in device shares fingerprint "+f+round(i))
+				}
 			}
 		}
 	}

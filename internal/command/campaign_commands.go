@@ -173,6 +173,8 @@ func (a *App) campaignStart(ctx context.Context, name string, args []string, pre
 	var share *float64
 	flags.Func("managed-share", "fraction of planned baseline plus mixed TL1 source posts", func(raw string) error { v, err := strconv.ParseFloat(raw, 64); share = &v; return err })
 	ack := flags.String("ack", "", "comma-separated acknowledged warnings, e.g. A1,A3")
+	var skip []string
+	flags.Func("skip-lane", "switch a lane off for this run (report); repeatable", func(v string) error { skip = append(skip, v); return nil })
 	runBy := flags.String("run-by", "human", "agent or human")
 	wait := flags.Bool("wait", false, "follow status until the campaign finishes")
 	var provenance domain.CampaignProvenance
@@ -204,6 +206,9 @@ func (a *App) campaignStart(ctx context.Context, name string, args []string, pre
 	}
 	if *ack != "" {
 		body["acknowledged"] = strings.Split(*ack, ",")
+	}
+	if len(skip) > 0 {
+		body["skipLanes"] = skip
 	}
 	path := "/api/v1/campaign/runs"
 	if precheck {
@@ -256,7 +261,7 @@ func (a *App) campaignStart(ctx context.Context, name string, args []string, pre
 		}
 		return code
 	}
-	fmt.Fprintf(a.stdout, "%s\t%s\t%s\n", camp.ID, camp.Status, displayEmpty(string(camp.Verdict)))
+	fmt.Fprintf(a.stdout, "%s\t%s\t%s%s\n", camp.ID, camp.Status, displayEmpty(string(camp.Verdict)), skippedLanes(camp))
 	return code
 }
 
@@ -299,7 +304,7 @@ func (a *App) campaignStatusCmd(ctx context.Context, args []string) int {
 		Campaign domain.Campaign `json:"campaign"`
 	}
 	_ = json.Unmarshal(view, &v)
-	fmt.Fprintf(a.stdout, "%s\t%s\t%s\n", v.Campaign.ID, v.Campaign.Status, displayEmpty(string(v.Campaign.Verdict)))
+	fmt.Fprintf(a.stdout, "%s\t%s\t%s%s\n", v.Campaign.ID, v.Campaign.Status, displayEmpty(string(v.Campaign.Verdict)), skippedLanes(v.Campaign))
 	return 0
 }
 
@@ -469,4 +474,14 @@ func parseLeading(flags *flag.FlagSet, args []string) ([]string, error) {
 		return nil, err
 	}
 	return append(pos, flags.Args()...), nil
+}
+
+// skippedLanes is a tab-separated note of the lanes a run switched off by
+// option (--skip-lane), so such a run never reads as a full pass; "" if none.
+func skippedLanes(c domain.Campaign) string {
+	var card struct{ SkippedLanes []string }
+	if json.Unmarshal(c.Scorecard, &card) != nil || len(card.SkippedLanes) == 0 {
+		return ""
+	}
+	return "\tskipped by option: " + strings.Join(card.SkippedLanes, ", ")
 }

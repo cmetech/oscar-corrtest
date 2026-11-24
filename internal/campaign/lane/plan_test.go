@@ -230,3 +230,57 @@ func TestBurstWindowRaisesTheFiringRate(t *testing.T) {
 		t.Fatalf("no burst: %d firings, want 6000", q.Firings)
 	}
 }
+
+// TestTwoBurstsEachRaiseTheirWindow: v4 spikes at T+45 and T+105 for 5
+// minutes each; the rate between and after them is the base rate.
+func TestTwoBurstsEachRaiseTheirWindow(t *testing.T) {
+	spec := scenario.AlertingDayV4().Baseline
+	spec.ResolveAfter = time.Hour
+	p := Compile("r", 1, spec, 150*time.Minute)
+	perMin := map[int]int{}
+	for _, e := range p.Events {
+		if e.Kind == Firing {
+			perMin[int(e.At/time.Minute)]++
+		}
+	}
+	for m := 0; m < 150; m++ {
+		want := 195 // 3.25/s
+		if m >= 45 && m < 50 || m >= 105 && m < 110 {
+			want = 435 // 7.25/s
+		}
+		if d := perMin[m] - want; d < -1 || d > 1 {
+			t.Fatalf("minute %d: %d firings, want %d", m, perMin[m], want)
+		}
+	}
+}
+
+// TestV4PlannedOfferedRatePerMinute: the planned per-minute firing posts of
+// every v4 lane (worker plan, paced cohorts, paced fingerprint rounds and the
+// correlation budget) stay at 5/s, and at 10/s in the spike minutes.
+func TestV4PlannedOfferedRatePerMinute(t *testing.T) {
+	s := scenario.AlertingDayV4()
+	load := s.Phase("drain").Start
+	p := Compile("r", s.Seed, s.Baseline, load)
+	perMin := make([]float64, int(load/time.Minute))
+	for _, e := range p.Events {
+		if e.Kind == Firing {
+			perMin[int(e.At/time.Minute)]++
+		}
+	}
+	for m, n := range perMin {
+		ctl := s.ControllerFiringRate() * 60 // paced: spread evenly over each minute
+		limit := scenario.V4TotalRate * 60
+		for _, b := range s.Baseline.Bursts {
+			if time.Duration(m)*time.Minute < b.At+b.For && b.At < time.Duration(m+1)*time.Minute {
+				limit = scenario.V4SpikeRate * 60
+				ctl = s.ControllerSpikeRate() * 60
+			}
+		}
+		if n+ctl < limit-2 {
+			t.Fatalf("minute %d: %.0f planned firing posts, well under the %.0f budget", m, n+ctl, limit)
+		}
+		if n+ctl > limit+1 {
+			t.Fatalf("minute %d: %.0f planned firing posts (worker %.0f + controller %.0f), budget %.0f", m, n+ctl, n, ctl, limit)
+		}
+	}
+}

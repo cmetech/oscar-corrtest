@@ -19,6 +19,10 @@ func (r *Runtime) ExecuteInstalledPack(ctx context.Context, kit *testpack.Kit, i
 	// Admission and WaitGroup registration share Close's lock, so shutdown
 	// cannot release the database while this execution is queued or running.
 	r.activeMu.Lock()
+	if r.campaignActive.Load() { // under activeMu, as the gate is set: campaign runs no longer hold runMu
+		r.activeMu.Unlock()
+		return domain.Run{}, ErrCampaignActive
+	}
 	if r.closing {
 		r.activeMu.Unlock()
 		return domain.Run{}, fmt.Errorf("runtime is closing")

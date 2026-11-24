@@ -93,6 +93,9 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 	}
 	report["tickets"], report["resend"], report["frontoffice"], report["cohorts"] = in.Tickets, in.Resend, r.foSnapshot(), r.cohortSnapshot()
 	for _, p := range r.s.Resend {
+		if p.Episode > 0 {
+			continue
+		}
 		in.PlannedResend += p.Cohort
 	}
 	card := score.Compute(in, r.s.Limits)
@@ -113,8 +116,12 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 		card.Fingerprint = &fp
 		report["fingerprint"] = fp
 		fails, incon := score.JudgeFingerprint(fp, f.Repeats)
+		if fp.Skipped != "" && f.Every > 0 { // v4 requires the lane: a skip is missing evidence, not a pass
+			incon = append(incon, "fingerprint: lane skipped: "+fp.Skipped)
+		}
 		judge(&card, fails, incon)
 	}
+	r.v4Score(&card, in, report)
 	if r.s.NativeWorkload != nil {
 		r.nativeScore(ctx, &card, in, end, report)
 	}
@@ -359,6 +366,9 @@ func (r *run) resendCases(ctx context.Context, receipts []targetops.Receipt, inc
 	}
 	var out []score.ResendCase
 	for _, m := range r.members() {
+		if m.policy.spec.Episode > 0 { // scored on its escalations (escalationScore)
+			continue
+		}
 		c := score.ResendCase{Policy: m.policy.spec, Deliveries: m.deliveries, Exhausted: exhausted[m.policy]}
 		var times []time.Time
 		if m.policy.spec.Action == "ticket" {

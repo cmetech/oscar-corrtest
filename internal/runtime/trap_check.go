@@ -53,6 +53,9 @@ type trapCheckReport struct {
 // StartTrapCheck starts one bounded SNMPv2c problem/clear test. The community
 // is resolved from the process environment and never enters run evidence.
 func (r *Runtime) StartTrapCheck(ctx context.Context, targetID string, options TrapCheckOptions) (domain.Run, error) {
+	if r.campaignActive.Load() { // campaign runs no longer hold runMu: refuse rather than overlap
+		return domain.Run{}, ErrCampaignActive
+	}
 	target, err := r.GetTarget(ctx, targetID)
 	if err != nil {
 		return domain.Run{}, err
