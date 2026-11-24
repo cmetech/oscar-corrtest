@@ -553,9 +553,9 @@ func (s Scenario) controllerRate(spike bool) float64 {
 // fillWorker sets the worker lane to what the controller lanes leave of the
 // 5/s total and the 10/s spike total, rounded down to 0.01/s.
 func (s *Scenario) fillWorker() {
-	s.Baseline.Rate = math.Floor((V4TotalRate-s.ControllerFiringRate())*100) / 100
+	s.Baseline.Rate = math.Floor((V4TotalRate-s.ControllerFiringRate())*100+1e-6) / 100
 	for i := range s.Baseline.Bursts {
-		s.Baseline.Bursts[i].Rate = math.Floor((V4SpikeRate-s.ControllerSpikeRate())*100) / 100
+		s.Baseline.Bursts[i].Rate = math.Floor((V4SpikeRate-s.ControllerSpikeRate())*100+1e-6) / 100
 	}
 }
 
@@ -565,9 +565,10 @@ func (s *Scenario) fillWorker() {
 // drain. Total offered firing rate is 5/s, and 10/s for 5 minutes at T+45
 // and T+105. Shares of the 5/s (and of the 10/s in a spike):
 //   - correlation (20%): set A and set B cycled from T+1 to the drain,
-//     paced to 1 firing source alert/s (2/s in a spike) with up to 48
-//     documents in flight; each case scored as in v1. Every run's names carry
-//     its own token, so parallel runs cannot satisfy or poison each other;
+//     paced to 1 alert/s (2/s in a spike: firing source alerts plus each
+//     run's label-survival probe) with up to 64 documents in flight; each
+//     case scored as in v1. Every run's names carry its own token, so
+//     parallel runs cannot satisfy or poison each other;
 //   - tickets (~5%): every 12th new worker alert, plus each ticketed set B
 //     run's synthetic parent (flood, threshold) and the R4 cohort;
 //   - fingerprint (5%): a 15-alert round every minute under one scoped
@@ -593,7 +594,7 @@ func AlertingDayV4() Scenario {
 	s.Baseline.Bursts = []BurstSpec{{At: 45 * min, For: 5 * min}, {At: 105 * min, For: 5 * min}}
 	s.Paced = true
 	s.Correlation.Cycle, s.Correlation.ParentTickets = true, true
-	s.Correlation.Rate, s.Correlation.SpikeRate, s.Correlation.Parallel = 1, 2, 48
+	s.Correlation.Rate, s.Correlation.SpikeRate, s.Correlation.Parallel = 1, 2, 64
 	for i := range s.Resend {
 		s.Resend[i].Cohort = 13
 	}

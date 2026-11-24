@@ -244,7 +244,9 @@ func (r *Runtime) ListCampaigns(ctx context.Context, f domain.CampaignFilter) ([
 // executeScenarioForCampaign is the engine's internal scenario run: it bypasses
 // the campaign gate. It waits out a synchronous run that took runMu before the
 // gate closed, then runs without holding runMu: once the gate is set every
-// Execute* refuses, so runMu only ever serialized the campaign's own runs.
+// synchronous run (Execute*, StartBuiltin/Scenario, trap checks, existing-feed
+// and installed-pack runs) refuses, so runMu only serialized the campaign's
+// own runs.
 // Campaign runs may now overlap (alerting-day@v4 runs correlation documents
 // concurrently); each run's alert, rule and parent names carry its own run
 // token, so they cannot match one another (compiler TestParallelRunsAreIsolated).

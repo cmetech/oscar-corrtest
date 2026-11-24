@@ -14,6 +14,7 @@ const RevisionAnnotation = "oscar_fingerprint_policy_revision"
 // FingerprintRound is one verification: the merge variants and the split
 // control of that round, read back from History.
 type FingerprintRound struct {
+	Sent               int      `json:"sent,omitempty"` // this round's accepted posts (multi-round lanes)
 	MergedRows         int      `json:"mergedRows"`
 	MergedFingerprints []string `json:"mergedFingerprints"`
 	SplitRows          int      `json:"splitRows"`
@@ -101,6 +102,9 @@ func JudgeFingerprint(s FingerprintStats, repeats int) (fail, incon []string) {
 		return ""
 	}
 	for i, rd := range s.Rounds {
+		if rd.Sent != 0 && rd.Sent < repeats+1 {
+			return nil, []string{fmt.Sprintf("fingerprint: %d of %d posts accepted%s", rd.Sent, repeats+1, round(i))}
+		}
 		switch {
 		case rd.MergedRows == 0:
 			return nil, []string{"fingerprint: no History row for the merge variants" + round(i)}

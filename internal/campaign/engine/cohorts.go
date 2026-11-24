@@ -182,19 +182,24 @@ func (r *run) deliverEpisode(ctx context.Context, m *cohortMember, tick time.Tim
 	}
 	if n := len(m.episodes); n > 0 && tick.Sub(m.episodes[n-1].StartsAt) >= m.policy.spec.Episode {
 		r.resolveEpisode(ctx, m)
-		m.alert.StartsAt = tick
 	}
 	if n := len(m.episodes); n == 0 || !m.episodes[n-1].End.IsZero() {
-		m.episodes = append(m.episodes, score.EscalationEpisode{Alert: m.alert.Name, StartsAt: m.alert.StartsAt})
+		// Each episode is its own alert (name suffix -e<k>): Alertmanager merges
+		// a re-fire of the same labels whose startsAt overlaps the resolved alert
+		// back into it (keeping the first startsAt), so it would open no new
+		// native episode. startsAt is the wall time of its first post, when the
+		// escalation clock (native active_since) starts.
+		m.episodes = append(m.episodes, score.EscalationEpisode{Alert: fmt.Sprintf("%s-e%d", m.alert.Name, n+1), StartsAt: r.now().Truncate(time.Millisecond)})
 	}
 	if !m.recorded {
 		r.event(context.WithoutCancel(ctx), cohortEvent, "info", "cohort member "+m.alert.Name, cohortPrior{m.alert.Name, m.alert.Labels, m.alert.StartsAt})
 		m.recorded = true
 	}
+	ep := &m.episodes[len(m.episodes)-1]
 	start := r.now()
-	status, err := r.e.d.nativeSender.Send(ctx, episodeEvent(m, lane.Firing), r.id, m.alert.Labels["campaign_lane"])
+	status, err := r.e.d.nativeSender.Send(ctx, episodeEvent(m, ep, lane.Firing), r.id, m.alert.Labels["campaign_lane"])
 	r.offer("resend", false, 1)
-	if ep := &m.episodes[len(m.episodes)-1]; err == nil && status/100 == 2 {
+	if err == nil && status/100 == 2 {
 		m.deliveries = append(m.deliveries, resend.Delivery{At: tick.Sub(m.origin)})
 		if ep.FirstAt.IsZero() {
 			ep.FirstAt = start
@@ -202,8 +207,8 @@ func (r *run) deliverEpisode(ctx context.Context, m *cohortMember, tick time.Tim
 	}
 }
 
-func episodeEvent(m *cohortMember, kind lane.EventKind) lane.Event {
-	return lane.Event{Identity: m.alert.Name, Instance: "corrtest-escalate", Severity: m.alert.Labels["severity"], StartsAt: m.alert.StartsAt, Kind: kind}
+func episodeEvent(m *cohortMember, ep *score.EscalationEpisode, kind lane.EventKind) lane.Event {
+	return lane.Event{Identity: ep.Alert, Instance: "corrtest-escalate", Severity: m.alert.Labels["severity"], StartsAt: ep.StartsAt, Kind: kind}
 }
 
 // resolveEpisode resolves a member's current episode at the native source
@@ -213,13 +218,13 @@ func (r *run) resolveEpisode(ctx context.Context, m *cohortMember) {
 	if n == 0 || !m.episodes[n-1].End.IsZero() {
 		return
 	}
-	status, err := r.e.d.nativeSender.Send(ctx, episodeEvent(m, lane.Resolve), r.id, m.alert.Labels["campaign_lane"])
+	status, err := r.e.d.nativeSender.Send(ctx, episodeEvent(m, &m.episodes[n-1], lane.Resolve), r.id, m.alert.Labels["campaign_lane"])
 	r.offer("resend", true, 1)
 	if err == nil && status/100 != 2 {
 		err = fmt.Errorf("HTTP %d", status)
 	}
 	if err != nil {
-		r.event(context.WithoutCancel(ctx), cohortEvent, "warn", "episode resolve "+m.alert.Name+": "+err.Error(), nil)
+		r.event(context.WithoutCancel(ctx), cohortEvent, "warn", "episode resolve "+m.episodes[n-1].Alert+": "+err.Error(), nil)
 	}
 	m.episodes[n-1].End = r.now()
 }

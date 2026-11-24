@@ -47,6 +47,10 @@ func (r *run) offer(lane string, resolve bool, n int) {
 	}
 }
 
+// docAlerts is what one correlation run offers: its firing source alerts plus
+// the runtime's label-survival probe alert (diagnose injects one per run).
+func docAlerts(doc corr.Scenario) int { return firingEvents(doc) + 1 }
+
 // firingEvents counts a correlation document's firing source alerts (the
 // synthetic parent is OSCAR's, not offered).
 func firingEvents(doc corr.Scenario) int {
@@ -104,7 +108,11 @@ func (r *run) execTask(ctx context.Context, job string, timeout time.Duration) s
 	out := score.TaskExecRun{At: start}
 	id, err := r.e.d.UserOps.RunTask(ctx, job)
 	if err != nil {
-		out.Status, out.Err = "not_started", err.Error()
+		out.Status, out.Err = "unknown", err.Error() // transport error: the run may or may not exist
+		var se *targetops.StatusError
+		if errors.As(err, &se) {
+			out.Status = "not_started" // OSCAR refused it
+		}
 		if ctx.Err() != nil {
 			out.Status = ""
 		}
@@ -117,11 +125,16 @@ func (r *run) execTask(ctx context.Context, job string, timeout time.Duration) s
 			out.Status, out.Seconds = status, r.now().Sub(start).Seconds()
 			return out
 		}
+		var se *targetops.StatusError
+		unread := err != nil && !errors.As(err, &se)
 		if err != nil {
 			out.Err = err.Error()
 		}
 		if !r.now().Before(deadline) {
 			out.Status, out.Seconds = "timeout", r.now().Sub(start).Seconds()
+			if unread {
+				out.Status = "unknown" // the result could not be read: not proof of a slow task
+			}
 			return out
 		}
 		if !r.e.clock.SleepUntil(ctx, r.now().Add(taskPoll)) {
@@ -241,7 +254,7 @@ func (r *run) v4Score(card *score.Scorecard, in score.Inputs, report map[string]
 		offered := score.OfferedPerMinute(r.t0, r.at("drain", false), offers)
 		card.Offered = &offered
 		report["offered"] = offered
-		judge(card, nil, offered.OverBudget(r.s.Baseline, scenario.V4TotalRate, scenario.V4SpikeRate))
+		judge(card, nil, offered.OfferedBudget(r.s.Baseline, scenario.V4TotalRate, scenario.V4SpikeRate))
 	}
 
 	r.escalationScore(card, in.Receipts, report)
@@ -302,13 +315,15 @@ func (r *run) escalationScore(card *score.Scorecard, receipts []targetops.Receip
 		total.Unknown += rate.Unknown
 		why = append(why, w...)
 	}
+	if total.Expected > 0 {
+		total.Ratio = float64(total.Succeeded) / float64(total.Expected)
+	}
 	card.Escalation = &total
 	report["escalation"] = map[string]any{"rate": total, "reasons": why}
 	if total.Expected == 0 {
 		judge(card, nil, []string{"escalation: no episode long enough to escalate was observed"})
 		return
 	}
-	total.Ratio = float64(total.Succeeded) / float64(total.Expected)
 	h := score.Headline{Name: "escalation.success", Unit: "ratio", Value: total.Ratio, Limit: &r.s.Limits.ResendSuccess,
 		HigherBetter: true, Pass: total.Ratio >= r.s.Limits.ResendSuccess}
 	card.Headlines = append(card.Headlines, h)

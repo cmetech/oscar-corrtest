@@ -422,14 +422,17 @@ func (r *run) cycleCorrelation(ctx context.Context) {
 	for i := range items {
 		items[i].alerts = 1
 		if doc, err := caseDoc(items[i].ref); err == nil {
-			items[i].alerts = float64(max(firingEvents(doc), 1))
+			items[i].alerts = float64(docAlerts(doc))
 		}
 	}
 	slots := make(chan struct{}, max(c.Parallel, 1))
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait() // the lane ends when its last run does
 	drain := r.at("drain", false)
-	credit, last := 0.0, r.now()
+	credit, last, creditCap := 0.0, r.now(), 0.0
+	for _, it := range items {
+		creditCap = max(creditCap, it.alerts) // never more than one document of catch-up
+	}
 	for i := 0; ; i++ {
 		it, pass := items[i%len(items)], i/len(items)
 		stopAt := drain // the first pass runs as v1 would
@@ -448,10 +451,10 @@ func (r *run) cycleCorrelation(ctx context.Context) {
 				}
 				return
 			}
-			if c.Rate > 0 {
-				credit = min(credit+r.correlationRate(now)*now.Sub(last).Seconds(), correlationCreditCap)
-				last = now
+			if c.Rate > 0 && len(slots) < cap(slots) { // no credit saved up while every slot is busy
+				credit = min(credit+r.correlationRate(now)*now.Sub(last).Seconds(), creditCap)
 			}
+			last = now
 			if (c.Rate <= 0 || credit >= it.alerts) && len(slots) < cap(slots) {
 				break
 			}
@@ -496,12 +499,8 @@ func (r *run) correlationRate(t time.Time) float64 {
 	return c.Rate
 }
 
-// correlationTick is how often the pacer re-checks its credit and slots;
-// correlationCreditCap bounds the catch-up after a stall (in alerts).
-const (
-	correlationTick      = time.Second
-	correlationCreditCap = 30.0
-)
+// correlationTick is how often the pacer re-checks its credit and slots.
+const correlationTick = time.Second
 
 // cycleMargin is the longest cycling document: a 90 s run plus a ticketed
 // case's 150 s observation.
@@ -544,7 +543,7 @@ func (r *run) correlate(ctx context.Context, ref scenario.CaseRef, kind string, 
 			kind = setBTicketRun + ref.Pattern
 		}
 		var res domain.Run
-		r.offer("correlation", false, firingEvents(doc)) // ponytail: counted at the run start, not per injection
+		r.offer("correlation", false, docAlerts(doc)) // ponytail: counted at the run start, not per injection
 		res, err = r.e.d.Correlate(ctx, r.e.d.TargetID, doc, correlationRun)
 		started = err == nil && res.ID != "" // a run that failed validation still has an ID
 		if res.ID != "" {

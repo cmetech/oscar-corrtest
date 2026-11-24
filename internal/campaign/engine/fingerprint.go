@@ -144,7 +144,8 @@ func (r *run) fpDevices(k int) (merge, split string) {
 // fingerprintRound posts Repeats merge variants and one split control with one
 // startsAt, reads History back after Verify and scores the round. In a
 // multi-round lane it then resolves the round's rows while the policy is on.
-// It reports whether the round was verified.
+// It reports whether the lane goes on: false when the campaign ended, or a
+// single-round lane could not read History back.
 func (r *run) fingerprintRound(ctx context.Context, k int, note func(bool, string)) bool {
 	spec := r.s.Fingerprint
 	merge, split := r.fpDevices(k)
@@ -179,10 +180,13 @@ func (r *run) fingerprintRound(ctx context.Context, k int, note func(bool, strin
 	}
 	rows, err := r.e.d.Target.History(ctx, r.id, startsAt.Add(-time.Minute), r.now().Add(time.Minute))
 	if err != nil {
-		note(false, "History read-back: "+err.Error())
-		return false
+		note(false, fmt.Sprintf("round %d History read-back: %v", k, err))
+		return spec.Every > 0 && ctx.Err() == nil // a multi-round lane keeps its load and goes on; cleanup resolves this round
 	}
-	r.setFP(func(s *score.FingerprintStats) { s.Observe(rows, fingerprintAlert, merge, split) })
+	r.setFP(func(s *score.FingerprintStats) {
+		s.Observe(rows, fingerprintAlert, merge, split)
+		s.Rounds[len(s.Rounds)-1].Sent = sent
+	})
 	if spec.Every > 0 { // cleanup resolves (and verifies) anything this leaves firing
 		for _, row := range rows {
 			if d := row.Labels["device"]; row.AlertName == fingerprintAlert && (d == merge || d == split) && !strings.EqualFold(row.Status, "resolved") {

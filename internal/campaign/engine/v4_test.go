@@ -182,18 +182,18 @@ func TestV4LanesRunConcurrently(t *testing.T) {
 			t.Errorf("escalation %+v reasons %v", card.Escalation, card.Reasons)
 		}
 		h.oscar.mu.Lock()
-		starts := map[time.Time]bool{}
+		episodes := map[string]bool{} // each episode is its own alert, so Alertmanager cannot merge it into the last
 		for _, row := range h.oscar.history {
 			if strings.Contains(row.AlertName, "native-escalate") {
-				starts[row.StartsAt] = true
+				episodes[row.AlertName] = true
 				if row.Status != "resolved" {
 					t.Errorf("escalation episode %s@%s left firing", row.AlertName, row.StartsAt)
 				}
 			}
 		}
 		h.oscar.mu.Unlock()
-		if len(starts) < 2 {
-			t.Errorf("escalation episodes were not rotated: %d History episodes", len(starts))
+		if len(episodes) < 2 || !episodes["Campaign-"+h.id+"-native-escalate-1-e2"] {
+			t.Errorf("escalation episodes were not rotated into their own alerts: %v", episodes)
 		}
 	})
 }

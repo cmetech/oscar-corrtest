@@ -69,16 +69,24 @@ func OfferedPerMinute(t0, loadEnd time.Time, offers []Offer) OfferedRate {
 // offeredSlack is how far a minute may exceed the budget (rounding, retries).
 const offeredSlack = 1.05
 
-// OverBudget names the minutes whose firing posts exceed the plan: spike per
-// second in a minute that overlaps a burst of b, total elsewhere. A run that
-// offered more than the gate's rate measured something else, so these are
-// INCONCLUSIVE reasons.
-func (o OfferedRate) OverBudget(b scenario.BaselineSpec, total, spike float64) []string {
+// offeredWarmup is how long the full plan takes to start (policy activation,
+// fingerprint convergence) and to wind down (lanes stop before the drain);
+// the minutes inside it are not checked for under-offering.
+const offeredWarmup = 5 * time.Minute
+
+// OfferedBudget checks every minute against the plan: spike per second in a
+// minute that overlaps a burst of b, total elsewhere. A minute more than 5%
+// over, or (outside the first and last offeredWarmup) more than 5% under,
+// means the run did not offer the gate's load, so these are INCONCLUSIVE
+// reasons.
+func (o OfferedRate) OfferedBudget(b scenario.BaselineSpec, total, spike float64) []string {
 	bursts := append([]scenario.BurstSpec(nil), b.Bursts...)
 	if b.Burst != nil {
 		bursts = append(bursts, *b.Burst)
 	}
-	var over []string
+	var over, under []string
+	n := len(o.PerMinute)
+	warm := int(offeredWarmup / time.Minute)
 	for _, m := range o.PerMinute {
 		from, to := time.Duration(m.Minute)*time.Minute, time.Duration(m.Minute+1)*time.Minute
 		limit := total
@@ -87,14 +95,22 @@ func (o OfferedRate) OverBudget(b scenario.BaselineSpec, total, spike float64) [
 				limit = spike
 			}
 		}
-		if rate := float64(m.Firing) / 60; rate > limit*offeredSlack {
+		rate := float64(m.Firing) / 60
+		switch {
+		case rate > limit*offeredSlack:
 			over = append(over, fmt.Sprintf("T+%d (%.2f/s, budget %.0f/s)", m.Minute, rate, limit))
+		case rate < limit*(2-offeredSlack) && m.Minute >= warm && m.Minute < n-warm:
+			under = append(under, fmt.Sprintf("T+%d (%.2f/s, plan %.0f/s)", m.Minute, rate, limit))
 		}
 	}
-	if len(over) == 0 {
-		return nil
+	var out []string
+	if len(over) > 0 {
+		out = append(out, fmt.Sprintf("offered rate over budget in %d minutes: %s", len(over), strings.Join(over[:min(len(over), 5)], ", ")))
 	}
-	return []string{fmt.Sprintf("offered rate over budget in %d minutes: %s", len(over), strings.Join(over[:min(len(over), 5)], ", "))}
+	if len(under) > 0 {
+		out = append(out, fmt.Sprintf("offered rate under plan in %d minutes: %s", len(under), strings.Join(under[:min(len(under), 5)], ", ")))
+	}
+	return out
 }
 
 // LedgerOffers are the worker lane's attempted posts.
@@ -210,34 +226,40 @@ type TaskExecRun struct {
 
 // TaskExecStats is the v4 on-demand task lane.
 type TaskExecStats struct {
-	Job               string
-	Runs              []TaskExecRun
-	Succeeded, Failed int
-	SuccessRatio, P95 float64
-	NotRun            string `json:",omitempty"`
+	Job                        string
+	Runs                       []TaskExecRun
+	Succeeded, Failed, Unknown int
+	SuccessRatio, P95          float64
+	NotRun                     string `json:",omitempty"`
 }
 
-// Judge gates the lane: success ratio and p95 against their limits; no run
-// is INCONCLUSIVE.
+// Judge gates the lane: success ratio (of runs with a known outcome) and p95
+// against their limits; an unknown outcome or no run is INCONCLUSIVE.
 func (s *TaskExecStats) Judge(minSuccess float64, maxP95 time.Duration) (h []Headline, fails, incon []string) {
 	var secs []float64
-	s.Succeeded, s.Failed = 0, 0
+	s.Succeeded, s.Failed, s.Unknown = 0, 0, 0
 	for _, r := range s.Runs {
-		if r.Status == "SUCCESS" {
+		switch r.Status {
+		case "SUCCESS":
 			s.Succeeded++
 			secs = append(secs, r.Seconds)
-		} else {
+		case "unknown": // transport error: neither a pass nor a fail
+			s.Unknown++
+		default:
 			s.Failed++
 		}
 	}
-	if len(s.Runs) == 0 {
+	if s.Unknown > 0 {
+		incon = append(incon, fmt.Sprintf("task executions: %d of %d runs with an unknown outcome", s.Unknown, len(s.Runs)))
+	}
+	if s.Succeeded+s.Failed == 0 {
 		why := s.NotRun
 		if why == "" {
 			why = "no run"
 		}
-		return nil, nil, []string{"task executions: " + why}
+		return nil, nil, append(incon, "task executions: "+why)
 	}
-	s.SuccessRatio, s.P95 = float64(s.Succeeded)/float64(len(s.Runs)), Percentile(secs, 95)
+	s.SuccessRatio, s.P95 = float64(s.Succeeded)/float64(s.Succeeded+s.Failed), Percentile(secs, 95)
 	h = []Headline{limitHeadline("tasks.exec_success", "ratio", s.SuccessRatio, minSuccess, true),
 		limitHeadline("tasks.exec_p95", "s", s.P95, maxP95.Seconds(), false)}
 	for _, x := range h {
@@ -245,7 +267,7 @@ func (s *TaskExecStats) Judge(minSuccess float64, maxP95 time.Duration) (h []Hea
 			fails = append(fails, fmt.Sprintf("%s %.3g %s breaches limit %.3g", x.Name, x.Value, x.Unit, *x.Limit))
 		}
 	}
-	return h, fails, nil
+	return h, fails, incon
 }
 
 // ReportRun is one alert report: requested At, its run id and final state,

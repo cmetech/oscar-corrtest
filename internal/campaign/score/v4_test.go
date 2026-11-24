@@ -116,15 +116,29 @@ func TestReportJudge(t *testing.T) {
 	}
 }
 
-func TestOfferedOverBudget(t *testing.T) {
-	b := scenario.BaselineSpec{Bursts: []scenario.BurstSpec{{At: 2 * time.Minute, For: time.Minute, Rate: 9}}}
-	o := OfferedRate{PerMinute: []OfferedMinute{{Minute: 0, Firing: 300}, {Minute: 1, Firing: 330}, {Minute: 2, Firing: 600}, {Minute: 3, Firing: 640}}}
-	got := o.OverBudget(b, 5, 10)
-	if len(got) != 1 || !strings.Contains(got[0], "2 minutes") || !strings.Contains(got[0], "T+1 (5.50/s, budget 5/s)") || !strings.Contains(got[0], "T+3") {
-		t.Fatalf("over budget: %v", got)
+func TestOfferedBudget(t *testing.T) {
+	b := scenario.BaselineSpec{Bursts: []scenario.BurstSpec{{At: 6 * time.Minute, For: time.Minute, Rate: 9}}}
+	o := OfferedRate{}
+	for m := 0; m < 13; m++ {
+		o.PerMinute = append(o.PerMinute, OfferedMinute{Minute: m, Firing: 300})
 	}
-	o.PerMinute[1].Firing, o.PerMinute[3].Firing = 310, 300
-	if got := o.OverBudget(b, 5, 10); got != nil {
-		t.Fatalf("within slack: %v", got)
+	o.PerMinute[0].Firing = 20 // warm-up: not under plan
+	o.PerMinute[6].Firing = 600
+	if got := o.OfferedBudget(b, 5, 10); got != nil {
+		t.Fatalf("on plan: %v", got)
+	}
+	o.PerMinute[5].Firing, o.PerMinute[7].Firing, o.PerMinute[6].Firing = 330, 270, 560
+	got := o.OfferedBudget(b, 5, 10)
+	if len(got) != 2 || !strings.Contains(got[0], "over budget in 1 minutes: T+5 (5.50/s, budget 5/s)") ||
+		!strings.Contains(got[1], "under plan in 2 minutes: T+6 (9.33/s, plan 10/s), T+7 (4.50/s, plan 5/s)") {
+		t.Fatalf("off plan: %v", got)
+	}
+}
+
+func TestTaskExecUnknownIsNotAFailure(t *testing.T) {
+	s := TaskExecStats{Runs: []TaskExecRun{{Status: "SUCCESS", Seconds: 5}, {Status: "unknown", Err: "connection reset"}}}
+	_, fails, incon := s.Judge(1, time.Minute)
+	if len(fails) != 0 || len(incon) != 1 || !strings.Contains(incon[0], "1 of 2 runs with an unknown outcome") || s.SuccessRatio != 1 {
+		t.Fatalf("fails %v incon %v stats %+v", fails, incon, s)
 	}
 }

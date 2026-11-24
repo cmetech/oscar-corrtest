@@ -14,6 +14,9 @@ import (
 func (r *Runtime) ExecuteOwnedExistingFeed(ctx context.Context, plan runner.OwnedExistingFeedPlan) (domain.Run, error) {
 	r.runMu.Lock()
 	defer r.runMu.Unlock()
+	if r.campaignActive.Load() { // campaign runs no longer hold runMu: refuse rather than overlap
+		return domain.Run{}, ErrCampaignActive
+	}
 	if err := plan.Validate(); err != nil {
 		return domain.Run{}, err
 	}

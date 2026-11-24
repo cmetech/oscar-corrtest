@@ -16,6 +16,9 @@ import (
 // ExecuteInstalledPack owns one new execution until its durable outcome is
 // settled. Reopening state or calling cleanup never invokes this method.
 func (r *Runtime) ExecuteInstalledPack(ctx context.Context, kit *testpack.Kit, installation *testpack.Installation, apiTargetID, receiverTargetID string) (domain.Run, error) {
+	if r.campaignActive.Load() { // campaign runs no longer hold runMu: refuse rather than overlap
+		return domain.Run{}, ErrCampaignActive
+	}
 	// Admission and WaitGroup registration share Close's lock, so shutdown
 	// cannot release the database while this execution is queued or running.
 	r.activeMu.Lock()
