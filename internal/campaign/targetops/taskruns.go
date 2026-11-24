@@ -16,6 +16,9 @@ type TaskRun struct {
 	Status    string
 	StartedAt time.Time
 	Duration  time.Duration
+	// Scheduled: the scheduler started the run (history trigger_source
+	// "scheduled"); user and unattributed runs are not.
+	Scheduled bool `json:",omitempty"`
 }
 
 // TaskRuns reads GET /api/v1/tasks/history for the window and keeps runs of the named jobs.
@@ -39,6 +42,7 @@ func TaskRuns(ctx context.Context, c *oscar.Client, jobNames []string, start, en
 				Received  *time.Time `json:"received"`
 				Timestamp *time.Time `json:"timestamp"`
 				Duration  *float64   `json:"duration"`
+				Source    string     `json:"trigger_source"`
 			} `json:"records"`
 		}
 		q := url.Values{"page": {strconv.Itoa(page)}, "perPage": {"100"}, "order": {"asc"}, "column": {"timestamp"},
@@ -54,7 +58,7 @@ func TaskRuns(ctx context.Context, c *oscar.Client, jobNames []string, start, en
 			if !want[job] {
 				continue
 			}
-			run := TaskRun{Job: job, Status: r.State}
+			run := TaskRun{Job: job, Status: r.State, Scheduled: r.Source == "scheduled"}
 			switch {
 			case r.Started != nil:
 				run.StartedAt = *r.Started

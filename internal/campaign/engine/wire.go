@@ -216,7 +216,7 @@ func v4Prechecks(ctx context.Context, d Deps, s scenario.Scenario) []precheck.Re
 // precheckTask runs the v4 task once (B15) on wall time and returns its
 // terminal status, or "timeout" after t.Timeout.
 func precheckTask(ctx context.Context, u UserOps, t *scenario.TaskExecSpec) (string, error) {
-	id, err := u.RunTask(ctx, t.Job)
+	id, err := u.RunTask(ctx, t.Job, newUUID())
 	if err != nil {
 		return "", err
 	}

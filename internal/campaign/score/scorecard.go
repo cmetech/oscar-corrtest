@@ -127,6 +127,7 @@ type Scorecard struct {
 	Offered                      *OfferedRate      `json:",omitempty"` // every lane's posts per minute
 	Escalation                   *Rate             `json:",omitempty"` // v4 escalation episodes
 	TaskExec                     *TaskExecStats    `json:",omitempty"` // v4 on-demand task runs
+	HomelabHealth                *HomelabHealth    `json:",omitempty"` // v4 scheduled homelab job gate
 	Reports                      *ReportStats      `json:",omitempty"` // v4 alert reports
 	SkippedLanes                 []string          `json:",omitempty"` // lanes switched off by run option: never a pass
 	Verdict                      domain.Verdict

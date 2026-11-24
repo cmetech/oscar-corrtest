@@ -356,6 +356,21 @@ func TestOldScenarioHashesUnchanged(t *testing.T) {
 	}
 }
 
+// TestQualificationScenarioHashesUnchanged pins the v3-family digests at
+// 6ecc192: v4 copies their Limits, so a new v4 limit must stay out of them.
+func TestQualificationScenarioHashesUnchanged(t *testing.T) {
+	for ref, want := range map[string]string{
+		"alerting-day@v3":         "c300e0322006c919ce963c7d610e11cba1df58fbdfc75b55639471f86f4515d5",
+		"alerting-day-smoke@v3":   "fcfe1bf9685846e2875373dffc848d73e7f3725d52a0844e66c60191559d3b9b",
+		"alerting-day-control@v1": "b6355431bc90f1f29ec705e0d06d4f718b4d0509b60a0dadc25fcb14bb1346dd",
+		"managed-alerts-smoke@v1": "bb0e784d710767e48bf49dc3f7dcb4a92c7ffcd23aed3fe134bd7999c2fcd304",
+	} {
+		if s, ok := Lookup(ref); !ok || s.Hash() != want {
+			t.Errorf("%s hash %s want %s", ref, s.Hash(), want)
+		}
+	}
+}
+
 // TestV4OfferedRateBudget: v4 is the single-node gate (3-5/s sustained,
 // spikes to 10/s). Every lane counts: the worker lane plus the controller
 // lanes must offer about 5/s, never more, and at most 10/s in a spike.
@@ -456,7 +471,7 @@ func TestV4RunsEveryLaneConcurrently(t *testing.T) {
 		esc.Episode < esc.Escalation.After+3*time.Minute || int((s.ResendUntil-s.Phase("resend").Start)/esc.Episode) < 5 || len(s.Resend) != 5 {
 		t.Errorf("escalation policy %+v must fire several times per member", esc)
 	}
-	if s.Tasks == nil || s.Tasks.Every != 5*time.Minute || s.Tasks.Timeout >= s.Tasks.Every || s.Limits.TaskSuccess != 1 || s.Limits.TaskP95 == 0 {
+	if s.Tasks == nil || s.Limits.TaskSuccess != 1 || s.Limits.TaskP95 != 2*time.Minute || s.Limits.HomelabFailRise != 0.05 {
 		t.Errorf("tasks %+v limits %+v", s.Tasks, s.Limits)
 	}
 	if s.Report == nil || len(s.Report.At) != 2 || s.Report.At[0] != 60*time.Minute || s.Report.At[1] != 120*time.Minute ||
@@ -474,6 +489,47 @@ func TestV4RunsEveryLaneConcurrently(t *testing.T) {
 	if r := smoke.Report; r.At[0]+r.Timeout > smoke.Phase("drain").End {
 		t.Errorf("smoke report %+v cannot finish", r)
 	}
+}
+
+// TestV4TaskSchedule (OSC-156 AC-1, AC-3): v4 requests a task every minute
+// for the whole load window, every 5th request issuing 3 concurrent runs; the
+// smoke runs the same lane scaled to its window with exactly one burst.
+func TestV4TaskSchedule(t *testing.T) {
+	for _, tc := range []struct {
+		ref                    string
+		requests, bursts, runs int
+	}{{"alerting-day@v4", 145, 29, 203}, {"alerting-day-smoke@v4", 7, 1, 9}} {
+		s, _ := Lookup(tc.ref)
+		load := s.Phase("drain").Start
+		reqs := s.Tasks.Requests(load)
+		bursts, runs := 0, 0
+		for i, r := range reqs {
+			if want := time.Duration(i+1) * time.Minute; r.At != want {
+				t.Fatalf("%s request %d at %s, want %s (every minute from T+1)", tc.ref, i, r.At, want)
+			}
+			if want := 1 + 2*btoi((i+1)%5 == 0); r.Runs != want {
+				t.Fatalf("%s request %d issues %d runs, want %d", tc.ref, i, r.Runs, want)
+			}
+			bursts += btoi(r.Runs > 1)
+			runs += r.Runs
+		}
+		if len(reqs) != tc.requests || bursts != tc.bursts || runs != tc.runs {
+			t.Errorf("%s: %d requests, %d bursts, %d runs; want %d, %d, %d", tc.ref, len(reqs), bursts, runs, tc.requests, tc.bursts, tc.runs)
+		}
+		if last := reqs[len(reqs)-1].At; last+s.Tasks.Timeout >= load || last+s.Tasks.Every+s.Tasks.Timeout < load {
+			t.Errorf("%s: last request at %s must be the last that can finish before the drain at %s", tc.ref, last, load)
+		}
+	}
+	if got := (TaskExecSpec{At: time.Minute, Timeout: time.Minute}).Requests(time.Hour); len(got) != 1 || got[0].Runs != 1 {
+		t.Errorf("a spec without Every runs once, without bursts: %+v", got)
+	}
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func TestValidateSkipLanes(t *testing.T) {
