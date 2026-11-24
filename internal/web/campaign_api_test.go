@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -364,5 +365,80 @@ func TestCampaignAPIForwardsRecordedProvenance(t *testing.T) {
 			Role: domain.CampaignPreChangeControl, TargetBuild: "before-id", CorrTestBuild: "runner-id", WorkloadConfig: "same-pack",
 		}) {
 		t.Fatalf("status=%d response=%s started=%v", w.Code, w.Body, f.started)
+	}
+}
+
+// manyCampaigns serves n stored campaigns, newest first, each with a 256 KiB
+// scorecard and report, and applies the filter's Limit and Offset as the store does.
+type manyCampaigns struct {
+	fakeDataSourceForCampaign
+	all []domain.Campaign
+}
+
+func newManyCampaigns(n int) *manyCampaigns {
+	card := json.RawMessage(`{"pad":"` + strings.Repeat("x", 256<<10) + `"}`)
+	t0 := time.Date(2026, 11, 24, 0, 0, 0, 0, time.UTC)
+	m := &manyCampaigns{}
+	for i := n - 1; i >= 0; i-- {
+		m.all = append(m.all, domain.Campaign{ID: fmt.Sprintf("camp_%03d", i), ScenarioID: "alerting-day", ScenarioHash: "h", Trigger: "cli", RunBy: "agent",
+			Status: domain.CampaignCompleted, Verdict: domain.VerdictPass, Comparable: true, StartedAt: t0.Add(time.Duration(i) * time.Hour), Scorecard: card, Report: card})
+	}
+	return m
+}
+
+func (m *manyCampaigns) ListCampaigns(_ context.Context, f domain.CampaignFilter) ([]domain.Campaign, error) {
+	out := m.all[min(f.Offset, len(m.all)):]
+	if f.Limit > 0 && len(out) > f.Limit {
+		out = out[:f.Limit]
+	}
+	return out, nil
+}
+
+// TestCampaignListReturnsPagedSummaries (OSC-154 AC-2): the list returns 20
+// summaries by default, without scorecards or reports, and pages with limit
+// and offset; bad paging values are refused.
+func TestCampaignListReturnsPagedSummaries(t *testing.T) {
+	t.Parallel()
+	h := campaignServer(t, newManyCampaigns(150), false)
+	list := func(query string) []map[string]any {
+		t.Helper()
+		w := apiDo(h, http.MethodGet, "/api/v1/campaign/runs"+query, "", true, nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: status %d %.200s", query, w.Code, w.Body)
+		}
+		if w.Body.Len() > 1<<20 {
+			t.Fatalf("%s: list body %d bytes", query, w.Body.Len())
+		}
+		var env struct{ Data []map[string]any }
+		if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil || env.Data == nil {
+			t.Fatalf("%s: %v %.200s", query, err, w.Body)
+		}
+		return env.Data
+	}
+	got := list("")
+	if len(got) != 20 || got[0]["ID"] != "camp_149" || got[19]["ID"] != "camp_130" {
+		t.Fatalf("default page: %d items, first %v last %v", len(got), got[0]["ID"], got[len(got)-1]["ID"])
+	}
+	for _, k := range []string{"ID", "ScenarioID", "ScenarioHash", "Custom", "Trigger", "RunBy", "TriggerIdentity", "Status", "Verdict", "Cleanup", "Comparable", "StartedAt", "EndedAt"} {
+		if _, ok := got[0][k]; !ok {
+			t.Errorf("summary lacks %s: %v", k, got[0])
+		}
+	}
+	if len(got[0]) != 13 {
+		t.Errorf("summary must be the campaign fields without Scorecard and Report: %v", got[0])
+	}
+	if got := list("?limit=5&offset=5"); len(got) != 5 || got[0]["ID"] != "camp_144" {
+		t.Errorf("limit 5 offset 5: %v", got)
+	}
+	if got := list("?offset=200"); len(got) != 0 {
+		t.Errorf("past the end: %v", got)
+	}
+	if got := list("?limit=100"); len(got) != 100 {
+		t.Errorf("limit 100: %d", len(got))
+	}
+	for _, q := range []string{"?limit=0", "?limit=101", "?limit=x", "?offset=-1", "?offset=x"} {
+		if w := apiDo(h, http.MethodGet, "/api/v1/campaign/runs"+q, "", true, nil); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "invalid_request") {
+			t.Errorf("%s: status %d %.200s", q, w.Code, w.Body)
+		}
 	}
 }

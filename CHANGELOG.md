@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- `campaign status` without an ID works however many campaigns exist: `GET /api/v1/campaign/runs`
+  returns summaries (every campaign field except `Scorecard` and `Report`) 20 at a time, newest first,
+  paged with `limit` (1-100) and `offset`; the CLI gains `--limit` and `--offset` and prints ID,
+  scenario, status, verdict and start. Callers that read scorecards from the list must fetch
+  `GET /api/v1/campaign/runs/{id}`; unparameterised list callers now get 20 runs, not 100. A
+  campaign response over 16 MiB now fails with "response exceeds 16 MiB" instead of a decode error.
+  Upgrade the server before relying on the new CLI.
+
 - New `alerting-day@v4` (comparable) and `alerting-day-smoke@v4` (about 15 minutes, never
   comparable): the single-node mixed-load gate. Every lane runs at once for 150 minutes at a
   total offered firing rate of 5/s over all lanes (10/s in 5-minute spikes at T+45 and T+105),

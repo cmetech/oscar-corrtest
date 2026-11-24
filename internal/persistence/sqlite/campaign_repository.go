@@ -273,8 +273,12 @@ func (d *Database) ListCampaigns(ctx context.Context, f domain.CampaignFilter) (
 		where, args = " WHERE status=?", append(args, string(f.Status))
 	}
 	where += " ORDER BY started_at DESC, id"
-	if f.Limit > 0 {
-		where, args = where+" LIMIT ?", append(args, f.Limit)
+	if f.Limit > 0 || f.Offset > 0 {
+		limit := f.Limit
+		if limit <= 0 {
+			limit = -1 // SQLite needs a LIMIT before OFFSET; -1 is none
+		}
+		where, args = where+" LIMIT ? OFFSET ?", append(args, limit, max(f.Offset, 0))
 	}
 	return d.queryCampaigns(ctx, where, args...)
 }
