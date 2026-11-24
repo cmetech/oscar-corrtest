@@ -14,8 +14,10 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/score"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
+	"github.com/cmetech/oscar-corrtest/internal/campaign/worker"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/runtime"
+	corr "github.com/cmetech/oscar-corrtest/internal/scenario"
 )
 
 // fakeUserOps is OSCAR's task and report API: every task succeeds, the report
@@ -274,4 +276,78 @@ func TestV4SkipReportLane(t *testing.T) {
 			t.Fatal("the other v4 lanes still run")
 		}
 	})
+}
+
+// linkStore accepts the run links a correlation run writes; nothing else is called.
+type linkStore struct{ Store }
+
+func (linkStore) LinkCampaignRun(context.Context, string, string, string) error { return nil }
+
+// TestV4SmokeCorrelationHoldsPlanWithSlowRuns (OSC-155 AC-1): with
+// correlation runs taking up to 90 s (OSCAR slow), and a ticketed set B run
+// using its whole 150 s ticket observation on top, alerting-day-smoke@v4
+// still offers its planned correlation rate within 10% over its cycling
+// window (T+1 to drain - cycleMargin) and in each spike minute.
+//
+// Each document offers its alerts at once (flood 10, threshold 6), so a
+// spike minute passes when three documents start in it. That phase is fixed
+// by the lane starting at T+1 with no credit; a change to document size,
+// creditCap or the start time can move a spike minute by one document.
+func TestV4SmokeCorrelationHoldsPlanWithSlowRuns(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name           string
+		plain, tickets time.Duration // run time of an unticketed / ticketed document
+	}{{"30s", 30 * time.Second, 30 * time.Second}, {"60s", time.Minute, time.Minute}, {"90s", 90 * time.Second, 90 * time.Second},
+		{"90s-ticketed-240s", 90 * time.Second, 90*time.Second + setBTicketObservation}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				s := scenario.AlertingDaySmokeV4()
+				r := &run{s: s, t0: time.Now(), e: New(Deps{Store: linkStore{}, Correlate: func(_ context.Context, _ string, doc corr.Scenario, _ string) (domain.Run, error) {
+					d := tc.plain
+					for _, c := range doc.Cases {
+						if c.ParentTicket {
+							d = tc.tickets
+						}
+					}
+					time.Sleep(d)
+					return domain.Run{ID: "crt_slow"}, nil
+				}}, worker.RealClock{})} // under synctest, RealClock runs on the bubble's fake time
+				time.Sleep(s.Phase("correlation").Start) // the phase runner starts the lane here
+				r.cycleCorrelation(context.Background())
+				perMinute := map[int]int{}
+				for _, o := range r.offers {
+					perMinute[int(o.At.Sub(r.t0)/time.Minute)]++
+				}
+				// Plan over the cycling window: Rate per minute, SpikeRate in a
+				// spike minute, from the correlation start to the last start.
+				spike := map[int]bool{}
+				for _, b := range s.Baseline.Bursts {
+					for m := b.At; m < b.At+b.For; m += time.Minute {
+						spike[int(m/time.Minute)] = true
+					}
+				}
+				within := func(got, plan float64) bool { return got >= 0.9*plan && got <= 1.1*plan }
+				var offered, planned float64
+				checked := 0
+				for m := int(s.Phase("correlation").Start / time.Minute); m < int((s.Phase("drain").Start-cycleMargin)/time.Minute); m++ {
+					plan := s.Correlation.Rate * 60
+					if spike[m] {
+						plan, checked = s.Correlation.SpikeRate*60, checked+1
+						if !within(float64(perMinute[m]), plan) {
+							t.Errorf("spike minute %d offered %d, plan %.0f (per minute %v)", m, perMinute[m], plan, perMinute)
+						}
+					}
+					offered, planned = offered+float64(perMinute[m]), planned+plan
+				}
+				if !within(offered, planned) {
+					t.Errorf("cycling window offered %.0f, plan %.0f (per minute %v)", offered, planned, perMinute)
+				}
+				if checked != len(spike) {
+					t.Errorf("only %d of spike minutes %v fall inside the cycling window", checked, spike)
+				}
+			})
+		})
+	}
 }
