@@ -240,12 +240,12 @@ func TestResendOnlyV1IsolatesResendAtFivePerSecond(t *testing.T) {
 	}
 }
 
-// The fingerprint lane is opt-in: no comparable built-in carries it (hashes,
-// and so comparability, are unchanged; custom functional@v1 does), and a
+// The fingerprint lane is opt-in: no comparable built-in before v4 carries it
+// (hashes, and so comparability, are unchanged; custom functional@v1 does), and a
 // scenario that adds it hashes apart.
 func TestFingerprintFacetIsOptional(t *testing.T) {
 	for _, s := range Builtins() {
-		if s.Fingerprint != nil && !s.Custom {
+		if s.Fingerprint != nil && !s.Custom && s.Version != "v4" {
 			t.Errorf("%s@%s carries the fingerprint lane", s.ID, s.Version)
 		}
 	}
@@ -352,5 +352,92 @@ func TestOldScenarioHashesUnchanged(t *testing.T) {
 				t.Fatal("optional qualification fields leaked into a frozen scenario")
 			}
 		})
+	}
+}
+
+// TestV4OfferedRateBudget: v4 is the single-node gate (3-5/s sustained,
+// spikes to 10/s). Every lane counts: the worker lane plus the controller
+// lanes must offer about 5/s, never more, and at most 10/s in a spike.
+func TestV4OfferedRateBudget(t *testing.T) {
+	for _, s := range []Scenario{AlertingDayV4(), AlertingDaySmokeV4()} {
+		ctl := s.ControllerFiringRate()
+		total := s.Baseline.Rate + ctl
+		if total > V4TotalRate+1e-9 || s.ID == "alerting-day" && total < V4TotalRate-0.05 {
+			t.Errorf("%s@%s: total %.3f/s (worker %.2f + controller %.3f), want about %.0f/s", s.ID, s.Version, total, s.Baseline.Rate, ctl, V4TotalRate)
+		}
+		if len(s.Baseline.Bursts) != 2 || s.Standing != nil || s.Breaker != nil || s.DeadTarget != nil {
+			t.Errorf("%s@%s: two spikes and no standing pool, breaker or dead target", s.ID, s.Version)
+		}
+		for _, b := range s.Baseline.Bursts {
+			if spike := b.Rate + ctl; spike > V4SpikeRate+1e-9 || spike < V4SpikeRate-0.05 {
+				t.Errorf("%s@%s: spike total %.3f/s, want 10/s", s.ID, s.Version, spike)
+			}
+		}
+	}
+	s := AlertingDayV4()
+	if b := s.Baseline.Bursts; b[0].At != 45*time.Minute || b[1].At != 105*time.Minute || b[0].For != 5*time.Minute || b[1].For != 5*time.Minute {
+		t.Fatalf("spikes %+v", b)
+	}
+	// Shares of the 5/s: resend about 10%, fingerprint 5%, tickets about 5%.
+	resend := 0.0
+	for _, p := range s.Resend {
+		resend += float64(p.Cohort) / s.Redelivery.Seconds()
+	}
+	fp := float64(s.Fingerprint.Repeats+1) / s.Fingerprint.Every.Seconds()
+	tickets := s.Baseline.Rate * s.Baseline.UniqueRatio / float64(s.Baseline.TicketEveryNth)
+	if resend < 0.45 || resend > 0.55 || fp != 0.25 || tickets < 0.22 || tickets > 0.27 {
+		t.Fatalf("shares of 5/s: resend %.3f fingerprint %.3f tickets %.3f", resend, fp, tickets)
+	}
+}
+
+// TestV4RunsEveryLaneConcurrently: one 150-minute load window with every lane
+// inside it, a 30-minute drain, comparable, with a compressed smoke.
+func TestV4RunsEveryLaneConcurrently(t *testing.T) {
+	s, ok := Lookup("alerting-day@v4")
+	if !ok || s.Custom || s.RequiresComparisonProvenance() || s.Seed != AlertingDayV1().Seed || s.Baseline.Instances != 50 {
+		t.Fatalf("v4: %+v", s)
+	}
+	drain := s.Phase("drain")
+	if drain.Start != 150*time.Minute || drain.End != 180*time.Minute {
+		t.Fatalf("drain %+v", drain)
+	}
+	for _, name := range []string{"baseline", "correlation", "ticketing", "resend"} {
+		if p := s.Phase(name); p.End-p.Start < 140*time.Minute || p.End > drain.Start {
+			t.Errorf("%s %+v must span the load window", name, p)
+		}
+	}
+	if !s.Correlation.Cycle || !s.Correlation.ParentTickets || len(s.Correlation.SetA) != len(AlertingDayV1().Correlation.SetA) {
+		t.Errorf("correlation %+v", s.Correlation)
+	}
+	if f := s.Fingerprint; f.Every <= f.Verify || f.At+f.Converge+f.Every > 10*time.Minute {
+		t.Errorf("fingerprint %+v", f)
+	}
+	var esc *PolicySpec
+	for i, p := range s.Resend {
+		if p.Escalation != nil {
+			esc = &s.Resend[i]
+		}
+	}
+	if esc == nil || esc.Escalation.TargetSeverity != "critical" || esc.Escalation.After > 5*time.Minute ||
+		esc.Episode < esc.Escalation.After+3*time.Minute || int((s.ResendUntil-s.Phase("resend").Start)/esc.Episode) < 5 || len(s.Resend) != 5 {
+		t.Errorf("escalation policy %+v must fire several times per member", esc)
+	}
+	if s.Tasks == nil || s.Tasks.Every != 5*time.Minute || s.Tasks.Timeout >= s.Tasks.Every || s.Limits.TaskSuccess != 1 || s.Limits.TaskP95 == 0 {
+		t.Errorf("tasks %+v limits %+v", s.Tasks, s.Limits)
+	}
+	if s.Report == nil || len(s.Report.At) != 2 || s.Report.At[0] != 60*time.Minute || s.Report.At[1] != 120*time.Minute ||
+		s.Report.At[1]-s.Report.At[0] <= s.Report.Timeout {
+		t.Errorf("report %+v", s.Report)
+	}
+	if s.Limits.HistoryP95 != AlertingDayV3().Limits.HistoryP95 || s.Limits.FrontOfficeP95 != AlertingDayV3().Limits.FrontOfficeP95 || s.FrontOffice != AlertingDayV1().FrontOffice {
+		t.Errorf("limits and front office follow v3/v1: %+v", s.Limits)
+	}
+	smoke, ok := Lookup("alerting-day-smoke@v4")
+	if !ok || !smoke.Custom || smoke.Phase("drain").End > 16*time.Minute || smoke.Phase("drain").End < 14*time.Minute ||
+		smoke.Hash() == s.Hash() || smoke.Tasks == nil || smoke.Report == nil || smoke.Fingerprint == nil {
+		t.Fatalf("v4 smoke: %+v", smoke)
+	}
+	if r := smoke.Report; r.At[0]+r.Timeout > smoke.Phase("drain").End {
+		t.Errorf("smoke report %+v cannot finish", r)
 	}
 }

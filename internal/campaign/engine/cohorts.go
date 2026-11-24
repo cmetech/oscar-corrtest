@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/resend"
+	"github.com/cmetech/oscar-corrtest/internal/campaign/score"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
+	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/oscar"
 )
 
@@ -126,6 +128,14 @@ func (r *run) deliver(ctx context.Context, m *cohortMember, tick time.Time) {
 	if fresh {
 		m.alert.StartsAt = tick
 	}
+	if ep := m.policy.spec.Episode; ep > 0 {
+		if n := len(m.episodes); n > 0 && tick.Sub(m.episodes[n-1].StartsAt) >= ep {
+			r.rotateEpisode(ctx, m, tick)
+		}
+		if len(m.episodes) == 0 {
+			m.episodes = append(m.episodes, score.EscalationEpisode{Alert: m.alert.Name, StartsAt: m.alert.StartsAt})
+		}
+	}
 	if !m.recorded { // evidence of the cohort; cleanup resolves from History
 		r.event(context.WithoutCancel(ctx), cohortEvent, "info", "cohort member "+m.alert.Name, cohortPrior{m.alert.Name, m.alert.Labels, m.alert.StartsAt})
 		m.recorded = true
@@ -133,6 +143,10 @@ func (r *run) deliver(ctx context.Context, m *cohortMember, tick time.Time) {
 	start := r.now()
 	status, err := r.e.d.Target.PostAlert(ctx, m.alert)
 	r.sourceOffer("ordinary_resend", start, status)
+	r.offer("resend", false, 1)
+	if n := len(m.episodes); n > 0 && err == nil && status/100 == 2 && m.episodes[n-1].FirstAt.IsZero() {
+		m.episodes[n-1].FirstAt = start
+	}
 	switch {
 	case status == 0 && err != nil && ctx.Err() == nil:
 		if m.policy.spec.Action == "ticket" && len(m.deliveries) == 0 {
@@ -145,6 +159,26 @@ func (r *run) deliver(ctx context.Context, m *cohortMember, tick time.Time) {
 	case err == nil && status/100 == 2:
 		m.deliveries = append(m.deliveries, resend.Delivery{At: tick.Sub(m.origin), Fresh: fresh})
 	}
+}
+
+// rotateEpisode (PolicySpec.Episode) resolves a member's current occurrence
+// and starts the next episode with startsAt tick, so OSCAR opens a new
+// episode (and schedules a new escalation). A failed resolve is logged;
+// cleanup resolves whatever History still holds firing.
+func (r *run) rotateEpisode(ctx context.Context, m *cohortMember, tick time.Time) {
+	now := r.now()
+	req, err := oscar.BuildAlertRequest(compiler.AlertPlan{Name: m.alert.Name, Status: "resolved", Labels: m.alert.Labels,
+		Annotations: map[string]string{"summary": m.alert.Name}, StartsAt: m.alert.StartsAt, EndsAt: now})
+	if err == nil {
+		_, err = r.e.d.Target.PostAlertGroup(ctx, req)
+		r.offer("resend", true, 1)
+	}
+	if err != nil {
+		r.event(context.WithoutCancel(ctx), cohortEvent, "warn", "episode resolve "+m.alert.Name+": "+err.Error(), nil)
+	}
+	m.episodes[len(m.episodes)-1].End = now
+	m.alert.StartsAt = tick
+	m.episodes = append(m.episodes, score.EscalationEpisode{Alert: m.alert.Name, StartsAt: tick})
 }
 
 // resolveFiring reads the campaign's History and resolves every occurrence

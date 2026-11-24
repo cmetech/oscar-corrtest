@@ -40,8 +40,9 @@ type Plan struct {
 	Firings, Resolves, Tickets int
 }
 
-// firingTimes is every 1/Rate seconds, and every 1/Burst.Rate seconds inside
-// the burst window.
+// firingTimes is every 1/Rate seconds, and every 1/Rate of a burst inside
+// each burst window (Burst and Bursts, in time order; a burst that overlaps an
+// earlier one or starts at or after duration is ignored).
 func firingTimes(spec scenario.BaselineSpec, duration time.Duration) []time.Duration {
 	uniform := func(from, to time.Duration, rate float64) []time.Duration {
 		var out []time.Duration
@@ -51,12 +52,22 @@ func firingTimes(spec scenario.BaselineSpec, duration time.Duration) []time.Dura
 		}
 		return out
 	}
-	b := spec.Burst
-	if b == nil || b.Rate <= 0 || b.At >= duration {
-		return uniform(0, duration, spec.Rate)
+	bursts := append([]scenario.BurstSpec(nil), spec.Bursts...)
+	if spec.Burst != nil {
+		bursts = append(bursts, *spec.Burst)
 	}
-	end := min(b.At+b.For, duration)
-	return append(append(uniform(0, b.At, spec.Rate), uniform(b.At, end, b.Rate)...), uniform(end, duration, spec.Rate)...)
+	sort.Slice(bursts, func(i, j int) bool { return bursts[i].At < bursts[j].At })
+	var out []time.Duration
+	at := time.Duration(0)
+	for _, b := range bursts {
+		if b.Rate <= 0 || b.At < at || b.At >= duration {
+			continue
+		}
+		end := min(b.At+b.For, duration)
+		out = append(append(out, uniform(at, b.At, spec.Rate)...), uniform(b.At, end, b.Rate)...)
+		at = end
+	}
+	return append(out, uniform(at, duration, spec.Rate)...)
 }
 
 // Compile builds the baseline plan: firings every 1/Rate seconds for duration.

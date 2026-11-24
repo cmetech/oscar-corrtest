@@ -230,3 +230,26 @@ func TestBurstWindowRaisesTheFiringRate(t *testing.T) {
 		t.Fatalf("no burst: %d firings, want 6000", q.Firings)
 	}
 }
+
+// TestTwoBurstsEachRaiseTheirWindow: v4 spikes at T+45 and T+105 for 5
+// minutes each; the rate between and after them is the base rate.
+func TestTwoBurstsEachRaiseTheirWindow(t *testing.T) {
+	spec := scenario.AlertingDayV4().Baseline
+	spec.ResolveAfter = time.Hour
+	p := Compile("r", 1, spec, 150*time.Minute)
+	perMin := map[int]int{}
+	for _, e := range p.Events {
+		if e.Kind == Firing {
+			perMin[int(e.At/time.Minute)]++
+		}
+	}
+	for m := 0; m < 150; m++ {
+		want := 246 // 4.1/s
+		if m >= 45 && m < 50 || m >= 105 && m < 110 {
+			want = 546 // 9.1/s
+		}
+		if d := perMin[m] - want; d < -1 || d > 1 {
+			t.Fatalf("minute %d: %d firings, want %d", m, perMin[m], want)
+		}
+	}
+}

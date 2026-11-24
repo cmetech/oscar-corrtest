@@ -872,6 +872,12 @@ func (f *fakeOSCAR) correlate(ctx context.Context, _ string, doc corr.Scenario, 
 	var mine []*targetops.Incident
 	f.mu.Lock()
 	for _, c := range doc.Cases {
+		if c.ParentTicket && c.Polarity == "positive" && !f.corrNoTicket { // the compiler tickets the synthetic parent
+			inc := &targetops.Incident{Number: fmt.Sprintf("INC9%06d", len(f.corrInc)+1), State: "1",
+				ShortDescription: fmt.Sprintf("[CORRTEST][%s][TRIGGER][%s] %s: correlation parent", doc.Pattern, short, c.Name)}
+			f.corrInc = append(f.corrInc, inc)
+			mine = append(mine, inc)
+		}
 		for _, e := range c.Events {
 			if e.Labels["create_ticket"] == "snow" && !f.corrNoTicket {
 				inc := &targetops.Incident{Number: fmt.Sprintf("INC9%06d", len(f.corrInc)+1), State: "1",

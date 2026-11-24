@@ -146,6 +146,9 @@ func laneFor(p scenario.PolicySpec) string {
 	if p.Action == "ticket" {
 		return "resend-ticket"
 	}
+	if p.Escalation != nil { // its own lane, or a higher-priority policy on the same lane would win
+		return "resend-escalate"
+	}
 	switch p.Mode {
 	case "occurrences":
 		return "resend-occ"
@@ -350,6 +353,10 @@ func (r *run) correlation(ctx context.Context) {
 	r.mu.Lock()
 	r.plannedCorr += len(setA)
 	r.mu.Unlock()
+	if r.s.Correlation.Cycle {
+		r.cycleCorrelation(ctx)
+		return
+	}
 	end := r.at("correlation", true)
 	for i, ref := range setA {
 		if ctx.Err() != nil || !r.now().Before(end) {
@@ -376,6 +383,45 @@ func (r *run) correlation(ctx context.Context) {
 	}
 	for ctx.Err() == nil {
 		ran := false
+		for _, ref := range setB {
+			if ctx.Err() != nil || !r.now().Before(stopAt) {
+				return
+			}
+			ran = r.correlate(ctx, ref, "setB", containsFold(r.s.Correlation.TicketedPatterns, ref.Pattern)) || ran
+		}
+		if !ran && !r.e.clock.SleepUntil(ctx, r.now().Add(setBBackoff)) { // a pass that started no run must not spin
+			return
+		}
+	}
+}
+
+// cycleCorrelation (Correlation.Cycle, v4) runs set A then set B in a loop
+// from the correlation phase start until the drain, each case scored as in
+// v1. Set A cases the first pass never reached are not_run; later passes add
+// to the plan as they start, like set B.
+func (r *run) cycleCorrelation(ctx context.Context) {
+	setA, setB := r.s.Correlation.SetA, r.s.Correlation.SetB
+	stopAt := r.at("drain", false)
+	for pass := 0; ; pass++ {
+		ran := false
+		for i, ref := range setA {
+			if ctx.Err() != nil || !r.now().Before(stopAt) {
+				if pass == 0 {
+					r.mu.Lock()
+					for _, rest := range setA[i:] {
+						r.notRun = append(r.notRun, "setA "+refName(rest))
+					}
+					r.mu.Unlock()
+				}
+				return
+			}
+			if pass > 0 {
+				r.mu.Lock()
+				r.plannedCorr++
+				r.mu.Unlock()
+			}
+			ran = r.correlate(ctx, ref, "setA", false) || ran
+		}
 		for _, ref := range setB {
 			if ctx.Err() != nil || !r.now().Before(stopAt) {
 				return
@@ -417,10 +463,15 @@ func (r *run) correlate(ctx context.Context, ref scenario.CaseRef, kind string, 
 	started := false
 	if err == nil {
 		if ticket {
-			ticketFirstTrigger(&doc)
+			if r.s.Correlation.ParentTickets {
+				ticketParent(&doc)
+			} else {
+				ticketFirstTrigger(&doc)
+			}
 			kind = setBTicketRun + ref.Pattern
 		}
 		var res domain.Run
+		r.offer("correlation", false, firingEvents(doc)) // ponytail: counted at the run start, not per injection
 		res, err = r.e.d.Correlate(ctx, r.e.d.TargetID, doc, correlationRun)
 		started = err == nil && res.ID != "" // a run that failed validation still has an ID
 		if res.ID != "" {
@@ -445,6 +496,19 @@ func (r *run) correlate(ctx context.Context, ref scenario.CaseRef, kind string, 
 // holds ticketed alerts (anti-flap), so their History rows land well after the
 // 45 s default (49-79 s at 5/s, max 91 s; Corey, 2026-11-18).
 const setBTicketObservation = 150 * time.Second
+
+// ticketParent (Correlation.ParentTickets) tickets the synthetic parent of
+// each trigger (positive) case instead of a source alert: the compiler puts
+// create_ticket=snow on the parent and its summary carries the run token.
+func ticketParent(doc *corr.Scenario) {
+	for i := range doc.Cases {
+		if c := &doc.Cases[i]; c.Polarity == "positive" {
+			c.ParentTicket = true
+			c.ObservationWindow = setBTicketObservation
+			doc.MaxDuration += setBTicketObservation
+		}
+	}
+}
 
 // ticketFirstTrigger labels the first firing event of each trigger
 // (positive) case with create_ticket=snow, lets that case observe for

@@ -154,6 +154,8 @@ type Deps struct {
 	ExportRun func(ctx context.Context, runID, destination string) (evidence.Result, error)
 	// Fingerprint manages fingerprint policies; nil skips the fingerprint lane.
 	Fingerprint FingerprintPolicies
+	// UserOps runs v4 tasks and reports as a user account; nil leaves those lanes without evidence.
+	UserOps UserOps
 }
 
 // Engine implements runtime.CampaignEngine.
@@ -215,6 +217,9 @@ type run struct {
 	standing      score.StandingStats // v2 standing pool
 	breaker       score.BreakerStats  // v2 forced breaker window
 	fp            score.FingerprintStats
+	offers        []score.Offer       // controller-lane posts (the offered rate)
+	tasks         score.TaskExecStats // v4 on-demand task runs
+	reports       score.ReportStats   // v4 alert reports
 }
 
 type policyState struct {
@@ -232,6 +237,7 @@ type cohortMember struct {
 	policy     *policyState
 	origin     time.Time
 	deliveries []resend.Delivery
+	episodes   []score.EscalationEpisode // PolicySpec.Episode cohorts only
 	ambiguous  bool
 	recorded   bool
 }
@@ -468,13 +474,15 @@ func (r *run) execute(ctx context.Context) error {
 	go func() { defer bg.Done(); r.guards(phaseCtx, func() { stopPhases(); stopFO() }) }()
 
 	var work sync.WaitGroup
-	work.Add(6)
+	work.Add(8)
 	go func() { defer work.Done(); r.managedPhase(phaseCtx) }()
 	go func() { defer work.Done(); r.nativeOrdinaryPhase(phaseCtx) }()
 	go func() { defer work.Done(); r.correlation(phaseCtx) }()
 	go func() { defer work.Done(); r.resendPhase(phaseCtx) }()
 	go func() { defer work.Done(); r.standingPhase(phaseCtx) }()    // v2 only
 	go func() { defer work.Done(); r.fingerprintPhase(phaseCtx) }() // facet only
+	go func() { defer work.Done(); r.taskPhase(phaseCtx) }()        // v4 only
+	go func() { defer work.Done(); r.reportPhase(phaseCtx) }()      // v4 only
 	work.Wait()
 	// Firings end at the drain phase start (or earlier on a trip/stop).
 	if r.e.clock.SleepUntil(phaseCtx, r.at("drain", false)) {

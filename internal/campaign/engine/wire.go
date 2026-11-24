@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign"
@@ -118,6 +119,9 @@ func NewFromConfig(ctx context.Context, cfg campaign.Config, host Host) (*Engine
 		actor, err := managed.NewActor(*cfg.ManagedTL1, root, targetHTTP)
 		d.managed = &managedDeps{setupErr: err, originals: *cfg.ManagedTL1, config: *cfg.ManagedTL1, actor: actor, oscar: oc, sink: sink, snow: snow}
 	}
+	if len(users) > 0 { // v4 tasks and reports refuse system-owned keys: use the first front-office user
+		d.UserOps = targetops.UserAPI{Root: root, Key: users[0].APIKey, HTTP: targetHTTP}
+	}
 	d.TaskRuns = func(ctx context.Context, start, end time.Time) ([]targetops.TaskRun, error) {
 		return targetops.TaskRuns(ctx, oc, precheck.HomelabJobs, start, end)
 	}
@@ -137,6 +141,7 @@ func NewFromConfig(ctx context.Context, cfg campaign.Config, host Host) (*Engine
 			return append(results, check)
 		}
 		results := precheck.Run(ctx, a, s, MinVersion)
+		results = append(results, v4Prechecks(ctx, d, s)...)
 		if s.NativeWorkload != nil && len(s.NativeWorkload.Cohorts) > 0 {
 			detail := "Scoring requires observed ordinary group decisions, request attempts and receipts."
 			if !s.Custom {
@@ -158,6 +163,36 @@ func NewFromConfig(ctx context.Context, cfg campaign.Config, host Host) (*Engine
 		return results
 	}
 	return New(d, clock), nil
+}
+
+// v4Prechecks are B12 (escalation scheduling) and B13 (alert report set up),
+// blocking, for scenarios with an escalation cohort or a report lane.
+func v4Prechecks(ctx context.Context, d Deps, s scenario.Scenario) []precheck.Result {
+	var out []precheck.Result
+	if precheck.NeedsEscalation(s) {
+		st, err := func() (targetops.PolicyStatus, error) {
+			all, err := d.Target.Notifiers(ctx)
+			if err != nil {
+				return targetops.PolicyStatus{}, err
+			}
+			for _, n := range all {
+				if strings.EqualFold(n.Name, d.CampaignNotifier) {
+					return d.Target.PolicyStatus(ctx, n.ID, "notification", "")
+				}
+			}
+			return targetops.PolicyStatus{}, fmt.Errorf("notifier %s not found", d.CampaignNotifier)
+		}()
+		out = append(out, precheck.EscalationSchedule(st, err))
+	}
+	if r := s.Report; r != nil {
+		if d.UserOps == nil {
+			out = append(out, precheck.ReportSetup(r.Key, targetops.ReportInfo{}, errors.New("no front-office user credential (campaign-fo)")))
+		} else {
+			info, err := d.UserOps.Report(ctx, r.Key)
+			out = append(out, precheck.ReportSetup(r.Key, info, err))
+		}
+	}
+	return out
 }
 
 type campaignIDKey struct{}

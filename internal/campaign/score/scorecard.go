@@ -124,6 +124,10 @@ type Scorecard struct {
 	Headlines                    []Headline
 	ATT                          *ATT              // v2 only: the AT&T-shape measurements (report-only)
 	Fingerprint                  *FingerprintStats // fingerprint-policy lane facet only
+	Offered                      *OfferedRate      `json:",omitempty"` // every lane's posts per minute
+	Escalation                   *Rate             `json:",omitempty"` // v4 escalation episodes
+	TaskExec                     *TaskExecStats    `json:",omitempty"` // v4 on-demand task runs
+	Reports                      *ReportStats      `json:",omitempty"` // v4 alert reports
 	Verdict                      domain.Verdict
 	EvidenceIncomplete           bool `json:",omitempty"`
 	Reasons                      []string

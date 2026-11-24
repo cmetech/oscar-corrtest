@@ -121,30 +121,69 @@ func (r *run) fingerprintPhase(ctx context.Context) {
 	}
 	r.setFP(func(s *score.FingerprintStats) { s.PublicationID = pub })
 	r.event(stable, "campaign.fingerprint", "info", "fingerprint policy served in publication "+pub, nil)
+	// Every > 0 (v4) repeats the round on its own devices while the policy
+	// stays on, as long as a round can be verified before the drain.
+	first := r.now()
+	for k := 1; r.fingerprintRound(ctx, k, note); k++ {
+		next := first.Add(time.Duration(k) * spec.Every)
+		if spec.Every <= 0 || !next.Add(spec.Verify).Before(r.at("drain", false)) || !r.e.clock.SleepUntil(ctx, next) {
+			return
+		}
+	}
+}
+
+// fpDevices are round k's merge and split devices; a single-round lane keeps
+// the fixed names.
+func (r *run) fpDevices(k int) (merge, split string) {
+	if r.s.Fingerprint == nil || r.s.Fingerprint.Every <= 0 {
+		return mergeDevice, splitDevice
+	}
+	return fmt.Sprintf("%s-%d", mergeDevice, k), fmt.Sprintf("%s-%d", splitDevice, k)
+}
+
+// fingerprintRound posts Repeats merge variants and one split control with one
+// startsAt, reads History back after Verify and scores the round. In a
+// multi-round lane it then resolves the round's rows while the policy is on.
+// It reports whether the round was verified.
+func (r *run) fingerprintRound(ctx context.Context, k int, note func(bool, string)) bool {
+	spec := r.s.Fingerprint
+	merge, split := r.fpDevices(k)
 	startsAt := r.now().Truncate(time.Second)
 	sent := 0
 	post := func(device, volatile string) {
 		labels := r.fpLabels(device, volatile)
+		r.offer(fingerprintLane, false, 1)
 		if status, err := r.e.d.Target.PostAlert(ctx, Alert{Name: fingerprintAlert, Labels: labels, StartsAt: startsAt}); err == nil && status/100 == 2 {
 			sent++
 		}
 	}
 	for i := 1; i <= spec.Repeats; i++ {
-		post(mergeDevice, fmt.Sprintf("v%d", i))
+		post(merge, fmt.Sprintf("v%d", i))
 	}
-	post(splitDevice, "v1")
-	r.setFP(func(s *score.FingerprintStats) { s.Sent = sent })
+	post(split, "v1")
+	r.setFP(func(s *score.FingerprintStats) { s.Sent += sent })
 	// ponytail: one read after Verify; poll for early completion if Verify must be long.
 	if !r.e.clock.SleepUntil(ctx, startsAt.Add(spec.Verify)) {
 		note(false, "campaign ended before the History read-back")
-		return
+		return false
 	}
 	rows, err := r.e.d.Target.History(ctx, r.id, startsAt.Add(-time.Minute), r.now().Add(time.Minute))
 	if err != nil {
 		note(false, "History read-back: "+err.Error())
-		return
+		return false
 	}
-	r.setFP(func(s *score.FingerprintStats) { s.Observe(rows, fingerprintAlert, mergeDevice, splitDevice) })
+	r.setFP(func(s *score.FingerprintStats) { s.Observe(rows, fingerprintAlert, merge, split) })
+	if spec.Every > 0 { // cleanup resolves (and verifies) anything this leaves firing
+		for _, row := range rows {
+			if d := row.Labels["device"]; row.AlertName == fingerprintAlert && (d == merge || d == split) && !strings.EqualFold(row.Status, "resolved") {
+				for _, req := range r.pairResolves(row) {
+					_, _ = r.e.d.Target.PostAlertGroup(ctx, req)
+					r.offer(fingerprintLane, true, 1)
+				}
+			}
+		}
+	}
+	return true
 }
 
 // revertFingerprint publishes the policy disabled now; on failure the
@@ -228,7 +267,7 @@ func (r *run) fpLabels(device, volatile string) map[string]string {
 // control is the single alert v1.
 func (r *run) pairResolves(row oscar.HistoryRecord) []oscar.AlertGroupRequest {
 	repeats := 1
-	if row.Labels["device"] == mergeDevice && r.s.Fingerprint != nil {
+	if strings.HasPrefix(row.Labels["device"], mergeDevice) && r.s.Fingerprint != nil {
 		repeats = r.s.Fingerprint.Repeats
 	}
 	var out []oscar.AlertGroupRequest

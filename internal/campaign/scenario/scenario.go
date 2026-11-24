@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"math"
 	"reflect"
 	"strings"
 	"time"
@@ -31,6 +32,8 @@ type BaselineSpec struct {
 	// Burst raises the firing rate to Burst.Rate for [At, At+For); nil keeps
 	// the uniform plan (and the scenario hash) unchanged.
 	Burst *BurstSpec `json:"burst,omitempty"`
+	// Bursts are further spikes (v4 has two); empty keeps the hash unchanged.
+	Bursts []BurstSpec `json:"bursts,omitempty"`
 }
 
 // BurstSpec is a timed spike of the baseline firing rate.
@@ -52,6 +55,12 @@ type CorrelationSpec struct {
 	SetA             []CaseRef `json:"setA"`
 	SetB             []CaseRef `json:"setB"`
 	TicketedPatterns []string  `json:"ticketedPatterns"`
+	// Cycle (v4) loops set A then set B from the correlation phase start
+	// until the drain, instead of set A once and then set B from ticketing.
+	Cycle bool `json:"cycle,omitempty"`
+	// ParentTickets (v4) tickets a ticketed run's synthetic parent, not its
+	// first trigger alert.
+	ParentTickets bool `json:"parentTickets,omitempty"`
 }
 
 type EscalationSpec struct {
@@ -70,6 +79,30 @@ type PolicySpec struct {
 	Cohort     int             `json:"cohort"`
 	Notifier   string          `json:"notifier"`
 	Escalation *EscalationSpec `json:"escalation,omitempty"`
+	// Episode > 0 (v4 escalation cohort) resolves each member and fires it
+	// again with a fresh startsAt every Episode, so every member opens a new
+	// OSCAR episode (and a new escalation) throughout the run. Such a cohort
+	// is scored on its escalations, not on the resend model.
+	Episode time.Duration `json:"episode,omitempty"`
+}
+
+// TaskExecSpec (v4) runs Job (a homelab pack task, by name) through OSCAR's
+// task API every Every from At until the drain, as the first front-office
+// user. A run must reach a terminal state within Timeout.
+type TaskExecSpec struct {
+	Job     string        `json:"job"`
+	At      time.Duration `json:"at"`
+	Every   time.Duration `json:"every"`
+	Timeout time.Duration `json:"timeout"`
+}
+
+// ReportSpec (v4) requests the alert report Key (alert history from T0 to the
+// request) at each At offset, as the first front-office user, and verifies
+// its artifact in object storage. A run must be ready within Timeout.
+type ReportSpec struct {
+	Key     string          `json:"key"`
+	At      []time.Duration `json:"at"`
+	Timeout time.Duration   `json:"timeout"`
 }
 
 type FrontOfficeSpec struct {
@@ -90,6 +123,9 @@ type Limits struct {
 	ResendSuccess            float64       `json:"resendSuccess"`
 	RegressionPct            float64       `json:"regressionPct"`
 	QuerySetVersion          string        `json:"querySetVersion"`
+	// v4 lanes; zero (and absent from the hash) elsewhere.
+	TaskSuccess float64       `json:"taskSuccess,omitempty"` // on-demand task runs that succeed
+	TaskP95     time.Duration `json:"taskP95,omitempty"`     // request to terminal result
 }
 
 type PrecheckLimits struct {
@@ -159,6 +195,10 @@ type FingerprintSpec struct {
 	Repeats  int           `json:"repeats"`
 	Converge time.Duration `json:"converge"`
 	Verify   time.Duration `json:"verify"`
+	// Every > 0 (v4) repeats the round every Every, on fresh devices and with
+	// the policy kept on, until a round can no longer verify before the drain;
+	// each round's alerts are resolved after its read-back. Verify < Every.
+	Every time.Duration `json:"every,omitempty"`
 }
 
 // NativeCohort identifies a distinct source-delivery path in the qualification workload.
@@ -201,7 +241,10 @@ type Scenario struct {
 	// DeadTarget is the delivery-retry isolation facet.
 	DeadTarget *DeadTargetSpec `json:"deadTarget,omitempty"`
 	// Fingerprint is the fingerprint-policy lane facet; nil runs no lane.
-	Fingerprint    *FingerprintSpec    `json:"fingerprint,omitempty"`
+	Fingerprint *FingerprintSpec `json:"fingerprint,omitempty"`
+	// Tasks and Report are the v4 on-demand task and alert-report lanes.
+	Tasks          *TaskExecSpec       `json:"tasks,omitempty"`
+	Report         *ReportSpec         `json:"report,omitempty"`
 	LoadEnd        time.Duration       `json:"loadEnd,omitempty"`
 	NativeWorkload *NativeWorkloadSpec `json:"nativeWorkload,omitempty"`
 	Limits         Limits              `json:"limits"`
@@ -234,10 +277,10 @@ func AlertingDayV1() Scenario {
 			ResolveAfter: 15 * min, TicketEveryNth: 20, TicketFrom: 60 * min, TicketTo: 120 * min},
 		Correlation: CorrelationSpec{SetA: setA, SetB: setB, TicketedPatterns: []string{"flood", "threshold"}},
 		Resend: []PolicySpec{
-			{"R1", "notification", "time", 110 * time.Second, 0, n(5), false, 10, "CAMPAIGN_SINK", nil},
-			{"R2", "notification", "occurrences", 0, 3, nil, true, 10, "CAMPAIGN_SINK", nil},
-			{"R3", "notification", "either", 300 * time.Second, 5, n(2), true, 10, "CAMPAIGN_SINK", nil},
-			{"R4", "ticket", "time", 590 * time.Second, 0, n(2), false, 10, "ALERTHISTORY", nil},
+			{"R1", "notification", "time", 110 * time.Second, 0, n(5), false, 10, "CAMPAIGN_SINK", nil, 0},
+			{"R2", "notification", "occurrences", 0, 3, nil, true, 10, "CAMPAIGN_SINK", nil, 0},
+			{"R3", "notification", "either", 300 * time.Second, 5, n(2), true, 10, "CAMPAIGN_SINK", nil, 0},
+			{"R4", "ticket", "time", 590 * time.Second, 0, n(2), false, 10, "ALERTHISTORY", nil, 0},
 		},
 		Redelivery: 130 * time.Second, ResendUntil: 118 * min, // clear of TransportDedupWindow
 		FrontOffice: FrontOfficeSpec{Users: 4, Interval: 15 * time.Second, Jitter: 3 * time.Second, SearchEvery: 2 * min},
@@ -287,7 +330,7 @@ func AlertingDaySmokeV1() Scenario {
 		Severity:     map[string]float64{"critical": 0.05, "major": 0.15, "minor": 0.40, "warning": 0.40},
 		ResolveAfter: min, TicketEveryNth: 100, TicketFrom: 4 * min, TicketTo: 8 * min} // seed 20261113: 2 tickets
 	s.Correlation = CorrelationSpec{SetA: []CaseRef{{Pattern: "flood", Level: "builtin"}}, TicketedPatterns: []string{"flood", "threshold"}}
-	s.Resend = []PolicySpec{{"R1", "notification", "time", 50 * time.Second, 0, n(2), false, 2, "CAMPAIGN_SINK", nil}}
+	s.Resend = []PolicySpec{{"R1", "notification", "time", 50 * time.Second, 0, n(2), false, 2, "CAMPAIGN_SINK", nil, 0}}
 	s.ResendUntil = 9*min + 48*time.Second // v1 stops cohorts just before drain; ~3 deliveries after activation
 	return s
 }
@@ -453,9 +496,118 @@ func FunctionalBurstFullV1() Scenario {
 	return s
 }
 
+// V4 offered-rate budget. The v4 rates (5/s, 10/s spikes) are the TOTAL
+// firing posts per second over every lane; the worker lane carries what the
+// controller lanes leave. Resolves are posted on top and reported per minute.
+const (
+	V4TotalRate = 5.0
+	V4SpikeRate = 10.0
+	// CorrelationBudget bounds the cycling correlation lane: one pass of the
+	// 32 v1 documents offers 155 firing source alerts, and the runtime runs
+	// one document at a time (each observes at least 45 s), so at most
+	// ~0.11/s. Synthetic parents are OSCAR's, not offered.
+	CorrelationBudget = 0.15
+)
+
+// ControllerFiringRate is the planned firing rate of the controller lanes
+// (correlation budget, resend cohorts and the fingerprint rounds) that the
+// v4 worker lane leaves room for.
+func (s Scenario) ControllerFiringRate() float64 {
+	rate := 0.0
+	if s.Correlation.Cycle {
+		rate += CorrelationBudget
+	}
+	if s.Redelivery > 0 {
+		for _, p := range s.Resend {
+			rate += float64(p.Cohort) / s.Redelivery.Seconds()
+		}
+	}
+	if f := s.Fingerprint; f != nil && f.Every > 0 {
+		rate += float64(f.Repeats+1) / f.Every.Seconds()
+	}
+	return rate
+}
+
+// AlertingDayV4 is the 150-minute mixed-load gate for the single-node target
+// (Corey, 2026-11-24: 3-5 alerts/s sustained, spikes to 10/s): every lane
+// runs concurrently instead of v3's sequential phases, then the 30-minute
+// drain. Total offered firing rate is 5/s, and 10/s for 5 minutes at T+45
+// and T+105: the worker lane fires 4.1/s (9.1/s in a spike) beside the
+// controller lanes' 0.9/s (ControllerFiringRate). Shares of the 5/s:
+//   - correlation: set A and set B cycled from T+1 to the drain, each case
+//     scored as in v1 (the runtime serializes runs: about 1-2%, not 20%);
+//   - tickets (~5%): every 15th new worker alert, plus each ticketed set B
+//     run's synthetic parent (flood, threshold) and the R4 cohort;
+//   - fingerprint (5%): a 30-alert round every 2 minutes under one scoped
+//     policy (29 variants that must collapse, one other device that must not),
+//     reverted at the end;
+//   - resend (10%): 65 cohort members re-delivered every 130 s: v1's R1-R4
+//     (13 each) and R5, a configured time policy that escalates to critical
+//     after 4 minutes, its 13 members starting a new episode every 15 minutes;
+//   - front-office API users as v1, one homelab task run through the task
+//     API every 5 minutes, and an alert report at T+60 and T+120.
+//
+// No v2 standing pool or forced breaker: the pool repeats are v1's 10%.
+func AlertingDayV4() Scenario {
+	min := time.Minute
+	s := AlertingDayV1()
+	s.Version = "v4"
+	s.Phases = []Phase{{"preflight", -10 * min, 0}, {"baseline", 0, 150 * min}, {"correlation", min, 150 * min},
+		{"ticketing", 0, 150 * min}, {"resend", 2 * min, 148 * min}, {"drain", 150 * min, 180 * min}}
+	s.Baseline.Rate = 4.1
+	s.Baseline.TicketEveryNth, s.Baseline.TicketFrom, s.Baseline.TicketTo = 15, 0, 150*min
+	s.Baseline.Bursts = []BurstSpec{{At: 45 * min, For: 5 * min, Rate: 9.1}, {At: 105 * min, For: 5 * min, Rate: 9.1}}
+	s.Correlation.Cycle, s.Correlation.ParentTickets = true, true
+	for i := range s.Resend {
+		s.Resend[i].Cohort = 13
+	}
+	s.Resend = append(s.Resend, PolicySpec{Key: "R5", Action: "notification", Mode: "time", Interval: 300 * time.Second, Cohort: 13,
+		Notifier: "CAMPAIGN_SINK", Escalation: &EscalationSpec{After: 4 * min, TargetSeverity: "critical"}, Episode: 15 * min})
+	s.ResendUntil = 146 * min
+	s.Fingerprint = &FingerprintSpec{At: 2 * min, Repeats: 29, Converge: 2 * min, Verify: 90 * time.Second, Every: 2 * min}
+	s.Tasks = &TaskExecSpec{Job: "monitor:check_connection:homelab", At: 5 * min, Every: 5 * min, Timeout: 4 * min}
+	s.Report = &ReportSpec{Key: "core-alarm-history-dump", At: []time.Duration{60 * min, 120 * min}, Timeout: 20 * min}
+	s.Limits = AlertingDayV3().Limits
+	s.Limits.TaskSuccess, s.Limits.TaskP95 = 1, 2*min
+	return s
+}
+
+// AlertingDaySmokeV4 compresses v4 into about 15 minutes (12 of load at the
+// same 5/s and 10/s totals (1-minute spikes) at T+4 and T+8, then a 3-minute
+// drain): one set A and one ticketed set B document cycled, R1 and the R5
+// escalation cohort (2 members each, escalating after 2 minutes), fingerprint
+// rounds of 6, two task runs and one report. Custom: never comparable.
+func AlertingDaySmokeV4() Scenario {
+	min := time.Minute
+	n := func(i int) *int { return &i }
+	s := AlertingDayV4()
+	s.ID, s.Custom = "alerting-day-smoke", true
+	s.Phases = []Phase{{"preflight", -2 * min, 0}, {"baseline", 0, 12 * min}, {"correlation", min, 12 * min},
+		{"ticketing", 0, 12 * min}, {"resend", min, 11 * min}, {"drain", 12 * min, 15 * min}}
+	s.Baseline.ResolveAfter = min
+	s.Baseline.TicketEveryNth, s.Baseline.TicketTo = 100, 12*min
+	s.Baseline.Bursts = []BurstSpec{{At: 4 * min, For: min, Rate: 9.1}, {At: 8 * min, For: min, Rate: 9.1}}
+	s.Correlation = CorrelationSpec{SetA: []CaseRef{{Pattern: "flood", Level: "builtin"}}, SetB: []CaseRef{{Pattern: "threshold", Level: "builtin"}},
+		TicketedPatterns: []string{"flood", "threshold"}, Cycle: true, ParentTickets: true}
+	s.Resend = []PolicySpec{{Key: "R1", Action: "notification", Mode: "time", Interval: 50 * time.Second, MaxResends: n(2), Cohort: 2, Notifier: "CAMPAIGN_SINK"},
+		{Key: "R5", Action: "notification", Mode: "time", Interval: 120 * time.Second, Cohort: 2, Notifier: "CAMPAIGN_SINK",
+			Escalation: &EscalationSpec{After: 2 * min, TargetSeverity: "critical"}, Episode: 5 * min}}
+	s.ResendUntil = 10*min + 30*time.Second
+	s.Fingerprint = &FingerprintSpec{At: min, Repeats: 5, Converge: 2 * min, Verify: time.Minute, Every: 2 * min}
+	s.Tasks = &TaskExecSpec{Job: "monitor:check_connection:homelab", At: 2 * min, Every: 5 * min, Timeout: 4 * min}
+	s.Report = &ReportSpec{Key: "core-alarm-history-dump", At: []time.Duration{4 * min}, Timeout: 7 * min}
+	// The smoke's controller lanes are smaller: the worker lane fills the same 5/s and 10/s totals.
+	worker := math.Floor((V4TotalRate-s.ControllerFiringRate())*100) / 100
+	s.Baseline.Rate = worker
+	for i := range s.Baseline.Bursts {
+		s.Baseline.Bursts[i].Rate = worker + V4SpikeRate - V4TotalRate
+	}
+	return s
+}
+
 // Builtins are the built-in campaign scenarios.
 func Builtins() []Scenario {
-	return []Scenario{AlertingDayV1(), AlertingDayV2(), AlertingDaySmokeV1(), AlertingDaySmokeV2(), DeliveryRetryV1(), ResendOnlyV1(), FunctionalV1(), FunctionalBurstV1(), FunctionalBurstFullV1(), AlertingDayControlV1(), AlertingDayV3(), AlertingDaySmokeV3(), ManagedAlertsSmokeV1()}
+	return []Scenario{AlertingDayV1(), AlertingDayV2(), AlertingDaySmokeV1(), AlertingDaySmokeV2(), DeliveryRetryV1(), ResendOnlyV1(), FunctionalV1(), FunctionalBurstV1(), FunctionalBurstFullV1(), AlertingDayControlV1(), AlertingDayV3(), AlertingDaySmokeV3(), ManagedAlertsSmokeV1(), AlertingDayV4(), AlertingDaySmokeV4()}
 }
 
 // Lookup returns the built-in scenario named "id@version".
