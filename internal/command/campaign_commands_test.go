@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -106,6 +107,7 @@ type wireFake struct {
 	active  bool
 	started []appruntime.CampaignOptions
 	report  string
+	all     []domain.Campaign // stored campaigns, newest first; nil lists camp_1
 }
 
 func (f *wireFake) ReadyStatus() (bool, string) { return true, "" }
@@ -120,8 +122,73 @@ func (f *wireFake) StopCampaign(context.Context, string) error { return nil }
 func (f *wireFake) CampaignStatus(_ context.Context, id string) (appruntime.CampaignView, error) {
 	return appruntime.CampaignView{Campaign: domain.Campaign{ID: id, Status: domain.CampaignCompleted, Verdict: domain.VerdictInconclusive, Report: json.RawMessage(f.report)}}, nil
 }
-func (f *wireFake) ListCampaigns(context.Context, domain.CampaignFilter) ([]domain.Campaign, error) {
-	return []domain.Campaign{{ID: "camp_1"}}, nil
+func (f *wireFake) ListCampaigns(_ context.Context, filter domain.CampaignFilter) ([]domain.Campaign, error) {
+	if f.all == nil {
+		return []domain.Campaign{{ID: "camp_1"}}, nil
+	}
+	out := f.all[min(filter.Offset, len(f.all)):]
+	if filter.Limit > 0 && len(out) > filter.Limit {
+		out = out[:filter.Limit]
+	}
+	return out, nil
+}
+
+// TestCampaignStatusListsManyCampaigns (OSC-154 AC-1): with 150 stored
+// campaigns whose full records exceed 16 MiB, campaign status without an ID
+// lists the newest 20 (ID, scenario, status, verdict, start) and pages with
+// --limit and --offset; bad paging values are usage errors.
+func TestCampaignStatusListsManyCampaigns(t *testing.T) {
+	card := json.RawMessage(`{"pad":"` + strings.Repeat("x", 256<<10) + `"}`)
+	t0 := time.Date(2026, 11, 24, 0, 0, 0, 0, time.UTC)
+	f := &wireFake{}
+	for i := 149; i >= 0; i-- {
+		f.all = append(f.all, domain.Campaign{ID: fmt.Sprintf("camp_%03d", i), ScenarioID: "alerting-day", Status: domain.CampaignCompleted,
+			Verdict: domain.VerdictPass, StartedAt: t0.Add(time.Duration(i) * time.Hour), Scorecard: card, Report: card})
+	}
+	const token = "0123456789abcdef-token"
+	h, err := web.NewHandlerWithCampaign(version.Info{}, f, web.Security{Mode: web.SecurityBearer, BearerToken: []byte(token), SecureCookies: true}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	tok := filepath.Join(t.TempDir(), "tok")
+	_ = os.WriteFile(tok, []byte(token), 0o600)
+	run := func(args ...string) (int, []string, string) {
+		var out, errb bytes.Buffer
+		code := New(&out, &errb, version.Info{}, nil).Run(context.Background(), append(append([]string{"campaign", "status"}, args...), "--server", srv.URL, "--token-file", tok))
+		return code, strings.Split(strings.TrimSpace(out.String()), "\n"), errb.String()
+	}
+	code, lines, errs := run()
+	if code != 0 || len(lines) != 20 {
+		t.Fatalf("code=%d lines=%d err=%s", code, len(lines), errs)
+	}
+	if want := "camp_149\talerting-day\tCOMPLETED\tPASS\t" + t0.Add(149*time.Hour).Format(time.RFC3339); lines[0] != want {
+		t.Errorf("first line %q, want %q", lines[0], want)
+	}
+	if code, lines, errs := run("--limit", "5", "--offset", "5"); code != 0 || len(lines) != 5 || !strings.HasPrefix(lines[0], "camp_144\t") {
+		t.Errorf("--limit 5 --offset 5: code=%d %v %s", code, lines, errs)
+	}
+	if code, _, _ := run("--output", "json", "--limit", "2"); code != 0 {
+		t.Errorf("json code=%d", code)
+	}
+	for _, bad := range [][]string{{"--limit", "0"}, {"--limit", "101"}, {"--offset", "-1"}} {
+		if code, _, _ := run(bad...); code != 2 {
+			t.Errorf("%v: code=%d, want usage error 2", bad, code)
+		}
+	}
+}
+
+// TestCampaignCallRefusesOversizedResponse: a body over the 16 MiB read limit
+// fails with a clear error instead of decoding a truncated body.
+func TestCampaignCallRefusesOversizedResponse(t *testing.T) {
+	pad := strings.Repeat("x", 16<<20)
+	code, _, errs := campaignCLI(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":{"campaign":{"ID":"` + pad + `"}}}`))
+	}, "campaign", "status", "cmp_1")
+	if code != 1 || !strings.Contains(errs, "exceeds 16 MiB") {
+		t.Fatalf("code=%d err=%.200s", code, errs)
+	}
 }
 
 func TestCampaignCLIAgainstRealWebHandler(t *testing.T) {

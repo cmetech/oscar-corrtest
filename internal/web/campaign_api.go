@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/lane"
@@ -175,12 +177,29 @@ func registerCampaignRoutes(mux *http.ServeMux, data DataSource, workerMode bool
 			})
 		}
 		mux.HandleFunc("GET /api/v1/campaign/runs", func(w http.ResponseWriter, r *http.Request) {
-			list, err := ctl.ListCampaigns(r.Context(), domain.CampaignFilter{Limit: 100})
+			// Summaries, newest first: full records carry scorecards and reports
+			// and outgrow any client limit (OSC-154).
+			f, ok := domain.CampaignFilter{Limit: 20}, true
+			if v := r.URL.Query().Get("limit"); v != "" {
+				f.Limit, ok = parseBounded(v, 1, 100)
+			}
+			if v := r.URL.Query().Get("offset"); v != "" && ok {
+				f.Offset, ok = parseBounded(v, 0, math.MaxInt32)
+			}
+			if !ok {
+				apiError(w, http.StatusBadRequest, "invalid_request", "limit must be 1-100 and offset a non-negative integer")
+				return
+			}
+			list, err := ctl.ListCampaigns(r.Context(), f)
 			if err != nil {
 				apiError(w, http.StatusInternalServerError, "list_failed", err.Error())
 				return
 			}
-			apiData(w, http.StatusOK, list)
+			out := make([]domain.CampaignSummary, 0, len(list))
+			for _, c := range list {
+				out = append(out, c.Summary())
+			}
+			apiData(w, http.StatusOK, out)
 		})
 		mux.HandleFunc("GET /api/v1/campaign/runs/{id}", func(w http.ResponseWriter, r *http.Request) {
 			view, err := ctl.CampaignStatus(r.Context(), r.PathValue("id"))
@@ -336,4 +355,10 @@ func decodeStrict(w http.ResponseWriter, r *http.Request, v any) bool {
 		return false
 	}
 	return true
+}
+
+// parseBounded parses a decimal integer in [lo, hi].
+func parseBounded(v string, lo, hi int) (int, bool) {
+	n, err := strconv.Atoi(v)
+	return n, err == nil && n >= lo && n <= hi
 }

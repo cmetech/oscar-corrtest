@@ -33,6 +33,25 @@ type Campaign struct {
 	Scorecard, Report            json.RawMessage
 }
 
+// CampaignSummary is a Campaign without its Scorecard and Report, for lists.
+// Field names match Campaign, so list items read the same in JSON.
+type CampaignSummary struct {
+	ID, ScenarioID, ScenarioHash string
+	Custom                       bool
+	Trigger, RunBy               string
+	TriggerIdentity              string
+	Status                       CampaignStatus
+	Verdict                      Verdict
+	Cleanup                      CleanupStatus
+	Comparable                   bool
+	StartedAt, EndedAt           time.Time
+}
+
+func (c Campaign) Summary() CampaignSummary {
+	return CampaignSummary{ID: c.ID, ScenarioID: c.ScenarioID, ScenarioHash: c.ScenarioHash, Custom: c.Custom, Trigger: c.Trigger, RunBy: c.RunBy,
+		TriggerIdentity: c.TriggerIdentity, Status: c.Status, Verdict: c.Verdict, Cleanup: c.Cleanup, Comparable: c.Comparable, StartedAt: c.StartedAt, EndedAt: c.EndedAt}
+}
+
 // CampaignRole declares how an operator intends a run to be used.
 type CampaignRole string
 
@@ -66,6 +85,7 @@ type CampaignRecordedOptions struct {
 type CampaignFilter struct {
 	Status CampaignStatus // empty = any
 	Limit  int            // 0 = no limit
+	Offset int            // newest campaigns to skip (paging)
 }
 
 type PrecheckResult struct {
