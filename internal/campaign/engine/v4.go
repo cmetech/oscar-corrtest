@@ -254,7 +254,13 @@ func (r *run) v4Score(card *score.Scorecard, in score.Inputs, report map[string]
 		offered := score.OfferedPerMinute(r.t0, r.at("drain", false), offers)
 		card.Offered = &offered
 		report["offered"] = offered
-		judge(card, nil, offered.OfferedBudget(r.s.Baseline, scenario.V4TotalRate, scenario.V4SpikeRate))
+		r.mu.Lock()
+		var fullFrom time.Duration // the last paced lane's full-load start: earlier minutes are not under plan
+		for _, t := range r.laneStarts {
+			fullFrom = max(fullFrom, t.Sub(r.t0))
+		}
+		r.mu.Unlock()
+		judge(card, nil, offered.OfferedBudget(r.s.Baseline, scenario.V4TotalRate, scenario.V4SpikeRate, fullFrom))
 	}
 
 	r.escalationScore(card, in.Receipts, report)

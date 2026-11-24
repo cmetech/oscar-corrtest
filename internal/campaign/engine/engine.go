@@ -220,6 +220,7 @@ type run struct {
 	offers        []score.Offer       // controller-lane posts (the offered rate)
 	tasks         score.TaskExecStats // v4 on-demand task runs
 	reports       score.ReportStats   // v4 alert reports
+	laneStarts    []time.Time         // when the paced controller lanes reached full load (offered-rate warm-up)
 }
 
 type policyState struct {
@@ -339,6 +340,12 @@ func (e *Engine) Recover(ctx context.Context, id string) error {
 		}
 	}
 	r.opts = runtime.CampaignOptions{Trigger: c.Trigger, RunBy: c.RunBy}
+	if ev, ok, err := r.store().FirstCampaignEvent(ctx, id, domain.CampaignOptionsEvent); err == nil && ok {
+		var rec domain.CampaignRecordedOptions
+		if json.Unmarshal(ev.Detail, &rec) == nil {
+			r.opts.SkipLanes = rec.SkipLanes // the recovered scorecard still shows a skipped lane
+		}
+	}
 	if s, ok := r.recordedScenario(ctx); ok {
 		r.s = s
 	}

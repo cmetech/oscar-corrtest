@@ -261,7 +261,7 @@ func (a *App) campaignStart(ctx context.Context, name string, args []string, pre
 		}
 		return code
 	}
-	fmt.Fprintf(a.stdout, "%s\t%s\t%s\n", camp.ID, camp.Status, displayEmpty(string(camp.Verdict)))
+	fmt.Fprintf(a.stdout, "%s\t%s\t%s%s\n", camp.ID, camp.Status, displayEmpty(string(camp.Verdict)), skippedLanes(camp))
 	return code
 }
 
@@ -304,7 +304,7 @@ func (a *App) campaignStatusCmd(ctx context.Context, args []string) int {
 		Campaign domain.Campaign `json:"campaign"`
 	}
 	_ = json.Unmarshal(view, &v)
-	fmt.Fprintf(a.stdout, "%s\t%s\t%s\n", v.Campaign.ID, v.Campaign.Status, displayEmpty(string(v.Campaign.Verdict)))
+	fmt.Fprintf(a.stdout, "%s\t%s\t%s%s\n", v.Campaign.ID, v.Campaign.Status, displayEmpty(string(v.Campaign.Verdict)), skippedLanes(v.Campaign))
 	return 0
 }
 
@@ -474,4 +474,14 @@ func parseLeading(flags *flag.FlagSet, args []string) ([]string, error) {
 		return nil, err
 	}
 	return append(pos, flags.Args()...), nil
+}
+
+// skippedLanes is a tab-separated note of the lanes a run switched off by
+// option (--skip-lane), so such a run never reads as a full pass; "" if none.
+func skippedLanes(c domain.Campaign) string {
+	var card struct{ SkippedLanes []string }
+	if json.Unmarshal(c.Scorecard, &card) != nil || len(card.SkippedLanes) == 0 {
+		return ""
+	}
+	return "\tskipped by option: " + strings.Join(card.SkippedLanes, ", ")
 }

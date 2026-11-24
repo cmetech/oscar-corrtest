@@ -76,10 +76,11 @@ const offeredWarmup = 5 * time.Minute
 
 // OfferedBudget checks every minute against the plan: spike per second in a
 // minute that overlaps a burst of b, total elsewhere. A minute more than 5%
-// over, or (outside the first and last offeredWarmup) more than 5% under,
+// over, or (from fullFrom, when the last paced lane reached full load, but
+// not before offeredWarmup, and not in the last offeredWarmup) more than 5% under,
 // means the run did not offer the gate's load, so these are INCONCLUSIVE
 // reasons.
-func (o OfferedRate) OfferedBudget(b scenario.BaselineSpec, total, spike float64) []string {
+func (o OfferedRate) OfferedBudget(b scenario.BaselineSpec, total, spike float64, fullFrom time.Duration) []string {
 	bursts := append([]scenario.BurstSpec(nil), b.Bursts...)
 	if b.Burst != nil {
 		bursts = append(bursts, *b.Burst)
@@ -87,6 +88,7 @@ func (o OfferedRate) OfferedBudget(b scenario.BaselineSpec, total, spike float64
 	var over, under []string
 	n := len(o.PerMinute)
 	warm := int(offeredWarmup / time.Minute)
+	first := max(warm, int((fullFrom+time.Minute-1)/time.Minute)) // the first whole minute at full load
 	for _, m := range o.PerMinute {
 		from, to := time.Duration(m.Minute)*time.Minute, time.Duration(m.Minute+1)*time.Minute
 		limit := total
@@ -99,7 +101,7 @@ func (o OfferedRate) OfferedBudget(b scenario.BaselineSpec, total, spike float64
 		switch {
 		case rate > limit*offeredSlack:
 			over = append(over, fmt.Sprintf("T+%d (%.2f/s, budget %.0f/s)", m.Minute, rate, limit))
-		case rate < limit*(2-offeredSlack) && m.Minute >= warm && m.Minute < n-warm:
+		case rate < limit*(2-offeredSlack) && m.Minute >= first && m.Minute < n-warm:
 			under = append(under, fmt.Sprintf("T+%d (%.2f/s, plan %.0f/s)", m.Minute, rate, limit))
 		}
 	}

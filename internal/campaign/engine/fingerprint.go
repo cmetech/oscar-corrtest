@@ -124,6 +124,9 @@ func (r *run) fingerprintPhase(ctx context.Context) {
 	// Every > 0 (v4) repeats the round on its own devices while the policy
 	// stays on, as long as a round can be verified before the drain.
 	first := r.now()
+	r.mu.Lock()
+	r.laneStarts = append(r.laneStarts, first)
+	r.mu.Unlock()
 	for k := 1; r.fingerprintRound(ctx, k, note); k++ {
 		next := first.Add(time.Duration(k) * spec.Every)
 		if spec.Every <= 0 || !next.Add(spec.Verify).Before(r.at("drain", false)) || !r.e.clock.SleepUntil(ctx, next) {

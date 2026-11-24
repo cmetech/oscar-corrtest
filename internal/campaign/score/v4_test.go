@@ -124,11 +124,11 @@ func TestOfferedBudget(t *testing.T) {
 	}
 	o.PerMinute[0].Firing = 20 // warm-up: not under plan
 	o.PerMinute[6].Firing = 600
-	if got := o.OfferedBudget(b, 5, 10); got != nil {
+	if got := o.OfferedBudget(b, 5, 10, 0); got != nil {
 		t.Fatalf("on plan: %v", got)
 	}
 	o.PerMinute[5].Firing, o.PerMinute[7].Firing, o.PerMinute[6].Firing = 330, 270, 560
-	got := o.OfferedBudget(b, 5, 10)
+	got := o.OfferedBudget(b, 5, 10, 0)
 	if len(got) != 2 || !strings.Contains(got[0], "over budget in 1 minutes: T+5 (5.50/s, budget 5/s)") ||
 		!strings.Contains(got[1], "under plan in 2 minutes: T+6 (9.33/s, plan 10/s), T+7 (4.50/s, plan 5/s)") {
 		t.Fatalf("off plan: %v", got)
@@ -140,5 +140,21 @@ func TestTaskExecUnknownIsNotAFailure(t *testing.T) {
 	_, fails, incon := s.Judge(1, time.Minute)
 	if len(fails) != 0 || len(incon) != 1 || !strings.Contains(incon[0], "1 of 2 runs with an unknown outcome") || s.SuccessRatio != 1 {
 		t.Fatalf("fails %v incon %v stats %+v", fails, incon, s)
+	}
+}
+
+// TestOfferedBudgetWaitsForFullLoad: minutes before the last paced lane
+// reached full load (a late policy activation) are not under plan.
+func TestOfferedBudgetWaitsForFullLoad(t *testing.T) {
+	o := OfferedRate{}
+	for m := 0; m < 20; m++ {
+		o.PerMinute = append(o.PerMinute, OfferedMinute{Minute: m, Firing: 300})
+	}
+	o.PerMinute[6].Firing = 270 // cohorts not yet posting
+	if got := o.OfferedBudget(scenario.BaselineSpec{}, 5, 10, 6*time.Minute+30*time.Second); got != nil {
+		t.Fatalf("before full load: %v", got)
+	}
+	if got := o.OfferedBudget(scenario.BaselineSpec{}, 5, 10, 0); len(got) != 1 || !strings.Contains(got[0], "T+6") {
+		t.Fatalf("at full load: %v", got)
 	}
 }

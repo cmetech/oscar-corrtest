@@ -68,6 +68,7 @@ func (r *run) resendPhase(ctx context.Context) {
 	}
 	origin := r.now()
 	r.mu.Lock()
+	r.laneStarts = append(r.laneStarts, origin.Add(r.s.Redelivery)) // every member has posted once
 	for _, p := range r.policies {
 		lane := laneFor(p.spec)
 		for k := 1; k <= p.spec.Cohort; k++ {
@@ -196,6 +197,9 @@ func (r *run) deliverEpisode(ctx context.Context, m *cohortMember, tick time.Tim
 		m.recorded = true
 	}
 	ep := &m.episodes[len(m.episodes)-1]
+	if ep.FirstAt.IsZero() { // not yet accepted: the episode starts at the post that is
+		ep.StartsAt = r.now().Truncate(time.Millisecond)
+	}
 	start := r.now()
 	status, err := r.e.d.nativeSender.Send(ctx, episodeEvent(m, ep, lane.Firing), r.id, m.alert.Labels["campaign_lane"])
 	r.offer("resend", false, 1)
