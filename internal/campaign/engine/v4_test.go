@@ -92,6 +92,7 @@ func v4Harness(t *testing.T) (*harness, *fakeUserOps) {
 	h.s.ResendUntil, h.s.Baseline.TicketTo = 398*s, 400*s
 	h.s.Paced = true
 	h.s.Correlation.Cycle, h.s.Correlation.ParentTickets = true, true
+	h.s.Correlation.Rate, h.s.Correlation.Parallel = 5, 3 // fast enough that 3 s runs overlap
 	h.s.Fingerprint = &scenario.FingerprintSpec{At: 10 * s, Repeats: 3, Converge: 5 * s, Verify: 15 * s, Every: 20 * s}
 	h.s.Resend = append(h.s.Resend, scenario.PolicySpec{Key: "R5", Action: "notification", Mode: "time", Interval: 4 * s, Cohort: 1,
 		Notifier: "CAMPAIGN_SINK", Escalation: &scenario.EscalationSpec{After: 10 * s, TargetSeverity: "critical"}, Episode: 9 * s})
@@ -135,6 +136,9 @@ func TestV4LanesRunConcurrently(t *testing.T) {
 		if card.Correlation.Expected <= 3 || card.Correlation.Succeeded != card.Correlation.Expected {
 			t.Errorf("correlation %+v", card.Correlation)
 		}
+		if m := h.oscar.corrMaxInFlight.Load(); m < 2 || m > 3 {
+			t.Errorf("correlation runs in flight at once: %d, want 2-3 (Parallel 3)", m)
+		}
 		h.oscar.mu.Lock()
 		parents := 0
 		for _, inc := range h.oscar.corrInc {
@@ -160,6 +164,10 @@ func TestV4LanesRunConcurrently(t *testing.T) {
 			for l, n := range m.Lanes {
 				lanes[l] += n
 			}
+		}
+		// Paced: correlation offers at most Rate over its window (plus one document).
+		if max := 5*float64(h.s.Phase("drain").Start-h.s.Phase("correlation").Start)/float64(time.Second) + 10; float64(lanes["correlation"]) > max || lanes["correlation"] < 100 {
+			t.Errorf("correlation offered %d alerts, want paced near Rate (at most %.0f)", lanes["correlation"], max)
 		}
 		for _, l := range []string{"baseline", "resend", "fingerprint", "correlation"} {
 			if lanes[l] == 0 {

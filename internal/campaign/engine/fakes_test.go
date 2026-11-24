@@ -179,6 +179,8 @@ type fakeOSCAR struct {
 	draftErr         error         // CreateDraft fails with this
 	db               *storage.Database
 	correlates       atomic.Int32
+	corrInFlight     atomic.Int32 // correlation runs in progress, and the most at once
+	corrMaxInFlight  atomic.Int32
 	slow             time.Duration
 	onCorr           func()
 	// alert rate limits and the scripted intake breaker (v2)
@@ -877,6 +879,10 @@ func (f *fakeOSCAR) probe(context.Context) (targetops.ProbeResult, error) {
 // OSCAR's resolution comment when the run's cleanup resolves its sources.
 func (f *fakeOSCAR) correlate(ctx context.Context, _ string, doc corr.Scenario, _ string) (domain.Run, error) {
 	n := f.correlates.Add(1)
+	if in := f.corrInFlight.Add(1); in > f.corrMaxInFlight.Load() {
+		f.corrMaxInFlight.Store(in)
+	}
+	defer f.corrInFlight.Add(-1)
 	if f.onCorr != nil {
 		f.onCorr()
 	}

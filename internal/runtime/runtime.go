@@ -258,7 +258,8 @@ func (r *Runtime) ExecuteScenario(ctx context.Context, targetID string, document
 	return r.executeScenarioLocked(ctx, targetID, document, pipelineMode)
 }
 
-// executeScenarioLocked is ExecuteScenario's body; callers hold runMu and have passed the gate.
+// executeScenarioLocked is ExecuteScenario's body; callers hold runMu and have passed the
+// gate, or are the active campaign (which may run several at once).
 func (r *Runtime) executeScenarioLocked(ctx context.Context, targetID string, document scenario.Scenario, pipelineMode string) (domain.Run, error) {
 	target, err := r.GetTarget(ctx, targetID)
 	if err != nil {

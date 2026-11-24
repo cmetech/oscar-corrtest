@@ -369,7 +369,7 @@ func TestV4OfferedRateBudget(t *testing.T) {
 			t.Errorf("%s@%s: two spikes and no standing pool, breaker or dead target", s.ID, s.Version)
 		}
 		for _, b := range s.Baseline.Bursts {
-			if spike := b.Rate + ctl; spike > V4SpikeRate+1e-9 || spike < V4SpikeRate-0.05 {
+			if spike := b.Rate + s.ControllerSpikeRate(); spike > V4SpikeRate+1e-9 || spike < V4SpikeRate-0.05 {
 				t.Errorf("%s@%s: spike total %.3f/s, want 10/s", s.ID, s.Version, spike)
 			}
 		}
@@ -377,6 +377,9 @@ func TestV4OfferedRateBudget(t *testing.T) {
 	s := AlertingDayV4()
 	if b := s.Baseline.Bursts; b[0].At != 45*time.Minute || b[1].At != 105*time.Minute || b[0].For != 5*time.Minute || b[1].For != 5*time.Minute {
 		t.Fatalf("spikes %+v", b)
+	}
+	if c := s.Correlation; c.Rate/V4TotalRate != 0.2 || c.SpikeRate/V4SpikeRate != 0.2 || c.Parallel < 2 {
+		t.Fatalf("correlation must be 20%% of the total in and out of spikes: %+v", c)
 	}
 	// Shares of the 5/s: resend about 10%, fingerprint 5%, tickets about 5%.
 	resend := 0.0

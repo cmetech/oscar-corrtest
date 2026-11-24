@@ -61,6 +61,12 @@ type CorrelationSpec struct {
 	// ParentTickets (v4) tickets a ticketed run's synthetic parent, not its
 	// first trigger alert.
 	ParentTickets bool `json:"parentTickets,omitempty"`
+	// Rate (v4) paces the cycling documents to about Rate firing source
+	// alerts/s (SpikeRate inside the baseline bursts), with up to Parallel
+	// documents in flight at once. Zero keeps one document at a time.
+	Rate      float64 `json:"rate,omitempty"`
+	SpikeRate float64 `json:"spikeRate,omitempty"`
+	Parallel  int     `json:"parallel,omitempty"`
 }
 
 type EscalationSpec struct {
@@ -506,19 +512,30 @@ func FunctionalBurstFullV1() Scenario {
 const (
 	V4TotalRate = 5.0
 	V4SpikeRate = 10.0
-	// CorrelationBudget bounds the cycling correlation lane: one pass of the
-	// 32 v1 documents offers 155 firing source alerts, and the runtime runs
-	// one document at a time (each observes at least 45 s), so at most
-	// ~0.11/s. Synthetic parents are OSCAR's, not offered.
+	// CorrelationBudget bounds an unpaced cycling correlation lane (one
+	// document at a time: one pass of the 32 v1 documents offers 155 firing
+	// source alerts and each observes at least 45 s, so at most ~0.11/s).
+	// Synthetic parents are OSCAR's, not offered.
 	CorrelationBudget = 0.15
 )
 
 // ControllerFiringRate is the planned firing rate of the controller lanes
-// (correlation budget, resend cohorts and the fingerprint rounds) that the
-// v4 worker lane leaves room for.
-func (s Scenario) ControllerFiringRate() float64 {
+// (correlation, resend cohorts and the fingerprint rounds) that the v4 worker
+// lane leaves room for, outside the bursts.
+func (s Scenario) ControllerFiringRate() float64 { return s.controllerRate(false) }
+
+// ControllerSpikeRate is ControllerFiringRate inside a burst, where the
+// correlation lane runs at its SpikeRate.
+func (s Scenario) ControllerSpikeRate() float64 { return s.controllerRate(true) }
+
+func (s Scenario) controllerRate(spike bool) float64 {
 	rate := 0.0
-	if s.Correlation.Cycle {
+	switch c := s.Correlation; {
+	case c.Cycle && spike && c.SpikeRate > 0:
+		rate += c.SpikeRate
+	case c.Cycle && c.Rate > 0:
+		rate += c.Rate
+	case c.Cycle:
 		rate += CorrelationBudget
 	}
 	if s.Redelivery > 0 {
@@ -532,23 +549,35 @@ func (s Scenario) ControllerFiringRate() float64 {
 	return rate
 }
 
+// fillWorker sets the worker lane to what the controller lanes leave of the
+// 5/s total and the 10/s spike total, rounded down to 0.01/s.
+func (s *Scenario) fillWorker() {
+	s.Baseline.Rate = math.Floor((V4TotalRate-s.ControllerFiringRate())*100) / 100
+	for i := range s.Baseline.Bursts {
+		s.Baseline.Bursts[i].Rate = math.Floor((V4SpikeRate-s.ControllerSpikeRate())*100) / 100
+	}
+}
+
 // AlertingDayV4 is the 150-minute mixed-load gate for the single-node target
 // (Corey, 2026-11-24: 3-5 alerts/s sustained, spikes to 10/s): every lane
 // runs concurrently instead of v3's sequential phases, then the 30-minute
 // drain. Total offered firing rate is 5/s, and 10/s for 5 minutes at T+45
-// and T+105: the worker lane fires 4.1/s (9.1/s in a spike) beside the
-// controller lanes' 0.9/s (ControllerFiringRate). Shares of the 5/s:
-//   - correlation: set A and set B cycled from T+1 to the drain, each case
-//     scored as in v1 (the runtime serializes runs: about 1-2%, not 20%);
-//   - tickets (~5%): every 15th new worker alert, plus each ticketed set B
+// and T+105. Shares of the 5/s (and of the 10/s in a spike):
+//   - correlation (20%): set A and set B cycled from T+1 to the drain,
+//     paced to 1 firing source alert/s (2/s in a spike) with up to 48
+//     documents in flight; each case scored as in v1. Every run's names carry
+//     its own token, so parallel runs cannot satisfy or poison each other;
+//   - tickets (~5%): every 12th new worker alert, plus each ticketed set B
 //     run's synthetic parent (flood, threshold) and the R4 cohort;
 //   - fingerprint (5%): a 15-alert round every minute under one scoped
-//     policy (14 variants posted over 30 s that must collapse, one other device that must not),
-//     reverted at the end;
-//   - resend (10%): 65 cohort members re-delivered every 130 s: v1's R1-R4
-//     (13 each) and R5, a configured time policy that escalates to critical
-//     after 4 minutes, its 13 members posted through native Alertmanager (escalation
-//     needs a native episode) and starting a new episode every 15 minutes;
+//     policy (14 variants posted over 30 s that must collapse, one other
+//     device that must not), reverted at the end;
+//   - resend (10%): 65 cohort members re-delivered every 130 s, paced: v1's
+//     R1-R4 (13 each) and R5, a configured time policy that escalates to
+//     critical after 4 minutes, its 13 members posted through native
+//     Alertmanager (escalation needs a native episode) and starting a new
+//     episode every 15 minutes;
+//   - the worker lane: the rest, 3.25/s (7.25/s in a spike), v1's mix;
 //   - front-office API users as v1, one homelab task run through the task
 //     API every 5 minutes, and an alert report at T+60 and T+120.
 //
@@ -559,11 +588,11 @@ func AlertingDayV4() Scenario {
 	s.Version = "v4"
 	s.Phases = []Phase{{"preflight", -10 * min, 0}, {"baseline", 0, 150 * min}, {"correlation", min, 150 * min},
 		{"ticketing", 0, 150 * min}, {"resend", 2 * min, 148 * min}, {"drain", 150 * min, 180 * min}}
-	s.Baseline.Rate = 4.1
-	s.Baseline.TicketEveryNth, s.Baseline.TicketFrom, s.Baseline.TicketTo = 15, 0, 150*min
-	s.Baseline.Bursts = []BurstSpec{{At: 45 * min, For: 5 * min, Rate: 9.1}, {At: 105 * min, For: 5 * min, Rate: 9.1}}
+	s.Baseline.TicketEveryNth, s.Baseline.TicketFrom, s.Baseline.TicketTo = 12, 0, 150*min
+	s.Baseline.Bursts = []BurstSpec{{At: 45 * min, For: 5 * min}, {At: 105 * min, For: 5 * min}}
 	s.Paced = true
 	s.Correlation.Cycle, s.Correlation.ParentTickets = true, true
+	s.Correlation.Rate, s.Correlation.SpikeRate, s.Correlation.Parallel = 1, 2, 48
 	for i := range s.Resend {
 		s.Resend[i].Cohort = 13
 	}
@@ -575,14 +604,16 @@ func AlertingDayV4() Scenario {
 	s.Report = &ReportSpec{Key: "core-alarm-history-dump", At: []time.Duration{60 * min, 120 * min}, Timeout: 20 * min}
 	s.Limits = AlertingDayV3().Limits
 	s.Limits.TaskSuccess, s.Limits.TaskP95 = 1, 2*min
+	s.fillWorker()
 	return s
 }
 
 // AlertingDaySmokeV4 compresses v4 into about 15 minutes (12 of load at the
-// same 5/s and 10/s totals (1-minute spikes) at T+4 and T+8, then a 3-minute
-// drain): one set A and one ticketed set B document cycled, R1 and the R5
-// escalation cohort (2 members each, escalating after 2 minutes), fingerprint
-// rounds of 6, two task runs and one report. Custom: never comparable.
+// same 5/s and 10/s totals, 1-minute spikes at T+4 and T+8, then a 3-minute
+// drain): one set A and one ticketed set B document cycled, two in flight at
+// 0.2 alerts/s (0.4/s in a spike), R1 and the R5 escalation cohort (2 members
+// each, escalating after 2 minutes), fingerprint rounds of 6, two task runs
+// and one report; the worker lane fills the rest. Custom: never comparable.
 func AlertingDaySmokeV4() Scenario {
 	min := time.Minute
 	n := func(i int) *int { return &i }
@@ -592,9 +623,9 @@ func AlertingDaySmokeV4() Scenario {
 		{"ticketing", 0, 12 * min}, {"resend", min, 11 * min}, {"drain", 12 * min, 15 * min}}
 	s.Baseline.ResolveAfter = min
 	s.Baseline.TicketEveryNth, s.Baseline.TicketTo = 100, 12*min
-	s.Baseline.Bursts = []BurstSpec{{At: 4 * min, For: min, Rate: 9.1}, {At: 8 * min, For: min, Rate: 9.1}}
+	s.Baseline.Bursts = []BurstSpec{{At: 4 * min, For: min}, {At: 8 * min, For: min}}
 	s.Correlation = CorrelationSpec{SetA: []CaseRef{{Pattern: "flood", Level: "builtin"}}, SetB: []CaseRef{{Pattern: "threshold", Level: "builtin"}},
-		TicketedPatterns: []string{"flood", "threshold"}, Cycle: true, ParentTickets: true}
+		TicketedPatterns: []string{"flood", "threshold"}, Cycle: true, ParentTickets: true, Rate: 0.2, SpikeRate: 0.4, Parallel: 2}
 	s.Resend = []PolicySpec{{Key: "R1", Action: "notification", Mode: "time", Interval: 50 * time.Second, MaxResends: n(2), Cohort: 2, Notifier: "CAMPAIGN_SINK"},
 		{Key: "R5", Action: "notification", Mode: "time", Interval: 120 * time.Second, Cohort: 2, Notifier: "CAMPAIGN_SINK",
 			Escalation: &EscalationSpec{After: 2 * min, TargetSeverity: "critical"}, Episode: 5 * min}}
@@ -602,12 +633,7 @@ func AlertingDaySmokeV4() Scenario {
 	s.Fingerprint = &FingerprintSpec{At: min, Repeats: 5, Converge: 2 * min, Verify: 55 * time.Second, Every: min}
 	s.Tasks = &TaskExecSpec{Job: "monitor:check_connection:homelab", At: 2 * min, Every: 5 * min, Timeout: 4 * min}
 	s.Report = &ReportSpec{Key: "core-alarm-history-dump", At: []time.Duration{4 * min}, Timeout: 7 * min}
-	// The smoke's controller lanes are smaller: the worker lane fills the same 5/s and 10/s totals.
-	worker := math.Floor((V4TotalRate-s.ControllerFiringRate())*100) / 100
-	s.Baseline.Rate = worker
-	for i := range s.Baseline.Bursts {
-		s.Baseline.Bursts[i].Rate = worker + V4SpikeRate - V4TotalRate
-	}
+	s.fillWorker()
 	return s
 }
 

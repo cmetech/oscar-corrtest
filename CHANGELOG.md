@@ -5,8 +5,9 @@
 - New `alerting-day@v4` (comparable) and `alerting-day-smoke@v4` (about 15 minutes, never
   comparable): the single-node mixed-load gate. Every lane runs at once for 150 minutes at a
   total offered firing rate of 5/s over all lanes (10/s in 5-minute spikes at T+45 and T+105),
-  then a 30-minute drain. Correlation cycles set A and set B and tickets the synthetic parents
-  of flood and threshold; the fingerprint lane runs a verified round every minute under one
+  then a 30-minute drain. Correlation cycles set A and set B, up to 48 documents in flight paced to 1 alert/s (2/s in
+  a spike, 20%), and tickets the synthetic parents of flood and threshold (campaign
+  correlation runs no longer hold the runtime's run lock; each run's names carry its token); the fingerprint lane runs a verified round every minute under one
   scoped policy (15 posts a minute, paced); R1-R4 plus an R5 escalation cohort (critical after 4 minutes, a new episode
   every 15 minutes, posted through native Alertmanager because escalation acts on native
   episodes) are scored, the latter per episode from sink receipts; a homelab task runs

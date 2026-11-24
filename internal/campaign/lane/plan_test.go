@@ -244,9 +244,9 @@ func TestTwoBurstsEachRaiseTheirWindow(t *testing.T) {
 		}
 	}
 	for m := 0; m < 150; m++ {
-		want := 246 // 4.1/s
+		want := 195 // 3.25/s
 		if m >= 45 && m < 50 || m >= 105 && m < 110 {
-			want = 546 // 9.1/s
+			want = 435 // 7.25/s
 		}
 		if d := perMin[m] - want; d < -1 || d > 1 {
 			t.Fatalf("minute %d: %d firings, want %d", m, perMin[m], want)
@@ -267,13 +267,17 @@ func TestV4PlannedOfferedRatePerMinute(t *testing.T) {
 			perMin[int(e.At/time.Minute)]++
 		}
 	}
-	ctl := s.ControllerFiringRate() * 60 // paced: spread evenly over each minute
 	for m, n := range perMin {
+		ctl := s.ControllerFiringRate() * 60 // paced: spread evenly over each minute
 		limit := scenario.V4TotalRate * 60
 		for _, b := range s.Baseline.Bursts {
 			if time.Duration(m)*time.Minute < b.At+b.For && b.At < time.Duration(m+1)*time.Minute {
 				limit = scenario.V4SpikeRate * 60
+				ctl = s.ControllerSpikeRate() * 60
 			}
+		}
+		if n+ctl < limit-2 {
+			t.Fatalf("minute %d: %.0f planned firing posts, well under the %.0f budget", m, n+ctl, limit)
 		}
 		if n+ctl > limit+1 {
 			t.Fatalf("minute %d: %.0f planned firing posts (worker %.0f + controller %.0f), budget %.0f", m, n+ctl, n, ctl, limit)

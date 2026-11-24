@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/frontoffice"
@@ -395,50 +396,112 @@ func (r *run) correlation(ctx context.Context) {
 	}
 }
 
-// cycleCorrelation (Correlation.Cycle, v4) runs set A then set B in a loop
+// cycleCorrelation (Correlation.Cycle, v4) starts set A then set B in a loop
 // from the correlation phase start until the drain, each case scored as in
-// v1. Set A cases the first pass never reached are not_run; later passes add
-// to the plan as they start, like set B, and stop cycleMargin before the drain.
+// v1. With Correlation.Rate it paces document starts by their firing source
+// alerts to about Rate/s (SpikeRate inside a baseline burst), up to Parallel
+// in flight; each run's names carry its own token, so parallel runs cannot
+// match each other (compiler TestParallelRunsAreIsolated). Set A cases the
+// first pass never started are not_run; later passes add to the plan as they
+// start, like set B, and stop cycleMargin before the drain.
 func (r *run) cycleCorrelation(ctx context.Context) {
-	setA, setB := r.s.Correlation.SetA, r.s.Correlation.SetB
-	drain := r.at("drain", false)
-	for pass := 0; ; pass++ {
-		ran := false
-		// After the first pass (which runs as v1 would), stop before a document
-		// could run into the drain.
-		stopAt := drain
-		if pass > 0 {
-			stopAt = drain.Add(-cycleMargin)
+	c := r.s.Correlation
+	type item struct {
+		ref    scenario.CaseRef
+		kind   string
+		ticket bool
+		alerts float64
+	}
+	var items []item
+	for _, ref := range c.SetA {
+		items = append(items, item{ref: ref, kind: "setA"})
+	}
+	for _, ref := range c.SetB {
+		items = append(items, item{ref: ref, kind: "setB", ticket: containsFold(c.TicketedPatterns, ref.Pattern)})
+	}
+	for i := range items {
+		items[i].alerts = 1
+		if doc, err := caseDoc(items[i].ref); err == nil {
+			items[i].alerts = float64(max(firingEvents(doc), 1))
 		}
-		for i, ref := range setA {
-			if ctx.Err() != nil || !r.now().Before(stopAt) {
-				if pass == 0 {
+	}
+	slots := make(chan struct{}, max(c.Parallel, 1))
+	var inFlight sync.WaitGroup
+	defer inFlight.Wait() // the lane ends when its last run does
+	drain := r.at("drain", false)
+	credit, last := 0.0, r.now()
+	for i := 0; ; i++ {
+		it, pass := items[i%len(items)], i/len(items)
+		stopAt := drain // the first pass runs as v1 would
+		if pass > 0 {
+			stopAt = drain.Add(-cycleMargin) // later ones never run into the drain
+		}
+		for {
+			now := r.now()
+			if ctx.Err() != nil || !now.Before(stopAt) {
+				if pass == 0 && it.kind == "setA" {
 					r.mu.Lock()
-					for _, rest := range setA[i:] {
-						r.notRun = append(r.notRun, "setA "+refName(rest))
+					for _, rest := range items[i:len(c.SetA)] {
+						r.notRun = append(r.notRun, "setA "+refName(rest.ref))
 					}
 					r.mu.Unlock()
 				}
 				return
 			}
-			if pass > 0 {
-				r.mu.Lock()
-				r.plannedCorr++
-				r.mu.Unlock()
+			if c.Rate > 0 {
+				credit = min(credit+r.correlationRate(now)*now.Sub(last).Seconds(), correlationCreditCap)
+				last = now
 			}
-			ran = r.correlate(ctx, ref, "setA", false) || ran
-		}
-		for _, ref := range setB {
-			if ctx.Err() != nil || !r.now().Before(stopAt) {
-				return
+			if (c.Rate <= 0 || credit >= it.alerts) && len(slots) < cap(slots) {
+				break
 			}
-			ran = r.correlate(ctx, ref, "setB", containsFold(r.s.Correlation.TicketedPatterns, ref.Pattern)) || ran
+			if !r.e.clock.SleepUntil(ctx, now.Add(correlationTick)) {
+				continue // ctx ended: the check above returns
+			}
 		}
-		if !ran && !r.e.clock.SleepUntil(ctx, r.now().Add(setBBackoff)) { // a pass that started no run must not spin
-			return
+		credit -= it.alerts
+		if pass > 0 && it.kind == "setA" {
+			r.mu.Lock()
+			r.plannedCorr++
+			r.mu.Unlock()
 		}
+		slots <- struct{}{}
+		inFlight.Add(1)
+		go func() {
+			defer inFlight.Done()
+			defer func() { <-slots }()
+			if !r.correlate(ctx, it.ref, it.kind, it.ticket) {
+				r.e.clock.SleepUntil(ctx, r.now().Add(setBBackoff)) // a run that did not start must not spin
+			}
+		}()
 	}
 }
+
+// correlationRate is the paced correlation rate at t: SpikeRate inside a
+// baseline burst, Rate elsewhere.
+func (r *run) correlationRate(t time.Time) float64 {
+	c, b := r.s.Correlation, r.s.Baseline
+	if c.SpikeRate <= 0 {
+		return c.Rate
+	}
+	bursts := append([]scenario.BurstSpec(nil), b.Bursts...)
+	if b.Burst != nil {
+		bursts = append(bursts, *b.Burst)
+	}
+	for _, x := range bursts {
+		if at := t.Sub(r.t0); at >= x.At && at < x.At+x.For {
+			return c.SpikeRate
+		}
+	}
+	return c.Rate
+}
+
+// correlationTick is how often the pacer re-checks its credit and slots;
+// correlationCreditCap bounds the catch-up after a stall (in alerts).
+const (
+	correlationTick      = time.Second
+	correlationCreditCap = 30.0
+)
 
 // cycleMargin is the longest cycling document: a 90 s run plus a ticketed
 // case's 150 s observation.

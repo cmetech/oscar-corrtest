@@ -27,7 +27,7 @@ func (r *Runtime) CampaignTarget(ctx context.Context, targetID string) (domain.T
 }
 
 // ExecuteScenarioForCampaign runs a correlation document for the active
-// campaign (gate bypass, runMu per call).
+// campaign (gate bypass; concurrent calls allowed, see executeScenarioForCampaign).
 func (r *Runtime) ExecuteScenarioForCampaign(ctx context.Context, targetID string, s scenario.Scenario, mode string) (domain.Run, error) {
 	return r.executeScenarioForCampaign(ctx, targetID, s, mode)
 }
