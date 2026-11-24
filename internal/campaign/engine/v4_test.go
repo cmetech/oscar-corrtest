@@ -10,10 +10,12 @@ import (
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/lane"
+	"github.com/cmetech/oscar-corrtest/internal/campaign/precheck"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/score"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
+	"github.com/cmetech/oscar-corrtest/internal/runtime"
 )
 
 // fakeUserOps is OSCAR's task and report API: every task succeeds, the report
@@ -235,4 +237,41 @@ func TestV4EscalationScoredPerEpisode(t *testing.T) {
 			})
 		})
 	}
+}
+
+// TestV4SkipReportLane: --skip-lane report switches the report lane off for
+// the run: no report is requested, B13 is advisory and skipped, the scorecard
+// says "skipped (by option)" (never a pass) and the run is not comparable.
+func TestV4SkipReportLane(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, ops := v4Harness(t)
+		pctx := context.WithValue(context.Background(), skipLanesKey{}, []string{"report"})
+		var b13 *precheck.Result
+		for _, r := range v4Prechecks(pctx, h.deps, h.s) {
+			if r.ID == "B13" {
+				b13 = &r
+			}
+		}
+		if b13 == nil || b13.Tier != precheck.Advisory || b13.Status != precheck.Skipped {
+			t.Fatalf("B13 with the report lane skipped: %+v", b13)
+		}
+		err := New(h.deps, h.clock).Run(context.Background(), h.id, runtime.CampaignOptions{Scenario: h.s, Trigger: "cli", RunBy: "agent", SkipLanes: []string{"report"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var card score.Scorecard
+		if err := json.Unmarshal(h.campaign().Scorecard, &card); err != nil {
+			t.Fatal(err)
+		}
+		if ops.reports != 0 || card.Reports == nil || card.Reports.Skipped != "skipped (by option)" || len(card.Reports.Runs) != 0 {
+			t.Fatalf("report lane: requested %d, section %+v", ops.reports, card.Reports)
+		}
+		if len(card.SkippedLanes) != 1 || card.SkippedLanes[0] != "report: skipped (by option)" || card.Comparable || hasReason(card.Reasons, "alert report") {
+			t.Fatalf("skipped lanes %v comparable %t reasons %v", card.SkippedLanes, card.Comparable, card.Reasons)
+		}
+		if card.TaskExec == nil || len(card.TaskExec.Runs) == 0 {
+			t.Fatal("the other v4 lanes still run")
+		}
+	})
 }

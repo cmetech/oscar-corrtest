@@ -60,3 +60,13 @@ func TestFingerprintAndTaskPrechecks(t *testing.T) {
 		t.Fatalf("task refused: %+v", r)
 	}
 }
+
+func TestSkippedLaneNeitherBlocksNorPasses(t *testing.T) {
+	r := SkippedLane("B13", "report")
+	if r.Tier != Advisory || r.Status != Skipped || r.Status == Pass {
+		t.Fatalf("skipped: %+v", r)
+	}
+	if ok, _, reason := Startable([]Result{{ID: "B1", Tier: Blocking, Status: Pass}, r}, nil); !ok {
+		t.Fatalf("a skipped lane must not block or need an acknowledgment: %s", reason)
+	}
+}

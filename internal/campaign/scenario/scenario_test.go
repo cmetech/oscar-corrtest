@@ -444,3 +444,15 @@ func TestV4RunsEveryLaneConcurrently(t *testing.T) {
 		t.Errorf("smoke report %+v cannot finish", r)
 	}
 }
+
+func TestValidateSkipLanes(t *testing.T) {
+	if err := ValidateSkipLanes(AlertingDayV4(), []string{"report"}); err != nil {
+		t.Fatal(err)
+	}
+	if ValidateSkipLanes(AlertingDayV4(), []string{"fingerprint"}) == nil || ValidateSkipLanes(AlertingDayV3(), []string{"report"}) == nil {
+		t.Fatal("only a lane the scenario has, and that may be skipped, is accepted")
+	}
+	if ValidateSkipLanes(AlertingDayV4(), nil) != nil {
+		t.Fatal("no skip is the default")
+	}
+}

@@ -50,6 +50,7 @@ type CampaignOptions struct {
 	Acknowledged    []string // advisory IDs
 	PrecheckOnly    bool
 	Provenance      *domain.CampaignProvenance
+	SkipLanes       []string // lanes switched off by option (scenario.SkippableLanes)
 }
 
 // CampaignView is a campaign plus its most recent events, for status endpoints.
@@ -127,7 +128,7 @@ func (r *Runtime) StartCampaign(ctx context.Context, o CampaignOptions) (domain.
 		return domain.Campaign{}, err
 	}
 	detail, _ := json.Marshal(domain.CampaignRecordedOptions{
-		Acknowledged: o.Acknowledged, PrecheckOnly: o.PrecheckOnly, RunBy: o.RunBy, Provenance: o.Provenance,
+		Acknowledged: o.Acknowledged, PrecheckOnly: o.PrecheckOnly, RunBy: o.RunBy, Provenance: o.Provenance, SkipLanes: o.SkipLanes,
 	})
 	if err := r.database.AppendCampaignEvent(ctx, c.ID, domain.CampaignOptionsEvent, "info", "campaign options recorded", detail, c.StartedAt); err != nil {
 		_ = r.database.TransitionCampaign(context.WithoutCancel(ctx), c.ID, domain.CampaignInterrupted, time.Now().UTC(), "options audit failed")

@@ -264,8 +264,10 @@ type ReportRun struct {
 	End           time.Time
 }
 
-// ReportStats is the v4 alert-report lane.
+// ReportStats is the v4 alert-report lane. Skipped ("skipped (by option)")
+// marks a lane switched off for the run: it neither passes nor fails.
 type ReportStats struct {
+	Skipped string `json:",omitempty"`
 	Planned int
 	Runs    []ReportRun
 }
@@ -290,6 +292,9 @@ func (s *ReportStats) HistoryWithin(rows []domain.LaneRow, hist []oscar.HistoryR
 // p95 above the limit while it ran FAILs; a report not run, unreadable or
 // with an artifact not read back from storage is INCONCLUSIVE.
 func (s ReportStats) Judge(historyP95 time.Duration) (fails, incon []string) {
+	if s.Skipped != "" {
+		return nil, nil
+	}
 	if len(s.Runs) < s.Planned {
 		incon = append(incon, fmt.Sprintf("alert report: %d of %d planned runs requested", len(s.Runs), s.Planned))
 	}

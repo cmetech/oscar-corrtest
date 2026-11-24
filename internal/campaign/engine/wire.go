@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -200,7 +201,9 @@ func v4Prechecks(ctx context.Context, d Deps, s scenario.Scenario) []precheck.Re
 		out = append(out, precheck.TaskRunnable(t.Job, status, err))
 	}
 	if r := s.Report; r != nil {
-		if d.UserOps == nil {
+		if skipped(ctx, "report") {
+			out = append(out, precheck.SkippedLane("B13", "report"))
+		} else if d.UserOps == nil {
 			out = append(out, precheck.ReportSetup(r.Key, targetops.ReportInfo{}, errors.New("no front-office user credential (campaign-fo)")))
 		} else {
 			info, err := d.UserOps.Report(ctx, r.Key)
@@ -238,6 +241,15 @@ func precheckTask(ctx context.Context, u UserOps, t *scenario.TaskExecSpec) (str
 }
 
 type campaignIDKey struct{}
+
+// skipLanesKey carries the run's --skip-lane option to the pre-checks.
+type skipLanesKey struct{}
+
+// skipped reports whether the run on ctx skips lane.
+func skipped(ctx context.Context, lane string) bool {
+	lanes, _ := ctx.Value(skipLanesKey{}).([]string)
+	return slices.Contains(lanes, lane)
+}
 
 // campaignIDFrom returns the campaign id Run put on ctx for the pre-checks.
 func campaignIDFrom(ctx context.Context) string {

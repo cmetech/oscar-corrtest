@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -25,6 +26,9 @@ type UserOps interface {
 	ReportArtifacts(ctx context.Context, runID string) (targetops.ReportManifest, error)
 	VerifyManifest(ctx context.Context, runID string, m targetops.ReportManifest) error
 }
+
+// laneSkipped is how a lane switched off by --skip-lane reads in the scorecard.
+const laneSkipped = "skipped (by option)"
 
 // Poll cadences of the v4 lanes (TaskResult long-polls 5 s itself).
 const (
@@ -130,6 +134,12 @@ func (r *run) execTask(ctx context.Context, job string, timeout time.Duration) s
 func (r *run) reportPhase(ctx context.Context) {
 	spec := r.s.Report
 	if spec == nil {
+		return
+	}
+	if slices.Contains(r.opts.SkipLanes, "report") {
+		r.mu.Lock()
+		r.reports.Skipped = laneSkipped
+		r.mu.Unlock()
 		return
 	}
 	r.mu.Lock()
@@ -241,6 +251,10 @@ func (r *run) v4Score(card *score.Scorecard, in score.Inputs, report map[string]
 		card.TaskExec = &tasks
 		report["taskExec"] = tasks
 		judge(card, fails, incon)
+	}
+	if slices.Contains(r.opts.SkipLanes, "report") {
+		reports.Skipped = laneSkipped
+		card.SkippedLanes = append(card.SkippedLanes, "report: "+laneSkipped)
 	}
 	if r.s.Report != nil {
 		reports.HistoryWithin(in.Ledger, in.History)

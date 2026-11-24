@@ -87,6 +87,7 @@ func registerCampaignRoutes(mux *http.ServeMux, data DataSource, workerMode bool
 					Acknowledged []string                   `json:"acknowledged"`
 					RunBy        string                     `json:"runBy"`
 					Provenance   *domain.CampaignProvenance `json:"provenance"`
+					SkipLanes    []string                   `json:"skipLanes"`
 				}
 				if !decodeStrict(w, r, &body) {
 					return
@@ -101,6 +102,10 @@ func registerCampaignRoutes(mux *http.ServeMux, data DataSource, workerMode bool
 					apiError(w, http.StatusBadRequest, "invalid_share", err.Error())
 					return
 				}
+				if err := campaignscenario.ValidateSkipLanes(s, body.SkipLanes); err != nil {
+					apiError(w, http.StatusBadRequest, "invalid_skip_lane", err.Error())
+					return
+				}
 				if body.RunBy == "" {
 					body.RunBy = "agent"
 				}
@@ -112,7 +117,7 @@ func registerCampaignRoutes(mux *http.ServeMux, data DataSource, workerMode bool
 				// runs the pre-check suite and completes without starting load.
 				c, err := ctl.StartCampaign(r.Context(), appruntime.CampaignOptions{
 					Scenario: s, Trigger: "cli", TriggerIdentity: identity, RunBy: body.RunBy,
-					Acknowledged: body.Acknowledged, PrecheckOnly: precheckOnly, Provenance: body.Provenance,
+					Acknowledged: body.Acknowledged, PrecheckOnly: precheckOnly, Provenance: body.Provenance, SkipLanes: body.SkipLanes,
 				})
 				if errors.Is(err, appruntime.ErrCampaignActive) {
 					apiError(w, http.StatusConflict, "campaign_active", err.Error())

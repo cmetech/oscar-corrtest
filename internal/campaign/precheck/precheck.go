@@ -27,6 +27,9 @@ const (
 	Fail  = "fail"
 	Warn  = "warn"
 	Error = "error" // the check could not run; blocks like a failure
+	// Skipped: the lane the check guards is off by run option (--skip-lane);
+	// it neither blocks nor needs an acknowledgment.
+	Skipped = "skipped"
 )
 
 type Result struct {
@@ -150,7 +153,7 @@ func Startable(results []Result, acknowledged []string) (ok bool, comparable boo
 	var blocked, unacked []string
 	comparable = true
 	for _, r := range results {
-		if r.Status == Pass {
+		if r.Status == Pass || r.Status == Skipped {
 			continue
 		}
 		if r.Tier == Blocking {

@@ -74,3 +74,9 @@ func TaskRunnable(job, status string, err error) Result {
 	}
 	return res("B15", Blocking, true, "task "+job+" "+status, probs)
 }
+
+// SkippedLane is a v4 check whose lane is off by run option: advisory and
+// reported as skipped, so it neither blocks nor reads as a pass.
+func SkippedLane(id, lane string) Result {
+	return Result{ID: id, Tier: Advisory, Status: Skipped, Measured: "skipped (by option --skip-lane " + lane + ")"}
+}

@@ -278,9 +278,11 @@ func (e *Engine) Run(ctx context.Context, id string, o runtime.CampaignOptions) 
 		return err
 	}
 
-	results := e.d.Precheck(context.WithValue(ctx, campaignIDKey{}, id), o.Scenario)
+	pctx := context.WithValue(context.WithValue(ctx, campaignIDKey{}, id), skipLanesKey{}, o.SkipLanes)
+	results := e.d.Precheck(pctx, o.Scenario)
 	ok, comparable, reason := precheck.Startable(results, o.Acknowledged)
-	r.comparable = comparable && !o.Scenario.Custom // custom (incl. the smoke) never enters the reference
+	// Custom (incl. the smoke) never enters the reference, nor does a run with a lane skipped.
+	r.comparable = comparable && !o.Scenario.Custom && len(o.SkipLanes) == 0
 	detail, _ := json.Marshal(map[string]any{"results": results, "reason": reason, "comparable": comparable})
 	_ = e.d.Store.AppendCampaignEvent(stable, id, precheckEvent, "info", "pre-check results", detail, r.now())
 	if err := e.d.Store.RecordPrecheck(stable, id, domain.PrecheckResult{Passed: ok, Detail: detail, At: r.now()}); err != nil {

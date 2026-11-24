@@ -173,6 +173,8 @@ func (a *App) campaignStart(ctx context.Context, name string, args []string, pre
 	var share *float64
 	flags.Func("managed-share", "fraction of planned baseline plus mixed TL1 source posts", func(raw string) error { v, err := strconv.ParseFloat(raw, 64); share = &v; return err })
 	ack := flags.String("ack", "", "comma-separated acknowledged warnings, e.g. A1,A3")
+	var skip []string
+	flags.Func("skip-lane", "switch a lane off for this run (report); repeatable", func(v string) error { skip = append(skip, v); return nil })
 	runBy := flags.String("run-by", "human", "agent or human")
 	wait := flags.Bool("wait", false, "follow status until the campaign finishes")
 	var provenance domain.CampaignProvenance
@@ -204,6 +206,9 @@ func (a *App) campaignStart(ctx context.Context, name string, args []string, pre
 	}
 	if *ack != "" {
 		body["acknowledged"] = strings.Split(*ack, ",")
+	}
+	if len(skip) > 0 {
+		body["skipLanes"] = skip
 	}
 	path := "/api/v1/campaign/runs"
 	if precheck {

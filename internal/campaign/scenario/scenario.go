@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"math"
 	"reflect"
 	"strings"
@@ -723,4 +724,26 @@ func canon(v reflect.Value) any {
 		return m
 	}
 	return v.Interface()
+}
+
+// SkippableLanes are the lanes a run may switch off by option (--skip-lane):
+// the run records it, never counts as comparable, and the lane reads
+// "skipped (by option)" rather than passing. The scenario and its hash are
+// unchanged.
+var SkippableLanes = map[string]func(Scenario) bool{
+	"report": func(s Scenario) bool { return s.Report != nil },
+}
+
+// ValidateSkipLanes rejects an unknown lane, or one the scenario does not have.
+func ValidateSkipLanes(s Scenario, lanes []string) error {
+	for _, l := range lanes {
+		has, ok := SkippableLanes[l]
+		if !ok {
+			return fmt.Errorf("lane %q cannot be skipped (skippable: report)", l)
+		}
+		if !has(s) {
+			return fmt.Errorf("%s@%s has no %s lane to skip", s.ID, s.Version, l)
+		}
+	}
+	return nil
 }

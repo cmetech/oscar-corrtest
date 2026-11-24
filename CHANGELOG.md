@@ -16,7 +16,9 @@
   paces cohort and fingerprint posts so no minute exceeds the budget, reports offered posts per
   minute by lane and is INCONCLUSIVE when a minute exceeds it by more than 5%. New blocking
   v4 pre-checks: B12 (RESEND_SCHEDULE_ENABLED), B13 (alert report approved), B14 (fingerprint
-  policies commissioned) and B15 (one run of the homelab task succeeds as fo-01). The worker must run the same
+  policies commissioned) and B15 (one run of the homelab task succeeds as fo-01). `--skip-lane report` switches the report
+  lane off for one run: B13 reads skipped, the scorecard marks the lane "skipped (by option)" and
+  the run is not comparable. The worker must run the same
   build (BaselineSpec gained `bursts`). Older scenario hashes are unchanged. Live runs UNRUN.
 
 - Source `39fae89` removes a duplicate standard-library import from the managed escalation smoke. Build and behavioral qualification remain UNRUN.
