@@ -476,33 +476,43 @@ func TestV4HomelabHealthGate(t *testing.T) {
 // judged stopped for the minutes the run never reached.
 func TestV4HomelabWindowEndsAtEarlyStop(t *testing.T) {
 	t.Parallel()
-	h, ops := v4Harness(t)
-	h.s.Limits.HomelabFailRise = 0.05
-	h.oscar.s = h.s
-	h.deps.TaskRuns = func(_ context.Context, start, end time.Time) ([]targetops.TaskRun, error) {
-		job := "monitor:check_connection:homelab"
-		if end.Sub(start) == time.Hour { // a 2-minute cadence before T0: 4 minutes without a run stops it
-			return []targetops.TaskRun{{Job: job, Status: "SUCCESS", StartedAt: end.Add(-4 * time.Minute), Scheduled: true},
-				{Job: job, Status: "SUCCESS", StartedAt: end.Add(-2 * time.Minute), Scheduled: true}}, nil
+	synctest.Test(t, func(t *testing.T) { // fake time: the stop lands right after the first task, however busy the host
+		h, ops := v4Harness(t)
+		h.s.Limits.HomelabFailRise = 0.05
+		h.oscar.s = h.s
+		h.deps.TaskRuns = func(_ context.Context, start, end time.Time) ([]targetops.TaskRun, error) {
+			job := "monitor:check_connection:homelab"
+			if end.Sub(start) == time.Hour { // a 2-minute cadence before T0: 4 minutes without a run stops it
+				return []targetops.TaskRun{{Job: job, Status: "SUCCESS", StartedAt: end.Add(-4 * time.Minute), Scheduled: true},
+					{Job: job, Status: "SUCCESS", StartedAt: end.Add(-2 * time.Minute), Scheduled: true}}, nil
+			}
+			return []targetops.TaskRun{{Job: job, Status: "SUCCESS", StartedAt: start.Add(time.Second), Scheduled: true}}, nil
 		}
-		return []targetops.TaskRun{{Job: job, Status: "SUCCESS", StartedAt: start.Add(time.Second), Scheduled: true}}, nil
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- h.run(ctx) }()
-	waitFor(t, "first task run", func() bool { ops.mu.Lock(); defer ops.mu.Unlock(); return ops.tasks > 0 })
-	if err := h.db.TransitionCampaign(context.Background(), h.id, domain.CampaignStopping, h.clock.Now(), "stop requested"); err != nil {
-		t.Fatal(err)
-	}
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	var card score.Scorecard
-	if err := json.Unmarshal(h.campaign().Scorecard, &card); err != nil {
-		t.Fatal(err)
-	}
-	if hh := card.HomelabHealth; hh == nil || len(hh.Stopped) != 0 || len(hh.NotJudged) != 1 || hasReason(card.Reasons, "homelab jobs") {
-		t.Fatalf("homelab health %+v reasons %v", hh, card.Reasons)
-	}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- h.run(ctx) }()
+		for {
+			ops.mu.Lock()
+			n := ops.tasks
+			ops.mu.Unlock()
+			if n > 0 {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if err := h.db.TransitionCampaign(context.Background(), h.id, domain.CampaignStopping, h.clock.Now(), "stop requested"); err != nil {
+			t.Fatal(err)
+		}
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		var card score.Scorecard
+		if err := json.Unmarshal(h.campaign().Scorecard, &card); err != nil {
+			t.Fatal(err)
+		}
+		if hh := card.HomelabHealth; hh == nil || len(hh.Stopped) != 0 || len(hh.NotJudged) != 1 || hasReason(card.Reasons, "homelab jobs") {
+			t.Fatalf("homelab health %+v reasons %v", hh, card.Reasons)
+		}
+	})
 }
