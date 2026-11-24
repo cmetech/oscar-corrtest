@@ -46,3 +46,31 @@ func ReportSetup(key string, info targetops.ReportInfo, err error) Result {
 	}
 	return res("B13", Blocking, true, "report "+info.ID+" setup_state "+info.SetupState, probs)
 }
+
+// FingerprintReady is B14 (v4, blocking): v4 needs its fingerprint lane, so
+// policies must be commissioned (a served managed publication) and the key
+// must hold the scoped-policy grant. why is the lane pre-flight answer.
+func FingerprintReady(why string, err error) Result {
+	if err != nil {
+		return errRes("B14", Blocking, "fingerprint policy pre-flight", err)
+	}
+	var probs []string
+	if why != "" {
+		probs = append(probs, why)
+	}
+	return res("B14", Blocking, true, "fingerprint policies commissioned", probs)
+}
+
+// TaskRunnable is B15 (v4, blocking): one run of the v4 task through the task
+// API as the first front-office user ends in SUCCESS, which proves the job
+// name and the run and result permissions before a 3-hour run depends on them.
+func TaskRunnable(job, status string, err error) Result {
+	if err != nil {
+		return errRes("B15", Blocking, "task run "+job, err)
+	}
+	var probs []string
+	if status != "SUCCESS" {
+		probs = append(probs, "task "+job+" ended "+status+", want SUCCESS")
+	}
+	return res("B15", Blocking, true, "task "+job+" "+status, probs)
+}

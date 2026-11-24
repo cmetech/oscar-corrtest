@@ -76,8 +76,8 @@ func TestUserAPI(t *testing.T) {
 		t.Fatalf("report %+v %v", info, err)
 	}
 	t0 := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
-	if _, err := u.RunReport(ctx, info.ID, "q-1", t0, t0.Add(time.Hour)); err != nil {
-		t.Fatal(err)
+	if run, _, err := u.RunReport(ctx, info.ID, "q-1", t0, t0.Add(time.Hour)); err != nil || run != "q-1" {
+		t.Fatalf("run report: %q %v", run, err)
 	}
 	if st, _, err := u.ReportRunState(ctx, "q-1"); st != "artifact_ready" || err != nil {
 		t.Fatalf("state %q %v", st, err)

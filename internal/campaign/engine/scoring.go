@@ -116,6 +116,9 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 		card.Fingerprint = &fp
 		report["fingerprint"] = fp
 		fails, incon := score.JudgeFingerprint(fp, f.Repeats)
+		if fp.Skipped != "" && f.Every > 0 { // v4 requires the lane: a skip is missing evidence, not a pass
+			incon = append(incon, "fingerprint: lane skipped: "+fp.Skipped)
+		}
 		judge(&card, fails, incon)
 	}
 	r.v4Score(&card, in, report)

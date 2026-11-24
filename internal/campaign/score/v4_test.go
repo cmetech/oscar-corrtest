@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/oscar"
@@ -112,5 +113,18 @@ func TestReportJudge(t *testing.T) {
 	s.Runs[0].State, s.Runs[0].Err = "artifact_ready", "object storage: HTTP 403"
 	if fails, incon = s.Judge(time.Minute); len(fails) != 0 || len(incon) != 1 || !strings.Contains(incon[0], "not read back") {
 		t.Fatalf("an unverified artifact is inconclusive: %v %v", fails, incon)
+	}
+}
+
+func TestOfferedOverBudget(t *testing.T) {
+	b := scenario.BaselineSpec{Bursts: []scenario.BurstSpec{{At: 2 * time.Minute, For: time.Minute, Rate: 9}}}
+	o := OfferedRate{PerMinute: []OfferedMinute{{Minute: 0, Firing: 300}, {Minute: 1, Firing: 330}, {Minute: 2, Firing: 600}, {Minute: 3, Firing: 640}}}
+	got := o.OverBudget(b, 5, 10)
+	if len(got) != 1 || !strings.Contains(got[0], "2 minutes") || !strings.Contains(got[0], "T+1 (5.50/s, budget 5/s)") || !strings.Contains(got[0], "T+3") {
+		t.Fatalf("over budget: %v", got)
+	}
+	o.PerMinute[1].Firing, o.PerMinute[3].Firing = 310, 300
+	if got := o.OverBudget(b, 5, 10); got != nil {
+		t.Fatalf("within slack: %v", got)
 	}
 }

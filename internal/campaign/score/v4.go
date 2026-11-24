@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
 	"github.com/cmetech/oscar-corrtest/internal/domain"
 	"github.com/cmetech/oscar-corrtest/internal/oscar"
@@ -65,6 +66,37 @@ func OfferedPerMinute(t0, loadEnd time.Time, offers []Offer) OfferedRate {
 	return out
 }
 
+// offeredSlack is how far a minute may exceed the budget (rounding, retries).
+const offeredSlack = 1.05
+
+// OverBudget names the minutes whose firing posts exceed the plan: spike per
+// second in a minute that overlaps a burst of b, total elsewhere. A run that
+// offered more than the gate's rate measured something else, so these are
+// INCONCLUSIVE reasons.
+func (o OfferedRate) OverBudget(b scenario.BaselineSpec, total, spike float64) []string {
+	bursts := append([]scenario.BurstSpec(nil), b.Bursts...)
+	if b.Burst != nil {
+		bursts = append(bursts, *b.Burst)
+	}
+	var over []string
+	for _, m := range o.PerMinute {
+		from, to := time.Duration(m.Minute)*time.Minute, time.Duration(m.Minute+1)*time.Minute
+		limit := total
+		for _, x := range bursts {
+			if from < x.At+x.For && x.At < to {
+				limit = spike
+			}
+		}
+		if rate := float64(m.Firing) / 60; rate > limit*offeredSlack {
+			over = append(over, fmt.Sprintf("T+%d (%.2f/s, budget %.0f/s)", m.Minute, rate, limit))
+		}
+	}
+	if len(over) == 0 {
+		return nil
+	}
+	return []string{fmt.Sprintf("offered rate over budget in %d minutes: %s", len(over), strings.Join(over[:min(len(over), 5)], ", "))}
+}
+
 // LedgerOffers are the worker lane's attempted posts.
 func LedgerOffers(rows []domain.LaneRow, lane string) []Offer {
 	var out []Offer
@@ -85,14 +117,20 @@ type EscalationEpisode struct {
 	End               time.Time
 }
 
-// escalationLate bounds how late the rise may land: the 10 s schedule tick
-// plus notifier delivery under load.
-const escalationLate = 90 * time.Second
+// The rise is due After past the first accepted post: native admits the post
+// at once and OSCAR counts After from native active_since. escalationLate
+// allows the 10 s schedule tick plus native callback and notifier delivery
+// under load (History p95 alone may reach 40 s); escalationEarly allows clock
+// and admission jitter.
+const (
+	escalationLate  = 2 * time.Minute
+	escalationEarly = 10 * time.Second
+)
 
 // JudgeEscalation scores each episode long enough to escalate (its first
 // post plus After plus escalationLate before End) from the sink receipts of
 // that alert and startsAt: the severity must rise to target exactly once,
-// After past the first post (no earlier, at most escalationLate later), and
+// After past the first post (at most escalationEarly before, escalationLate after), and
 // stay there. No receipt at all is Unknown.
 func JudgeEscalation(eps []EscalationEpisode, receipts []targetops.Receipt, target string, after time.Duration) (Rate, []string) {
 	var r Rate
@@ -139,10 +177,10 @@ func JudgeEscalation(eps []EscalationEpisode, receipts []targetops.Receipt, targ
 			r.Failed++
 			bad("escalation %s@%s: never reached %s", ep.Alert, ep.StartsAt.Format(time.RFC3339), target)
 			continue
-		case rise == 0 || got[rise].at.Before(due) || got[rise].at.After(due.Add(escalationLate)):
+		case rise == 0 || got[rise].at.Before(due.Add(-escalationEarly)) || got[rise].at.After(due.Add(escalationLate)):
 			r.Failed++
-			bad("escalation %s@%s: rose to %s %s after the first post, want %s (+%s)", ep.Alert, ep.StartsAt.Format(time.RFC3339), target,
-				got[rise].at.Sub(ep.FirstAt).Round(time.Second), after, escalationLate)
+			bad("escalation %s@%s: rose to %s %s after the first post, want %s (-%s +%s)", ep.Alert, ep.StartsAt.Format(time.RFC3339), target,
+				got[rise].at.Sub(ep.FirstAt).Round(time.Second), after, escalationEarly, escalationLate)
 			continue
 		}
 		ok := true

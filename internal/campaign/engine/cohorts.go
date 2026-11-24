@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/campaign/lane"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/resend"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/score"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
-	"github.com/cmetech/oscar-corrtest/internal/compiler"
 	"github.com/cmetech/oscar-corrtest/internal/oscar"
 )
 
@@ -86,10 +86,19 @@ func (r *run) resendPhase(ctx context.Context) {
 		every = time.Minute
 	}
 	for tick := origin; tick.Before(until) && r.e.clock.SleepUntil(ctx, tick); tick = tick.Add(every) {
-		for _, m := range r.members() {
-			r.deliver(ctx, m, tick)
+		ms := r.members()
+		for i, m := range ms {
+			slot := tick
+			if r.s.Paced { // member i at its own offset: no burst of every member at once
+				slot = tick.Add(time.Duration(i) * every / time.Duration(len(ms)))
+				if !r.e.clock.SleepUntil(ctx, slot) {
+					break
+				}
+			}
+			r.deliver(ctx, m, slot)
 		}
 	}
+	r.endEpisodes(context.WithoutCancel(ctx))
 	// OSCAR's status lists only open episodes, and a scenario may resolve the
 	// cohorts (drain) before scoring: read exhaustion now, after the last
 	// resends had until the phase end to land.
@@ -124,17 +133,13 @@ func (r *run) deliver(ctx context.Context, m *cohortMember, tick time.Time) {
 	if m.ambiguous || ctx.Err() != nil {
 		return
 	}
+	if m.policy.spec.Episode > 0 {
+		r.deliverEpisode(ctx, m, tick)
+		return
+	}
 	fresh := m.policy.spec.Fresh
 	if fresh {
 		m.alert.StartsAt = tick
-	}
-	if ep := m.policy.spec.Episode; ep > 0 {
-		if n := len(m.episodes); n > 0 && tick.Sub(m.episodes[n-1].StartsAt) >= ep {
-			r.rotateEpisode(ctx, m, tick)
-		}
-		if len(m.episodes) == 0 {
-			m.episodes = append(m.episodes, score.EscalationEpisode{Alert: m.alert.Name, StartsAt: m.alert.StartsAt})
-		}
 	}
 	if !m.recorded { // evidence of the cohort; cleanup resolves from History
 		r.event(context.WithoutCancel(ctx), cohortEvent, "info", "cohort member "+m.alert.Name, cohortPrior{m.alert.Name, m.alert.Labels, m.alert.StartsAt})
@@ -144,9 +149,6 @@ func (r *run) deliver(ctx context.Context, m *cohortMember, tick time.Time) {
 	status, err := r.e.d.Target.PostAlert(ctx, m.alert)
 	r.sourceOffer("ordinary_resend", start, status)
 	r.offer("resend", false, 1)
-	if n := len(m.episodes); n > 0 && err == nil && status/100 == 2 && m.episodes[n-1].FirstAt.IsZero() {
-		m.episodes[n-1].FirstAt = start
-	}
 	switch {
 	case status == 0 && err != nil && ctx.Err() == nil:
 		if m.policy.spec.Action == "ticket" && len(m.deliveries) == 0 {
@@ -161,24 +163,75 @@ func (r *run) deliver(ctx context.Context, m *cohortMember, tick time.Time) {
 	}
 }
 
-// rotateEpisode (PolicySpec.Episode) resolves a member's current occurrence
-// and starts the next episode with startsAt tick, so OSCAR opens a new
-// episode (and schedules a new escalation). A failed resolve is logged;
-// cleanup resolves whatever History still holds firing.
-func (r *run) rotateEpisode(ctx context.Context, m *cohortMember, tick time.Time) {
-	now := r.now()
-	req, err := oscar.BuildAlertRequest(compiler.AlertPlan{Name: m.alert.Name, Status: "resolved", Labels: m.alert.Labels,
-		Annotations: map[string]string{"summary": m.alert.Name}, StartsAt: m.alert.StartsAt, EndsAt: now})
-	if err == nil {
-		_, err = r.e.d.Target.PostAlertGroup(ctx, req)
-		r.offer("resend", true, 1)
+// deliverEpisode is deliver for an episode cohort (PolicySpec.Episode).
+// Escalation acts on native episodes (OSCAR's design doc: the webhook bypass
+// never proves native admission), so these members go through native
+// Alertmanager's public v2 route, like the worker lane: a repost with the
+// same startsAt refreshes the alert (native keeps it firing for its
+// resolve_timeout after each), and every Episode the member is resolved there
+// and fired again with startsAt tick, opening a new episode and a new
+// escalation. The lane label starts with "native-", so cleanup leaves the
+// clears to this source; endEpisodes resolves the last episodes.
+func (r *run) deliverEpisode(ctx context.Context, m *cohortMember, tick time.Time) {
+	if r.e.d.nativeSender == nil {
+		if !m.recorded {
+			r.noteMissing("native v2 sender unavailable for escalation cohort member " + m.alert.Name)
+			m.recorded = true
+		}
+		return
+	}
+	if n := len(m.episodes); n > 0 && tick.Sub(m.episodes[n-1].StartsAt) >= m.policy.spec.Episode {
+		r.resolveEpisode(ctx, m)
+		m.alert.StartsAt = tick
+	}
+	if n := len(m.episodes); n == 0 || !m.episodes[n-1].End.IsZero() {
+		m.episodes = append(m.episodes, score.EscalationEpisode{Alert: m.alert.Name, StartsAt: m.alert.StartsAt})
+	}
+	if !m.recorded {
+		r.event(context.WithoutCancel(ctx), cohortEvent, "info", "cohort member "+m.alert.Name, cohortPrior{m.alert.Name, m.alert.Labels, m.alert.StartsAt})
+		m.recorded = true
+	}
+	start := r.now()
+	status, err := r.e.d.nativeSender.Send(ctx, episodeEvent(m, lane.Firing), r.id, m.alert.Labels["campaign_lane"])
+	r.offer("resend", false, 1)
+	if ep := &m.episodes[len(m.episodes)-1]; err == nil && status/100 == 2 {
+		m.deliveries = append(m.deliveries, resend.Delivery{At: tick.Sub(m.origin)})
+		if ep.FirstAt.IsZero() {
+			ep.FirstAt = start
+		}
+	}
+}
+
+func episodeEvent(m *cohortMember, kind lane.EventKind) lane.Event {
+	return lane.Event{Identity: m.alert.Name, Instance: "corrtest-escalate", Severity: m.alert.Labels["severity"], StartsAt: m.alert.StartsAt, Kind: kind}
+}
+
+// resolveEpisode resolves a member's current episode at the native source
+// and ends it. A failed resolve is logged: native resolve_timeout clears it.
+func (r *run) resolveEpisode(ctx context.Context, m *cohortMember) {
+	n := len(m.episodes)
+	if n == 0 || !m.episodes[n-1].End.IsZero() {
+		return
+	}
+	status, err := r.e.d.nativeSender.Send(ctx, episodeEvent(m, lane.Resolve), r.id, m.alert.Labels["campaign_lane"])
+	r.offer("resend", true, 1)
+	if err == nil && status/100 != 2 {
+		err = fmt.Errorf("HTTP %d", status)
 	}
 	if err != nil {
 		r.event(context.WithoutCancel(ctx), cohortEvent, "warn", "episode resolve "+m.alert.Name+": "+err.Error(), nil)
 	}
-	m.episodes[len(m.episodes)-1].End = now
-	m.alert.StartsAt = tick
-	m.episodes = append(m.episodes, score.EscalationEpisode{Alert: m.alert.Name, StartsAt: tick})
+	m.episodes[n-1].End = r.now()
+}
+
+// endEpisodes resolves every episode cohort member's last episode when the
+// cohorts stop, even on a stop.
+func (r *run) endEpisodes(ctx context.Context) {
+	for _, m := range r.members() {
+		if m.policy.spec.Episode > 0 && r.e.d.nativeSender != nil {
+			r.resolveEpisode(ctx, m)
+		}
+	}
 }
 
 // resolveFiring reads the campaign's History and resolves every occurrence

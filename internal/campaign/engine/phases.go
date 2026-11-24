@@ -147,7 +147,7 @@ func laneFor(p scenario.PolicySpec) string {
 		return "resend-ticket"
 	}
 	if p.Escalation != nil { // its own lane, or a higher-priority policy on the same lane would win
-		return "resend-escalate"
+		return "native-escalate" // native-sourced: see deliverEpisode
 	}
 	switch p.Mode {
 	case "occurrences":
@@ -398,12 +398,18 @@ func (r *run) correlation(ctx context.Context) {
 // cycleCorrelation (Correlation.Cycle, v4) runs set A then set B in a loop
 // from the correlation phase start until the drain, each case scored as in
 // v1. Set A cases the first pass never reached are not_run; later passes add
-// to the plan as they start, like set B.
+// to the plan as they start, like set B, and stop cycleMargin before the drain.
 func (r *run) cycleCorrelation(ctx context.Context) {
 	setA, setB := r.s.Correlation.SetA, r.s.Correlation.SetB
-	stopAt := r.at("drain", false)
+	drain := r.at("drain", false)
 	for pass := 0; ; pass++ {
 		ran := false
+		// After the first pass (which runs as v1 would), stop before a document
+		// could run into the drain.
+		stopAt := drain
+		if pass > 0 {
+			stopAt = drain.Add(-cycleMargin)
+		}
 		for i, ref := range setA {
 			if ctx.Err() != nil || !r.now().Before(stopAt) {
 				if pass == 0 {
@@ -433,6 +439,10 @@ func (r *run) cycleCorrelation(ctx context.Context) {
 		}
 	}
 }
+
+// cycleMargin is the longest cycling document: a 90 s run plus a ticketed
+// case's 150 s observation.
+const cycleMargin = 4 * time.Minute
 
 // setBBackoff spaces set B passes in which every run failed to start.
 const setBBackoff = 30 * time.Second

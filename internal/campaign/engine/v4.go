@@ -20,7 +20,7 @@ type UserOps interface {
 	RunTask(ctx context.Context, job string) (string, error)
 	TaskResult(ctx context.Context, id string) (status string, done bool, err error)
 	Report(ctx context.Context, key string) (targetops.ReportInfo, error)
-	RunReport(ctx context.Context, id, requestID string, start, end time.Time) (string, error)
+	RunReport(ctx context.Context, id, requestID string, start, end time.Time) (runID, state string, err error)
 	ReportRunState(ctx context.Context, runID string) (state, errorCode string, err error)
 	ReportArtifacts(ctx context.Context, runID string) (targetops.ReportManifest, error)
 	VerifyManifest(ctx context.Context, runID string, m targetops.ReportManifest) error
@@ -48,7 +48,9 @@ func (r *run) offer(lane string, resolve bool, n int) {
 func firingEvents(doc corr.Scenario) int {
 	n := 0
 	for _, c := range doc.Cases {
-		n += c.Repeat
+		if len(c.Events) == 0 { // the compiler expands Repeat only without Events
+			n += c.Repeat
+		}
 		for _, e := range c.Events {
 			if !strings.EqualFold(e.Status, "resolved") {
 				n++
@@ -80,7 +82,7 @@ func (r *run) taskPhase(ctx context.Context) {
 	stop := r.at("drain", false)
 	for k := 0; ; k++ {
 		at := r.t0.Add(spec.At + time.Duration(k)*spec.Every)
-		if spec.Every <= 0 && k > 0 || !at.Before(stop) || !r.e.clock.SleepUntil(ctx, at) {
+		if spec.Every <= 0 && k > 0 || !at.Add(spec.Timeout).Before(stop) || !r.e.clock.SleepUntil(ctx, at) {
 			return
 		}
 		run := r.execTask(ctx, spec.Job, spec.Timeout)
@@ -159,7 +161,8 @@ func (r *run) runReport(ctx context.Context, spec *scenario.ReportSpec) (rr scor
 		rr.Err = "find report: " + err.Error()
 		return rr
 	}
-	if _, err := r.e.d.UserOps.RunReport(ctx, info.ID, rr.RunID, r.t0.Truncate(time.Minute), start.Truncate(time.Minute)); err != nil {
+	runID, _, err := r.e.d.UserOps.RunReport(ctx, info.ID, rr.RunID, r.t0.Truncate(time.Minute), start.Truncate(time.Minute))
+	if err != nil {
 		rr.Err = "request: " + err.Error()
 		var se *targetops.StatusError
 		if errors.As(err, &se) {
@@ -167,6 +170,7 @@ func (r *run) runReport(ctx context.Context, spec *scenario.ReportSpec) (rr scor
 		}
 		return rr
 	}
+	rr.RunID = runID
 	for deadline := start.Add(spec.Timeout); ; {
 		state, code, err := r.e.d.UserOps.ReportRunState(ctx, rr.RunID)
 		rr.Seconds = r.now().Sub(start).Seconds()
@@ -214,7 +218,7 @@ func newUUID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
 
-// v4Score adds the offered rate (every scenario) and the v4 lanes: the
+// v4Score adds the offered rate (Paced scenarios) and the v4 lanes: the
 // escalation episodes, the on-demand task runs and the alert reports.
 func (r *run) v4Score(card *score.Scorecard, in score.Inputs, report map[string]any) {
 	r.mu.Lock()
@@ -223,9 +227,12 @@ func (r *run) v4Score(card *score.Scorecard, in score.Inputs, report map[string]
 	tasks.Runs = append([]score.TaskExecRun(nil), r.tasks.Runs...)
 	reports.Runs = append([]score.ReportRun(nil), r.reports.Runs...)
 	r.mu.Unlock()
-	offered := score.OfferedPerMinute(r.t0, r.at("drain", false), offers)
-	card.Offered = &offered
-	report["offered"] = offered
+	if r.s.Paced { // v4: every lane is counted (older scenarios have uncounted lanes)
+		offered := score.OfferedPerMinute(r.t0, r.at("drain", false), offers)
+		card.Offered = &offered
+		report["offered"] = offered
+		judge(card, nil, offered.OverBudget(r.s.Baseline, scenario.V4TotalRate, scenario.V4SpikeRate))
+	}
 
 	r.escalationScore(card, in.Receipts, report)
 	if r.s.Tasks != nil {

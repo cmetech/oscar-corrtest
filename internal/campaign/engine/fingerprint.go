@@ -157,10 +157,20 @@ func (r *run) fingerprintRound(ctx context.Context, k int, note func(bool, strin
 			sent++
 		}
 	}
-	for i := 1; i <= spec.Repeats; i++ {
-		post(merge, fmt.Sprintf("v%d", i))
+	if r.s.Paced { // split control first, then the variants spread over half a round, one startsAt
+		post(split, "v1")
+		for i := 1; i <= spec.Repeats; i++ {
+			if i > 1 && !r.e.clock.SleepUntil(ctx, startsAt.Add(time.Duration(i-1)*spec.Every/2/time.Duration(spec.Repeats))) {
+				break
+			}
+			post(merge, fmt.Sprintf("v%d", i))
+		}
+	} else {
+		for i := 1; i <= spec.Repeats; i++ {
+			post(merge, fmt.Sprintf("v%d", i))
+		}
+		post(split, "v1")
 	}
-	post(split, "v1")
 	r.setFP(func(s *score.FingerprintStats) { s.Sent += sent })
 	// ponytail: one read after Verify; poll for early completion if Verify must be long.
 	if !r.e.clock.SleepUntil(ctx, startsAt.Add(spec.Verify)) {

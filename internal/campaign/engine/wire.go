@@ -165,8 +165,9 @@ func NewFromConfig(ctx context.Context, cfg campaign.Config, host Host) (*Engine
 	return New(d, clock), nil
 }
 
-// v4Prechecks are B12 (escalation scheduling) and B13 (alert report set up),
-// blocking, for scenarios with an escalation cohort or a report lane.
+// v4Prechecks are the blocking v4 checks: B12 escalation scheduling, B14
+// fingerprint policies commissioned, B15 one task run succeeds, B13 alert
+// report approved; each only for a scenario with that lane.
 func v4Prechecks(ctx context.Context, d Deps, s scenario.Scenario) []precheck.Result {
 	var out []precheck.Result
 	if precheck.NeedsEscalation(s) {
@@ -184,6 +185,20 @@ func v4Prechecks(ctx context.Context, d Deps, s scenario.Scenario) []precheck.Re
 		}()
 		out = append(out, precheck.EscalationSchedule(st, err))
 	}
+	if f := s.Fingerprint; f != nil && f.Every > 0 {
+		why, err := "no fingerprint policy client", error(nil)
+		if d.Fingerprint != nil {
+			why, err = d.Fingerprint.Preflight(ctx)
+		}
+		out = append(out, precheck.FingerprintReady(why, err))
+	}
+	if t := s.Tasks; t != nil {
+		status, err := "", errors.New("no front-office user credential (campaign-fo)")
+		if d.UserOps != nil {
+			status, err = precheckTask(ctx, d.UserOps, t)
+		}
+		out = append(out, precheck.TaskRunnable(t.Job, status, err))
+	}
 	if r := s.Report; r != nil {
 		if d.UserOps == nil {
 			out = append(out, precheck.ReportSetup(r.Key, targetops.ReportInfo{}, errors.New("no front-office user credential (campaign-fo)")))
@@ -193,6 +208,33 @@ func v4Prechecks(ctx context.Context, d Deps, s scenario.Scenario) []precheck.Re
 		}
 	}
 	return out
+}
+
+// precheckTask runs the v4 task once (B15) on wall time and returns its
+// terminal status, or "timeout" after t.Timeout.
+func precheckTask(ctx context.Context, u UserOps, t *scenario.TaskExecSpec) (string, error) {
+	id, err := u.RunTask(ctx, t.Job)
+	if err != nil {
+		return "", err
+	}
+	deadline := time.Now().Add(t.Timeout)
+	for {
+		status, done, err := u.TaskResult(ctx, id)
+		if done {
+			return status, nil
+		}
+		if !time.Now().Before(deadline) {
+			if err != nil {
+				return "", err
+			}
+			return "timeout", nil
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(taskPoll):
+		}
+	}
 }
 
 type campaignIDKey struct{}

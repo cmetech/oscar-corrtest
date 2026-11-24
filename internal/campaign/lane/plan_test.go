@@ -253,3 +253,30 @@ func TestTwoBurstsEachRaiseTheirWindow(t *testing.T) {
 		}
 	}
 }
+
+// TestV4PlannedOfferedRatePerMinute: the planned per-minute firing posts of
+// every v4 lane (worker plan, paced cohorts, paced fingerprint rounds and the
+// correlation budget) stay at 5/s, and at 10/s in the spike minutes.
+func TestV4PlannedOfferedRatePerMinute(t *testing.T) {
+	s := scenario.AlertingDayV4()
+	load := s.Phase("drain").Start
+	p := Compile("r", s.Seed, s.Baseline, load)
+	perMin := make([]float64, int(load/time.Minute))
+	for _, e := range p.Events {
+		if e.Kind == Firing {
+			perMin[int(e.At/time.Minute)]++
+		}
+	}
+	ctl := s.ControllerFiringRate() * 60 // paced: spread evenly over each minute
+	for m, n := range perMin {
+		limit := scenario.V4TotalRate * 60
+		for _, b := range s.Baseline.Bursts {
+			if time.Duration(m)*time.Minute < b.At+b.For && b.At < time.Duration(m+1)*time.Minute {
+				limit = scenario.V4SpikeRate * 60
+			}
+		}
+		if n+ctl > limit+1 {
+			t.Fatalf("minute %d: %.0f planned firing posts (worker %.0f + controller %.0f), budget %.0f", m, n+ctl, n, ctl, limit)
+		}
+	}
+}

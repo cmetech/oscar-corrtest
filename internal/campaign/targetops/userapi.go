@@ -129,16 +129,21 @@ func (u UserAPI) Report(ctx context.Context, key string) (ReportInfo, error) {
 	return ReportInfo{}, fmt.Errorf("report %s not found", key)
 }
 
-// RunReport requests a manual artifact run of report id over [start, end);
-// requestID (a UUID) becomes the run id, so a retry is idempotent.
-func (u UserAPI) RunReport(ctx context.Context, id, requestID string, start, end time.Time) (string, error) {
+// RunReport requests a manual artifact run of report id over [start, end).
+// OSCAR makes requestID (a UUID) the run id, so a retry is idempotent; the
+// run id it answers is returned (requestID when it answers none).
+func (u UserAPI) RunReport(ctx context.Context, id, requestID string, start, end time.Time) (runID, state string, err error) {
 	const iso = "2006-01-02T15:04:05+00:00"
 	var out struct {
+		RunID string `json:"run_id"`
 		State string `json:"state"`
 	}
-	err := u.do(ctx, http.MethodPost, "/reports/"+url.PathEscape(id)+"/run", nil,
+	err = u.do(ctx, http.MethodPost, "/reports/"+url.PathEscape(id)+"/run", nil,
 		map[string]string{"request_id": requestID, "start": start.UTC().Format(iso), "end": end.UTC().Format(iso)}, &out)
-	return out.State, err
+	if out.RunID == "" {
+		out.RunID = requestID
+	}
+	return out.RunID, out.State, err
 }
 
 // ReportRunState is GET /reports/runs/{id}: its state and error code.

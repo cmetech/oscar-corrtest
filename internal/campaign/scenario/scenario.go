@@ -243,8 +243,12 @@ type Scenario struct {
 	// Fingerprint is the fingerprint-policy lane facet; nil runs no lane.
 	Fingerprint *FingerprintSpec `json:"fingerprint,omitempty"`
 	// Tasks and Report are the v4 on-demand task and alert-report lanes.
-	Tasks          *TaskExecSpec       `json:"tasks,omitempty"`
-	Report         *ReportSpec         `json:"report,omitempty"`
+	Tasks  *TaskExecSpec `json:"tasks,omitempty"`
+	Report *ReportSpec   `json:"report,omitempty"`
+	// Paced (v4) spreads the controller lanes' posts evenly (cohort members
+	// across Redelivery, fingerprint posts across half a round) so no minute
+	// exceeds the offered-rate budget, and reports offered posts per minute.
+	Paced          bool                `json:"paced,omitempty"`
 	LoadEnd        time.Duration       `json:"loadEnd,omitempty"`
 	NativeWorkload *NativeWorkloadSpec `json:"nativeWorkload,omitempty"`
 	Limits         Limits              `json:"limits"`
@@ -538,12 +542,13 @@ func (s Scenario) ControllerFiringRate() float64 {
 //     scored as in v1 (the runtime serializes runs: about 1-2%, not 20%);
 //   - tickets (~5%): every 15th new worker alert, plus each ticketed set B
 //     run's synthetic parent (flood, threshold) and the R4 cohort;
-//   - fingerprint (5%): a 30-alert round every 2 minutes under one scoped
-//     policy (29 variants that must collapse, one other device that must not),
+//   - fingerprint (5%): a 15-alert round every minute under one scoped
+//     policy (14 variants posted over 30 s that must collapse, one other device that must not),
 //     reverted at the end;
 //   - resend (10%): 65 cohort members re-delivered every 130 s: v1's R1-R4
 //     (13 each) and R5, a configured time policy that escalates to critical
-//     after 4 minutes, its 13 members starting a new episode every 15 minutes;
+//     after 4 minutes, its 13 members posted through native Alertmanager (escalation
+//     needs a native episode) and starting a new episode every 15 minutes;
 //   - front-office API users as v1, one homelab task run through the task
 //     API every 5 minutes, and an alert report at T+60 and T+120.
 //
@@ -557,6 +562,7 @@ func AlertingDayV4() Scenario {
 	s.Baseline.Rate = 4.1
 	s.Baseline.TicketEveryNth, s.Baseline.TicketFrom, s.Baseline.TicketTo = 15, 0, 150*min
 	s.Baseline.Bursts = []BurstSpec{{At: 45 * min, For: 5 * min, Rate: 9.1}, {At: 105 * min, For: 5 * min, Rate: 9.1}}
+	s.Paced = true
 	s.Correlation.Cycle, s.Correlation.ParentTickets = true, true
 	for i := range s.Resend {
 		s.Resend[i].Cohort = 13
@@ -564,7 +570,7 @@ func AlertingDayV4() Scenario {
 	s.Resend = append(s.Resend, PolicySpec{Key: "R5", Action: "notification", Mode: "time", Interval: 300 * time.Second, Cohort: 13,
 		Notifier: "CAMPAIGN_SINK", Escalation: &EscalationSpec{After: 4 * min, TargetSeverity: "critical"}, Episode: 15 * min})
 	s.ResendUntil = 146 * min
-	s.Fingerprint = &FingerprintSpec{At: 2 * min, Repeats: 29, Converge: 2 * min, Verify: 90 * time.Second, Every: 2 * min}
+	s.Fingerprint = &FingerprintSpec{At: 2 * min, Repeats: 14, Converge: 2 * min, Verify: 55 * time.Second, Every: min}
 	s.Tasks = &TaskExecSpec{Job: "monitor:check_connection:homelab", At: 5 * min, Every: 5 * min, Timeout: 4 * min}
 	s.Report = &ReportSpec{Key: "core-alarm-history-dump", At: []time.Duration{60 * min, 120 * min}, Timeout: 20 * min}
 	s.Limits = AlertingDayV3().Limits
@@ -593,7 +599,7 @@ func AlertingDaySmokeV4() Scenario {
 		{Key: "R5", Action: "notification", Mode: "time", Interval: 120 * time.Second, Cohort: 2, Notifier: "CAMPAIGN_SINK",
 			Escalation: &EscalationSpec{After: 2 * min, TargetSeverity: "critical"}, Episode: 5 * min}}
 	s.ResendUntil = 10*min + 30*time.Second
-	s.Fingerprint = &FingerprintSpec{At: min, Repeats: 5, Converge: 2 * min, Verify: time.Minute, Every: 2 * min}
+	s.Fingerprint = &FingerprintSpec{At: min, Repeats: 5, Converge: 2 * min, Verify: 55 * time.Second, Every: min}
 	s.Tasks = &TaskExecSpec{Job: "monitor:check_connection:homelab", At: 2 * min, Every: 5 * min, Timeout: 4 * min}
 	s.Report = &ReportSpec{Key: "core-alarm-history-dump", At: []time.Duration{4 * min}, Timeout: 7 * min}
 	// The smoke's controller lanes are smaller: the worker lane fills the same 5/s and 10/s totals.

@@ -212,6 +212,12 @@ type fakeOSCAR struct {
 	fpPub                 string
 	fpEnables, fpDisables int
 	fpDisableErr          error
+	// Native escalation for the native-escalate lane: every episode first sends
+	// a warning receipt and, when escalate > 0, one critical receipt once it is
+	// refreshed escalate after its first post.
+	escalate  time.Duration
+	escFirst  map[*oscar.HistoryRecord]time.Time
+	escalated map[*oscar.HistoryRecord]bool
 }
 
 func newFakeOSCAR(t *testing.T, clock *scaledClock, s scenario.Scenario) *fakeOSCAR {
@@ -233,8 +239,9 @@ func newFakeOSCAR(t *testing.T, clock *scaledClock, s scenario.Scenario) *fakeOS
 func (f *fakeOSCAR) serve(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/api/v2/alerts") {
 		var alerts []struct {
-			Labels map[string]string `json:"labels"`
-			EndsAt string            `json:"endsAt"`
+			Labels   map[string]string `json:"labels"`
+			StartsAt string            `json:"startsAt"`
+			EndsAt   string            `json:"endsAt"`
 		}
 		raw, _ := io.ReadAll(r.Body)
 		if err := json.Unmarshal(raw, &alerts); err != nil {
@@ -242,7 +249,8 @@ func (f *fakeOSCAR) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, a := range alerts {
-			f.ingest(a.Labels, time.Time{}, a.EndsAt != "", true)
+			posted, _ := time.Parse(time.RFC3339Nano, a.StartsAt)
+			f.ingest(a.Labels, posted, a.EndsAt != "", true)
 		}
 		w.WriteHeader(200)
 		return
@@ -353,9 +361,11 @@ func (f *fakeOSCAR) ingest(labels map[string]string, startsAt time.Time, resolve
 		seen = seen || h.AlertName == name
 		if h.Labels["am_fingerprint"] == fp && (lane && h.Status == "firing" || !lane && h.StartsAt.Equal(startsAt)) {
 			h.Status = "firing"
+			f.escalation(h, labels, startsAt)
 			return
 		}
 	}
+	posted := startsAt
 	if lane || startsAt.IsZero() {
 		startsAt = now
 	}
@@ -374,6 +384,14 @@ func (f *fakeOSCAR) ingest(labels map[string]string, startsAt time.Time, resolve
 		}
 		f.fpScoped[f.history[len(f.history)-1]] = true
 		f.fpPairs[f.history[len(f.history)-1]] = map[string]bool{fp: true}
+	}
+	if labels["campaign_lane"] == "native-escalate" {
+		h := f.history[len(f.history)-1]
+		if f.escFirst == nil {
+			f.escFirst, f.escalated = map[*oscar.HistoryRecord]time.Time{}, map[*oscar.HistoryRecord]bool{}
+		}
+		f.escFirst[h] = posted
+		f.escReceipt(name, "warning", posted)
 	}
 	if seen {
 		return
@@ -1150,4 +1168,20 @@ func (f *fakeOSCAR) Disable(context.Context, targetops.FingerprintDefinition, st
 	}
 	f.fpOn = false
 	return nil
+}
+
+// escalation sends the native-escalate lane's one critical receipt once a
+// refresh comes escalate after the episode's first post (f.mu held).
+func (f *fakeOSCAR) escalation(h *oscar.HistoryRecord, labels map[string]string, posted time.Time) {
+	first, ok := f.escFirst[h]
+	if f.escalate <= 0 || !ok || f.escalated[h] || labels["campaign_lane"] != "native-escalate" || f.clock.Now().Sub(first) < f.escalate {
+		return
+	}
+	f.escalated[h] = true
+	f.escReceipt(labels["alertname"], "critical", posted)
+}
+
+func (f *fakeOSCAR) escReceipt(name, severity string, startsAt time.Time) {
+	f.receipts = append(f.receipts, targetops.Receipt{ReceivedAt: f.clock.Now(), Alerts: []targetops.SinkAlert{{AlertName: name, Status: "firing",
+		StartsAt: startsAt.UTC().Format(time.RFC3339Nano), Labels: map[string]string{"severity": severity}}}})
 }

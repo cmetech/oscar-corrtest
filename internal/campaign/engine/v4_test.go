@@ -9,6 +9,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/cmetech/oscar-corrtest/internal/campaign/lane"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/score"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
@@ -43,7 +44,7 @@ func (f *fakeUserOps) Report(context.Context, string) (targetops.ReportInfo, err
 	return targetops.ReportInfo{ID: "rep-1", Key: "core-alarm-history-dump", SetupState: "approved"}, nil
 }
 
-func (f *fakeUserOps) RunReport(_ context.Context, _, id string, start, end time.Time) (string, error) {
+func (f *fakeUserOps) RunReport(_ context.Context, _, id string, start, end time.Time) (string, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.reports++
@@ -51,7 +52,7 @@ func (f *fakeUserOps) RunReport(_ context.Context, _, id string, start, end time
 		f.polls = map[string]int{}
 	}
 	f.polls[id] = 0
-	return "artifact_admitted", nil
+	return id, "artifact_admitted", nil
 }
 
 func (f *fakeUserOps) ReportRunState(_ context.Context, id string) (string, string, error) {
@@ -84,8 +85,14 @@ func (f *fakeUserOps) VerifyManifest(context.Context, string, targetops.ReportMa
 func v4Harness(t *testing.T) (*harness, *fakeUserOps) {
 	h := newHarness(t)
 	s := time.Second
+	// Long enough for the cycling correlation to make several passes before its
+	// drain margin.
+	h.s.Phases = []scenario.Phase{{Name: "preflight", Start: -10 * s}, {Name: "baseline", End: 420 * s}, {Name: "correlation", Start: 30 * s, End: 420 * s},
+		{Name: "ticketing", Start: 60 * s, End: 420 * s}, {Name: "resend", Start: 90 * s, End: 400 * s}, {Name: "drain", Start: 420 * s, End: 450 * s}}
+	h.s.ResendUntil, h.s.Baseline.TicketTo = 398*s, 400*s
+	h.s.Paced = true
 	h.s.Correlation.Cycle, h.s.Correlation.ParentTickets = true, true
-	h.s.Fingerprint = &scenario.FingerprintSpec{At: 10 * s, Repeats: 3, Converge: 5 * s, Verify: 8 * s, Every: 20 * s}
+	h.s.Fingerprint = &scenario.FingerprintSpec{At: 10 * s, Repeats: 3, Converge: 5 * s, Verify: 15 * s, Every: 20 * s}
 	h.s.Resend = append(h.s.Resend, scenario.PolicySpec{Key: "R5", Action: "notification", Mode: "time", Interval: 4 * s, Cohort: 1,
 		Notifier: "CAMPAIGN_SINK", Escalation: &scenario.EscalationSpec{After: 10 * s, TargetSeverity: "critical"}, Episode: 9 * s})
 	h.s.Tasks = &scenario.TaskExecSpec{Job: "monitor:check_connection:homelab", At: 5 * s, Every: 20 * s, Timeout: 10 * s}
@@ -94,6 +101,7 @@ func v4Harness(t *testing.T) (*harness, *fakeUserOps) {
 	h.oscar.s = h.s
 	ops := &fakeUserOps{}
 	h.deps.UserOps = ops
+	h.deps.nativeSender = lane.NewAlertmanagerSenderClient(h.oscar.srv.URL+ingestPath, h.oscar.client)
 	return h, ops
 }
 
@@ -166,7 +174,7 @@ func TestV4LanesRunConcurrently(t *testing.T) {
 		h.oscar.mu.Lock()
 		starts := map[time.Time]bool{}
 		for _, row := range h.oscar.history {
-			if strings.Contains(row.AlertName, "resend-escalate") {
+			if strings.Contains(row.AlertName, "native-escalate") {
 				starts[row.StartsAt] = true
 				if row.Status != "resolved" {
 					t.Errorf("escalation episode %s@%s left firing", row.AlertName, row.StartsAt)
@@ -178,4 +186,45 @@ func TestV4LanesRunConcurrently(t *testing.T) {
 			t.Errorf("escalation episodes were not rotated: %d History episodes", len(starts))
 		}
 	})
+}
+
+// TestV4EscalationScoredPerEpisode: R5 goes through the native route; each
+// episode long enough to escalate is judged from its sink receipts. A target
+// that escalates on time passes every episode; one that never escalates FAILs.
+func TestV4EscalationScoredPerEpisode(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		escalate time.Duration
+	}{{"escalates", 10 * time.Second}, {"never escalates", 0}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				h, _ := v4Harness(t)
+				for i := range h.s.Resend {
+					if h.s.Resend[i].Key == "R5" {
+						h.s.Resend[i].Episode = 150 * time.Second // > After + escalationLate: judged
+					}
+				}
+				h.oscar.s = h.s
+				h.oscar.escalate = tc.escalate
+				if err := h.run(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				var card score.Scorecard
+				if err := json.Unmarshal(h.campaign().Scorecard, &card); err != nil {
+					t.Fatal(err)
+				}
+				e := card.Escalation
+				if e == nil || e.Expected < 2 {
+					t.Fatalf("escalation %+v reasons %v", e, card.Reasons)
+				}
+				if tc.escalate > 0 && (e.Succeeded != e.Expected || hasReason(card.Reasons, "escalation")) {
+					t.Fatalf("on-time escalations: %+v %v", e, card.Reasons)
+				}
+				if tc.escalate == 0 && (e.Failed != e.Expected || card.Verdict != domain.VerdictFail || !hasReason(card.Reasons, "escalation:")) {
+					t.Fatalf("missing escalations must FAIL: %+v %s %v", e, card.Verdict, card.Reasons)
+				}
+			})
+		})
+	}
 }

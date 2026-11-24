@@ -42,3 +42,21 @@ func TestReportSetupPrecheck(t *testing.T) {
 		t.Fatalf("unreadable: %+v", r)
 	}
 }
+
+func TestFingerprintAndTaskPrechecks(t *testing.T) {
+	if r := FingerprintReady("", nil); r.ID != "B14" || r.Status != Pass || r.Tier != Blocking {
+		t.Fatalf("ready: %+v", r)
+	}
+	if r := FingerprintReady("fingerprint policies unpublished (no desired publication)", nil); r.Status != Fail {
+		t.Fatalf("not commissioned: %+v", r)
+	}
+	if r := TaskRunnable("j", "SUCCESS", nil); r.ID != "B15" || r.Status != Pass {
+		t.Fatalf("task ok: %+v", r)
+	}
+	if r := TaskRunnable("j", "timeout", nil); r.Status != Fail {
+		t.Fatalf("task timeout: %+v", r)
+	}
+	if r := TaskRunnable("j", "", errors.New("HTTP 403")); r.Status != Error {
+		t.Fatalf("task refused: %+v", r)
+	}
+}
