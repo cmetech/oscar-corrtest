@@ -611,9 +611,11 @@ func AlertingDayV4() Scenario {
 }
 
 // AlertingDaySmokeV4 compresses v4 into about 15 minutes (12 of load at the
-// same 5/s and 10/s totals, 1-minute spikes at T+4 and T+8, then a 3-minute
-// drain): one set A and one ticketed set B document cycled, two in flight at
-// 0.2 alerts/s (0.4/s in a spike), R1 and the R5 escalation cohort (2 members
+// same 5/s and 10/s totals, 1-minute spikes at T+4 and T+7, then a 3-minute
+// drain): one set A and one ticketed set B document cycled at 0.2 alerts/s
+// (0.4/s in a spike), up to 8 in flight so 90 s runs (OSCAR slow) still hold
+// the spike rate (OSC-155). Both spikes end by T+8, when the cycling
+// documents stop (engine cycleMargin before the drain). R1 and the R5 escalation cohort (2 members
 // each, escalating after 2 minutes), fingerprint rounds of 6, two task runs
 // and one report; the worker lane fills the rest. Custom: never comparable.
 func AlertingDaySmokeV4() Scenario {
@@ -625,9 +627,9 @@ func AlertingDaySmokeV4() Scenario {
 		{"ticketing", 0, 12 * min}, {"resend", min, 11 * min}, {"drain", 12 * min, 15 * min}}
 	s.Baseline.ResolveAfter = min
 	s.Baseline.TicketEveryNth, s.Baseline.TicketTo = 100, 12*min
-	s.Baseline.Bursts = []BurstSpec{{At: 4 * min, For: min}, {At: 8 * min, For: min}}
+	s.Baseline.Bursts = []BurstSpec{{At: 4 * min, For: min}, {At: 7 * min, For: min}}
 	s.Correlation = CorrelationSpec{SetA: []CaseRef{{Pattern: "flood", Level: "builtin"}}, SetB: []CaseRef{{Pattern: "threshold", Level: "builtin"}},
-		TicketedPatterns: []string{"flood", "threshold"}, Cycle: true, ParentTickets: true, Rate: 0.2, SpikeRate: 0.4, Parallel: 2}
+		TicketedPatterns: []string{"flood", "threshold"}, Cycle: true, ParentTickets: true, Rate: 0.2, SpikeRate: 0.4, Parallel: 8}
 	s.Resend = []PolicySpec{{Key: "R1", Action: "notification", Mode: "time", Interval: 50 * time.Second, MaxResends: n(2), Cohort: 2, Notifier: "CAMPAIGN_SINK"},
 		{Key: "R5", Action: "notification", Mode: "time", Interval: 120 * time.Second, Cohort: 2, Notifier: "CAMPAIGN_SINK",
 			Escalation: &EscalationSpec{After: 2 * min, TargetSeverity: "critical"}, Episode: 5 * min}}

@@ -2,6 +2,7 @@ package scenario
 
 import (
 	"encoding/json"
+	"math"
 	"reflect"
 	"testing"
 	"time"
@@ -378,8 +379,38 @@ func TestV4OfferedRateBudget(t *testing.T) {
 	if b := s.Baseline.Bursts; b[0].At != 45*time.Minute || b[1].At != 105*time.Minute || b[0].For != 5*time.Minute || b[1].For != 5*time.Minute {
 		t.Fatalf("spikes %+v", b)
 	}
-	if c := s.Correlation; c.Rate/V4TotalRate != 0.2 || c.SpikeRate/V4SpikeRate != 0.2 || c.Parallel < 2 {
-		t.Fatalf("correlation must be 20%% of the total in and out of spikes: %+v", c)
+	if c := s.Correlation; c.Rate/V4TotalRate != 0.2 || c.SpikeRate/V4SpikeRate != 0.2 || c.Parallel != 64 {
+		t.Fatalf("correlation must be 20%% of the total in and out of spikes, 64 in flight: %+v", c)
+	}
+	// OSC-155 AC-2: the smoke's in-flight cap holds its spike rate when a run
+	// takes 90 s (Little's law over its smallest document, plus one slot for
+	// a ticketed run's longer observation), and both spikes end before the
+	// cycling documents stop, 4 minutes (engine cycleMargin) before the drain.
+	smoke := AlertingDaySmokeV4()
+	smallest := 0
+	for _, ref := range append(smoke.Correlation.SetA, smoke.Correlation.SetB...) {
+		n := 1 // the runtime's label-survival probe
+		for _, c := range corr.Builtin(ref.Pattern).Cases {
+			if len(c.Events) == 0 {
+				n += c.Repeat
+			}
+			for _, e := range c.Events {
+				if e.Status != "resolved" {
+					n++
+				}
+			}
+		}
+		if smallest == 0 || n < smallest {
+			smallest = n
+		}
+	}
+	if c := smoke.Correlation; smallest == 0 || c.Parallel < int(math.Ceil(c.SpikeRate*90/float64(smallest)))+1 {
+		t.Errorf("smoke in-flight cap %d cannot hold %.1f/s with 90 s runs of %d-alert documents", c.Parallel, c.SpikeRate, smallest)
+	}
+	for _, b := range smoke.Baseline.Bursts {
+		if b.At+b.For > smoke.Phase("drain").Start-4*time.Minute {
+			t.Errorf("smoke spike %+v ends after the cycling documents stop", b)
+		}
 	}
 	// Shares of the 5/s: resend about 10%, fingerprint 5%, tickets about 5%.
 	resend := 0.0

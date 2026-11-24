@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `alerting-day-smoke@v4` allows 8 correlation documents in flight (was 2), so its correlation share
+  (0.2/s, 0.4/s in a spike) holds when OSCAR is slow and runs take up to 90 s, or 240 s for a
+  ticketed run. Its second 1-minute spike moves from T+8 to T+7: cycling documents stop 4 minutes
+  before the drain (T+8), so a T+8 spike never received its correlation share. Totals stay 5/s and
+  10/s; the worker lane is unchanged (4.66/s, 9.46/s in a spike). The smoke hash changes (never
+  comparable); `alerting-day@v4` is unchanged. Read the smoke correlation rate over T+1 to T+8.
+
 - New `alerting-day@v4` (comparable) and `alerting-day-smoke@v4` (about 15 minutes, never
   comparable): the single-node mixed-load gate. Every lane runs at once for 150 minutes at a
   total offered firing rate of 5/s over all lanes (10/s in 5-minute spikes at T+45 and T+105),
