@@ -65,7 +65,7 @@ func TestMigration0006AppliesOnTopOf0005(t *testing.T) {
 		t.Fatal(err)
 	}
 	var n, runs int
-	if err := db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 12 {
+	if err := db.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 13 {
 		t.Fatalf("n=%d err=%v", n, err)
 	}
 	if err := db.QueryRow(`SELECT count(*) FROM runs`).Scan(&runs); err != nil || runs != 1 {
@@ -637,6 +637,47 @@ func TestMigration0012AcceptsMaintenance(t *testing.T) {
 	var ids string
 	if err := db.QueryRow(`SELECT group_concat(id || ':' || kind || ':' || coalesce(restored_at, '-')) FROM campaign_mutations ORDER BY id`).Scan(&ids); err != nil ||
 		ids != "1:native_owned_inhibitor:2026-01-01T00:01:00Z,2:maint_pattern:-,3:maint_template:-,4:maint_window:-" {
+		t.Fatalf("rows %q err %v", ids, err)
+	}
+}
+
+// Migration 0013 (OSC-207): campaign_mutations accepts the receivers lane's
+// mapping kind and keeps every row.
+func TestMigration0013AcceptsReceiverMappings(t *testing.T) {
+	ctx := context.Background()
+	db := openTestSQL(t)
+	old := fstest.MapFS{}
+	entries, _ := fs.ReadDir(embeddedMigrations, "migrations")
+	for _, e := range entries {
+		if e.Name() < "0013" {
+			data, _ := embeddedMigrations.ReadFile("migrations/" + e.Name())
+			old["migrations/"+e.Name()] = &fstest.MapFile{Data: data}
+		}
+	}
+	if err := migrate(ctx, db, old); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO campaigns(id, scenario_id, scenario_hash, custom, trigger, run_by, trigger_identity, status, started_at) VALUES('c1','s','h',0,'cli','agent','me','COMPLETED','2026-01-01T00:00:00Z')`,
+		`INSERT INTO campaign_mutations(campaign_id, kind, object_id, recorded_at, restored_at) VALUES('c1','maint_window','w','2026-01-01T00:00:00Z','2026-01-01T00:01:00Z')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insert := `INSERT INTO campaign_mutations(campaign_id, kind, object_id, recorded_at) VALUES('c1','rx_mapping','webhook_profiles/ct-rx-x','2026-01-01T00:00:00Z')`
+	if _, err := db.Exec(insert); err == nil {
+		t.Fatal("0012 should refuse rx_mapping")
+	}
+	if err := migrate(ctx, db, embeddedMigrations); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(insert); err != nil {
+		t.Fatalf("rx_mapping after 0013: %v", err)
+	}
+	var ids string
+	if err := db.QueryRow(`SELECT group_concat(id || ':' || kind || ':' || coalesce(restored_at, '-')) FROM campaign_mutations ORDER BY id`).Scan(&ids); err != nil ||
+		ids != "1:maint_window:2026-01-01T00:01:00Z,2:rx_mapping:-" {
 		t.Fatalf("rows %q err %v", ids, err)
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/cmetech/oscar-corrtest/internal/campaign/lane"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/managed"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/precheck"
+	"github.com/cmetech/oscar-corrtest/internal/campaign/receivers"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/worker"
@@ -124,6 +125,11 @@ func NewFromConfig(ctx context.Context, cfg campaign.Config, host Host) (*Engine
 		d.UserOps = targetops.UserAPI{Root: root, Key: users[0].APIKey, HTTP: targetHTTP}
 		d.Maintenance = targetops.UserAPI{Root: root, Key: users[0].APIKey, HTTP: targetHTTP}
 	}
+	getenv := os.Getenv // the runtime's environment file when it offers one
+	if h, ok := host.(interface{ CampaignGetenv(string) string }); ok {
+		getenv = h.CampaignGetenv
+	}
+	d.Receivers = targetops.Receivers{C: oc, Root: root, HTTP: targetHTTP, Community: targetops.CommunityFromEnv(getenv)}
 	d.TaskRuns = func(ctx context.Context, start, end time.Time) ([]targetops.TaskRun, error) {
 		return targetops.TaskRuns(ctx, oc, precheck.HomelabJobs, start, end)
 	}
@@ -210,6 +216,16 @@ func v4Prechecks(ctx context.Context, d Deps, s scenario.Scenario) []precheck.Re
 			out = append(out, precheck.MaintenanceReady("", nil, errors.New("no front-office user credential (campaign-fo)")))
 		default:
 			out = append(out, precheck.MaintenanceReady(precheckMaint(ctx, d.Maintenance)))
+		}
+	}
+	if s.Receivers != nil {
+		switch {
+		case skipped(ctx, receivers.Lane):
+			out = append(out, precheck.SkippedLane("B17", receivers.Lane))
+		case d.Receivers == nil:
+			out = append(out, precheck.ReceiversReady("", nil, errors.New("no receivers client")))
+		default:
+			out = append(out, precheckReceivers(ctx, d.Receivers))
 		}
 	}
 	if r := s.Report; r != nil {

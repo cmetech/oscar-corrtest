@@ -44,7 +44,7 @@ func replay(t *testing.T, h http.HandlerFunc, users []User, d time.Duration) []A
 	defer srv.Close()
 	t0 := time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)
 	var res []ActionResult
-	Run(context.Background(), srv.URL, srv.Client(), users, 5, 7, spec, &fakeClock{now: t0, limit: t0.Add(d)}, func(r ActionResult) { res = append(res, r) })
+	Run(context.Background(), srv.URL, srv.Client(), users, 5, 7, spec, nil, &fakeClock{now: t0, limit: t0.Add(d)}, func(r ActionResult) { res = append(res, r) })
 	return res
 }
 

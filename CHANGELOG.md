@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+- New `alerting-day-3ps@v3` and `alerting-day-3ps-smoke@v3` (OSC-207): v2 plus three facets; every
+  earlier scenario hash is pinned unchanged.
+  - Server labels: worker alerts on `ct-srv-01..32`, correlation documents and receiver probes on
+    `ct-srv-33..40`; each alert carries instance `ct-srv-NN.home.arpa:9100`, hostname `ct-srv-NN`,
+    meta_hostname `ct-srv-NN.home.arpa` and meta_ipaddress `198.51.100.(10+NN)` (TEST-NET-2), so
+    OSCAR's Alert View shows Source `ct-srv-NN` and Source IP the address (`alert_source.py`). The
+    worker derives the labels from the instance, so a resolve rebuilt from the ledger matches.
+  - Front office: `source_equals`, `source_contains`, `source_ip_startswith` (`198.51.100.1`) and
+    `source_ip_notempty` through the `uisrc:` filters, window from T0, every status. Scorecard
+    `SourceFilters`: p50/p95/p99 per action and `frontoffice.<action>.p95/.p99` at the front-office
+    limits; FAIL on a returned row whose Source / Source IP (a port of OSCAR's derivation, pinned
+    to its shared vectors) misses the filter, on an HTTP error answer other than 429, or on a
+    `source_equals` count outside the campaign History rows of that server created by the end of the
+    request and before its start less 30 s (in flight); 429, transport errors, rows without labels
+    or no read-back are INCONCLUSIVE.
+  - Receivers lane (`receivers` facet): the campaign installs a webhook profile `ct-rx-<token>` and
+    a trap mapping `1.3.6.1.4.1.32473.7.1` (documentation enterprise; plain `put~` / `keep~`
+    elements, no eval) through the mapping API, journalled (`rx_mapping`, SQLite migration 0013)
+    and removed with read-back, then sends one probe each through the webhook profile route, an
+    SNMPv2c trap to port 162 (community `CORRTEST_SNMP_COMMUNITY` from the controller environment)
+    and plain SMTP to port 2526, every 30 s from T+2 to T+147 (smoke: 20 s, T+1 to T+10), not within
+    30 s of a spike, not offered load. Rolling History reads judge each probe at first sighting:
+    in History within 60 s, every label, Source, Source IP, severity warning, firing; 100% or
+    FAIL. Scorecard `Receivers`; `--skip-lane receivers`.
+  - New blocking pre-check B17 (scenarios with the lane): no campaign Mapping left (nor a mapping
+    for the documentation enterprise), the webhook receiver answers its profile route (405 to a
+    GET), the SMTP port answers 220/EHLO/QUIT, and the trap community is set (UDP is not checked).
+  - Upgrade: the database migrates (0013); controller and worker must run the same build.
+
 - New `alerting-day-3ps@v2` and `alerting-day-3ps-smoke@v2` (OSC-189); v1 stays as released.
   - Smoothed correlation pacing (`smoothCorrelationOffers`, off everywhere else): documents start
     so each minute T0-aligned lands on its plan plus the backlog clamped to 2, chosen from the next

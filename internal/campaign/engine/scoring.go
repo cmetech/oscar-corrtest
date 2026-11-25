@@ -72,6 +72,7 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 	if in.History, err = r.e.d.Target.History(ctx, r.id, r.t0, end); err != nil {
 		r.noteMissing("history: " + err.Error())
 	}
+	historyOK := err == nil
 	if r.e.d.Sink != nil {
 		if in.Receipts, err = r.e.d.Sink.Receipts(ctx, "campaign", r.id, r.t0); err != nil {
 			r.noteMissing("sink receipts: " + err.Error())
@@ -123,6 +124,8 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 	}
 	r.v4Score(&card, in, report)
 	r.maintScore(&card, in.Receipts, incidents, report)
+	r.sourceScore(&card, in.History, historyOK, report)
+	r.rxScore(&card, report)
 	if r.s.NativeWorkload != nil {
 		r.nativeScore(ctx, &card, in, end, report)
 	}
@@ -165,6 +168,24 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 		end.Sub(r.t0) >= r.s.Phase("drain").Start && !card.EvidenceIncomplete && card.Verdict != domain.VerdictInconclusive
 	report["reasons"] = card.Reasons
 	return card, mustJSON(report)
+}
+
+// sourceScore judges the Source / Source IP filter actions (OSC-207).
+func (r *run) sourceScore(card *score.Scorecard, history []oscar.HistoryRecord, historyOK bool, report map[string]any) {
+	if !r.s.FrontOffice.SourceFilters {
+		return
+	}
+	r.mu.Lock()
+	samples := append([]score.SourceSample(nil), r.foSrc...)
+	r.mu.Unlock()
+	st, heads, fails, incon := score.JudgeSourceFilters(samples, history, historyOK, r.s.Precheck.ClockSkew, r.s.Limits)
+	for a, p := range st.Actions {
+		card.FrontOffice[a] = p.Percentiles
+	}
+	card.Headlines = append(card.Headlines, heads...)
+	card.SourceFilters = &st
+	report["sourceFilters"] = st
+	judge(card, fails, incon)
 }
 
 // judge applies a facet's verdict: any failure FAILs, missing evidence keeps a PASS from passing.

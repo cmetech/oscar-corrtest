@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/frontoffice"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/guard"
+	"github.com/cmetech/oscar-corrtest/internal/campaign/lane"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/score"
 	"github.com/cmetech/oscar-corrtest/internal/campaign/targetops"
@@ -313,11 +316,24 @@ func (r *run) frontOffice(ctx context.Context) {
 	if len(r.e.d.FrontOfficeUsers) == 0 {
 		return
 	}
+	var src *frontoffice.Sources
+	if r.s.FrontOffice.SourceFilters {
+		src = &frontoffice.Sources{Since: r.t0, Worker: r.s.Baseline.Servers}
+	}
 	frontoffice.Run(ctx, r.e.d.FrontOfficeURL, r.e.d.FrontOfficeHTTP, r.e.d.FrontOfficeUsers, r.s.Baseline.Instances, r.s.Seed,
-		r.s.FrontOffice, r.e.clock, func(a frontoffice.ActionResult) {
+		r.s.FrontOffice, src, r.e.clock, func(a frontoffice.ActionResult) {
 			r.mu.Lock()
-			r.fo[a.Action] = append(r.fo[a.Action], score.FOSample{Seconds: float64(a.LatencyMillis) / 1000, Err: a.Err != ""})
-			r.mu.Unlock()
+			defer r.mu.Unlock()
+			if !slices.Contains(score.SourceActions, a.Action) {
+				r.fo[a.Action] = append(r.fo[a.Action], score.FOSample{Seconds: float64(a.LatencyMillis) / 1000, Err: a.Err != ""})
+				return
+			}
+			ss := score.SourceSample{Action: a.Action, At: a.At, Seconds: float64(a.LatencyMillis) / 1000, Status: a.Status, Err: a.Err}
+			if a.Source != nil && a.Err == "" {
+				ss.Answered, ss.Value, ss.End = true, a.Source.Value, a.Source.End
+				ss.Count, ss.Rows, ss.Mismatch, ss.Unverifiable = a.Source.Count, a.Source.Rows, a.Source.Mismatch, a.Source.Unverifiable
+			}
+			r.foSrc = append(r.foSrc, ss)
 		})
 }
 
@@ -554,6 +570,9 @@ func (r *run) correlate(ctx context.Context, ref scenario.CaseRef, kind string, 
 			}
 			kind = setBTicketRun + ref.Pattern
 		}
+		if n := r.s.Correlation.Servers; n > 0 {
+			serverLabels(&doc, r.s.Baseline.Servers+1+corrServer(r.s.Seed, ref, kind, n))
+		}
 		var res domain.Run
 		r.offer("correlation", false, docAlerts(doc)) // ponytail: counted at the run start, not per injection
 		res, err = r.e.d.Correlate(ctx, r.e.d.TargetID, doc, correlationRun)
@@ -574,6 +593,30 @@ func (r *run) correlate(ctx context.Context, ref scenario.CaseRef, kind string, 
 	r.corrRuns = append(r.corrRuns, cr)
 	r.mu.Unlock()
 	return started
+}
+
+// corrServer is a document's server offset (0..n-1): a function of the
+// seed and the document (pattern, level, set), so every pass of a document
+// uses the same server whatever order parallel starts take.
+func corrServer(seed int64, ref scenario.CaseRef, kind string, n int) int {
+	h := fnv.New32a()
+	_, _ = fmt.Fprintf(h, "%d/%s/%s/%s", seed, ref.Pattern, ref.Level, kind)
+	return int(h.Sum32() % uint32(n)) // #nosec G115 -- n is a small positive server count
+}
+
+// serverLabels (Correlation.Servers, 3ps v3) gives every source alert of the
+// document one server's source labels as case labels; a label a case already
+// sets is kept. No builtin or example groups or matches by these names
+// (groupBy is site/service), so correlation behaviour is unchanged.
+func serverLabels(doc *corr.Scenario, server int) {
+	for i := range doc.Cases {
+		c := &doc.Cases[i]
+		labels := lane.ServerLabels(server)
+		for k, v := range c.Labels {
+			labels[k] = v
+		}
+		c.Labels = labels
+	}
 }
 
 // setBTicketObservation is how long a ticketed set B case observes: OSCAR

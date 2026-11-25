@@ -63,11 +63,17 @@ func (s *amSender) Send(ctx context.Context, e Event, runID, lane string) (int, 
 		ticket = "snow"
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	labels := map[string]string{
+		"alertname": e.Identity, "campaign_run": runID, "campaign_lane": lane,
+		"severity": e.Severity, "instance": e.Instance, "create_ticket": ticket,
+	}
+	if n, ok := ServerOf(e.Instance); ok {
+		for k, v := range ServerLabels(n) {
+			labels[k] = v
+		}
+	}
 	alert := map[string]any{
-		"labels": map[string]string{
-			"alertname": e.Identity, "campaign_run": runID, "campaign_lane": lane,
-			"severity": e.Severity, "instance": e.Instance, "create_ticket": ticket,
-		},
+		"labels":      labels,
 		"annotations": map[string]string{"summary": e.Identity, "description": "OSCAR alerting campaign"},
 		"startsAt":    now,
 	}
