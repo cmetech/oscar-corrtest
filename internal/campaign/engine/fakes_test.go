@@ -142,6 +142,10 @@ type delivery struct {
 // Target, SNOW, Sink and Metrics interfaces. Firings reach History and the
 // sink; create_ticket=snow opens an incident; a resolve adds OSCAR's comment.
 type fakeOSCAR struct {
+	// maintSuppress (OSC-189) is the alerthistory maintenance rule: a window
+	// name when a new row's alert is suppressed at its processing time.
+	maintSuppress func(labels map[string]string, at time.Time) string
+
 	t      *testing.T
 	clock  *scaledClock
 	lane   *laneClock // the worker lane's clock; stamps History and sink rows for lane posts
@@ -378,7 +382,13 @@ func (f *fakeOSCAR) ingest(labels map[string]string, startsAt time.Time, resolve
 	for k, v := range labels {
 		row[k] = v
 	}
-	f.history = append(f.history, &oscar.HistoryRecord{ID: fmt.Sprintf("h%d", len(f.history)+1), AlertName: name, Fingerprint: identity, Status: "firing",
+	status, suppressed := "firing", ""
+	if f.maintSuppress != nil {
+		if suppressed = f.maintSuppress(labels, stamp); suppressed != "" { // OSCAR stores the row suppressed and skips its ticket
+			status, annotations = "suppressed", map[string]string{"suppression_window": suppressed}
+		}
+	}
+	f.history = append(f.history, &oscar.HistoryRecord{ID: fmt.Sprintf("h%d", len(f.history)+1), AlertName: name, Fingerprint: identity, Status: status,
 		StartsAt: startsAt.Truncate(time.Millisecond), CreatedAt: stamp.Add(50 * time.Millisecond), Labels: row, Annotations: annotations})
 	if scoped {
 		if f.fpScoped == nil {
@@ -402,7 +412,7 @@ func (f *fakeOSCAR) ingest(labels map[string]string, startsAt time.Time, resolve
 		f.receipts = append(f.receipts, targetops.Receipt{ReceivedAt: stamp.Add(100 * time.Millisecond),
 			Alerts: []targetops.SinkAlert{{AlertName: name, Status: "firing", Labels: labels}}})
 	}
-	if labels["create_ticket"] == "snow" && f.incidents[name] == nil {
+	if labels["create_ticket"] == "snow" && f.incidents[name] == nil && suppressed == "" {
 		f.incidents[name] = &targetops.Incident{Number: fmt.Sprintf("INC%07d", len(f.incidents)+1), SysID: name, State: "1",
 			ShortDescription: "OSCAR " + name}
 	}
@@ -622,7 +632,7 @@ func (f *fakeOSCAR) PostAlert(_ context.Context, a Alert) (int, error) {
 	}
 	f.posts[a.Name]++
 	amb := a.Name == f.ambiguous && f.posts[a.Name] == 1
-	if !amb && a.Labels["campaign_lane"] != standingLane && a.Labels["campaign_lane"] != fingerprintLane { // not resend cohorts
+	if !amb && a.Labels["campaign_lane"] != standingLane && a.Labels["campaign_lane"] != fingerprintLane && a.Labels["campaign_lane"] != maintLane { // not resend cohorts
 		f.cohort[a.Name] = append(f.cohort[a.Name], delivery{at: f.clock.Now().UTC(), labels: a.Labels})
 	}
 	f.mu.Unlock()
@@ -673,7 +683,7 @@ func (f *fakeOSCAR) PostAlertGroup(_ context.Context, req oscar.AlertGroupReques
 				}
 				continue
 			}
-			if h.Labels["am_fingerprint"] == a.Fingerprint && want.Equal(starts) && h.Status == "firing" {
+			if h.Labels["am_fingerprint"] == a.Fingerprint && want.Equal(starts) && (h.Status == "firing" || h.Status == "suppressed") {
 				h.Status = "resolved"
 				if inc := f.incidents[h.AlertName]; inc != nil && !f.withholdComments {
 					inc.Comments = append(inc.Comments, targetops.Comment{Value: "[OSCAR AUTO-UPDATE 1] Alert has been resolved"})

@@ -355,6 +355,10 @@ func (r *run) correlation(ctx context.Context) {
 	r.plannedCorr += len(setA)
 	r.mu.Unlock()
 	if r.s.Correlation.Cycle {
+		if r.s.SmoothCorrelationOffers && r.s.Correlation.Rate > 0 {
+			r.smoothCorrelation(ctx)
+			return
+		}
 		r.cycleCorrelation(ctx)
 		return
 	}
@@ -406,25 +410,7 @@ func (r *run) correlation(ctx context.Context) {
 // start, like set B, and stop cycleMargin before the drain.
 func (r *run) cycleCorrelation(ctx context.Context) {
 	c := r.s.Correlation
-	type item struct {
-		ref    scenario.CaseRef
-		kind   string
-		ticket bool
-		alerts float64
-	}
-	var items []item
-	for _, ref := range c.SetA {
-		items = append(items, item{ref: ref, kind: "setA"})
-	}
-	for _, ref := range c.SetB {
-		items = append(items, item{ref: ref, kind: "setB", ticket: containsFold(c.TicketedPatterns, ref.Pattern)})
-	}
-	for i := range items {
-		items[i].alerts = 1
-		if doc, err := caseDoc(items[i].ref); err == nil {
-			items[i].alerts = float64(docAlerts(doc))
-		}
-	}
+	items := corrItems(c)
 	slots := make(chan struct{}, max(c.Parallel, 1))
 	var inFlight sync.WaitGroup
 	defer inFlight.Wait() // the lane ends when its last run does
@@ -478,6 +464,32 @@ func (r *run) cycleCorrelation(ctx context.Context) {
 			}
 		}()
 	}
+}
+
+// corrItem is one cycling correlation document and the firing alerts it offers.
+type corrItem struct {
+	ref    scenario.CaseRef
+	kind   string
+	ticket bool
+	alerts float64
+}
+
+// corrItems is one pass of the cycle: set A, then set B (ticketed patterns marked).
+func corrItems(c scenario.CorrelationSpec) []corrItem {
+	var items []corrItem
+	for _, ref := range c.SetA {
+		items = append(items, corrItem{ref: ref, kind: "setA"})
+	}
+	for _, ref := range c.SetB {
+		items = append(items, corrItem{ref: ref, kind: "setB", ticket: containsFold(c.TicketedPatterns, ref.Pattern)})
+	}
+	for i := range items {
+		items[i].alerts = 1
+		if doc, err := caseDoc(items[i].ref); err == nil {
+			items[i].alerts = float64(docAlerts(doc))
+		}
+	}
+	return items
 }
 
 // correlationRate is the paced correlation rate at t: SpikeRate inside a

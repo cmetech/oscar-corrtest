@@ -80,3 +80,14 @@ func TaskRunnable(job, status string, err error) Result {
 func SkippedLane(id, lane string) Result {
 	return Result{ID: id, Tier: Advisory, Status: Skipped, Measured: "skipped (by option --skip-lane " + lane + ")"}
 }
+
+// MaintenanceReady is B16 (OSC-189, blocking): the maintenance lane's user
+// (fo-01) can manage maintenance windows, no always-applied pattern would
+// join the campaign window, and no campaign maintenance object remains.
+// problems come from the caller's checks; err is a failed read.
+func MaintenanceReady(measured string, problems []string, err error) Result {
+	if err != nil {
+		return errRes("B16", Blocking, "maintenance API as fo-01", err)
+	}
+	return res("B16", Blocking, true, measured, problems)
+}

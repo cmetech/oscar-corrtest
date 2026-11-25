@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- New `alerting-day-3ps@v2` and `alerting-day-3ps-smoke@v2` (OSC-189); v1 stays as released.
+  - Smoothed correlation pacing (`smoothCorrelationOffers`, off everywhere else): documents start
+    so each minute T0-aligned lands on its plan plus the backlog clamped to 2, chosen from the next
+    12 by the best fill, the oldest first once it has waited a minute. Engine synctest per minute
+    T+5..T+144 on fake time: v1 36 -8/+7, v2 36 -2/+2 (totals exact), so a minute totals 177-183
+    against the offered-rate check's 171-189; with every wake 3 ms late, as on a real clock,
+    v2 stays within -3/+3 and 0.1% of plan (each minute is planned from its boundary). Live UNRUN. The smoke stays within -2/+2 per minute with an even mix
+    (96 of 108 alerts: documents of 10 and 6 cannot fill 12 a minute evenly). No tolerance changed.
+  - Maintenance-mode lane (`maintenance` facet): as fo-01, a campaign pattern (`campaign_maint`
+    equals the run token), a template and a scheduled window for the alerthistory handler only
+    (main T+70 for 5 minutes, smoke T+8 for 3), set up 4 (2) minutes before. Inside probes
+    (create_ticket=snow) must read `suppressed` with `suppression_window=<cr>` and get no
+    incident; non-matching controls and matching probes after the end must not; status reads
+    scheduled, active, expired on time; an always-applied pattern in the enable answer FAILs and
+    disables the window. Probes are judged by their History `createdAt` (processed after the end:
+    not judged) and are not offered load. The window, template and pattern are journalled
+    (`maint_window`, `maint_template`, `maint_pattern`; SQLite migration 0012) and removed with
+    read-back (an expired window still holds its rules, so removal means OSCAR has no window).
+    Scorecard `Maintenance` section; `--skip-lane maintenance`.
+  - New blocking pre-check B16 (scenarios with the lane): fo-01 can read and manage maintenance
+    (`manage:maintenance-windows`; a probe pattern is created and deleted), no always-applied
+    pattern exists, and no campaign pattern, template or window remains.
+  - Upgrade: the database migrates (0012 rebuilds campaign_mutations); older binaries do not know
+    the new kinds. Controller and worker must run the same build.
+
 - New `alerting-day-3ps@v1` (comparable) and `alerting-day-3ps-smoke@v1` (never comparable), OSC-184:
   `alerting-day@v4` and its smoke at a total offered firing rate of 3/s, and 6/s in 1-minute spikes
   (main: T+45 and T+105; smoke: T+4 and T+7). The main run keeps v4's shares: correlation 0.6/s

@@ -122,6 +122,7 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 		judge(&card, fails, incon)
 	}
 	r.v4Score(&card, in, report)
+	r.maintScore(&card, in.Receipts, incidents, report)
 	if r.s.NativeWorkload != nil {
 		r.nativeScore(ctx, &card, in, end, report)
 	}

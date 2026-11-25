@@ -141,6 +141,20 @@ type ReportSpec struct {
 	Timeout time.Duration   `json:"timeout"`
 }
 
+// MaintenanceSpec (OSC-189) is the maintenance-mode lane: at At, a campaign
+// pattern, template and scheduled window for the alerthistory handler are
+// created; the window runs [Start, Start+For). Probes are posted every Every:
+// matching ones from Start+5s while they can still be processed Lag before the
+// end, non-matching controls alongside, and matching ones for a minute after
+// the end. Probes are not offered load.
+type MaintenanceSpec struct {
+	At    time.Duration `json:"at"`
+	Start time.Duration `json:"start"`
+	For   time.Duration `json:"for"`
+	Every time.Duration `json:"every"`
+	Lag   time.Duration `json:"lag"`
+}
+
 type FrontOfficeSpec struct {
 	Users       int           `json:"users"`
 	Interval    time.Duration `json:"interval"`
@@ -299,6 +313,12 @@ type Scenario struct {
 	// v4's (V4TotalRate, V4SpikeRate), so v4's hash is unchanged.
 	OfferedRate      float64 `json:"offeredRate,omitempty"`
 	OfferedSpikeRate float64 `json:"offeredSpikeRate,omitempty"`
+	// SmoothCorrelationOffers (OSC-189) paces a cycling correlation lane so
+	// every minute lands near its plan (engine smoothCorrelation) instead of
+	// starting documents as pacing credit allows; false keeps that pacer.
+	SmoothCorrelationOffers bool `json:"smoothCorrelationOffers,omitempty"`
+	// Maintenance is the maintenance-mode lane facet; nil runs no lane.
+	Maintenance *MaintenanceSpec `json:"maintenance,omitempty"`
 }
 
 // TransportDedupWindow is OSCAR's JetStream duplicate window for ordinary alerts
@@ -742,9 +762,36 @@ func AlertingDay3psSmokeV1() Scenario {
 	return s
 }
 
+// AlertingDay3psV2 is alerting-day-3ps@v1 with smoothed correlation pacing
+// (OSC-189): v1's documents start as credit allows and swing a minute's
+// correlation offers by about one document (36 -8/+7), against a 5%
+// offered-rate tolerance of 9 alerts at 3/s. v1 is released and frozen by
+// hash, so the change is a new version.
+//
+// v2 also adds the maintenance-mode lane (OSC-189): a 5-minute window at
+// T+70, between the spikes, after setup at T+66, probes every 20 s.
+func AlertingDay3psV2() Scenario {
+	s := AlertingDay3psV1()
+	s.Version, s.SmoothCorrelationOffers = "v2", true
+	s.Maintenance = &MaintenanceSpec{At: 66 * time.Minute, Start: 70 * time.Minute, For: 5 * time.Minute, Every: 20 * time.Second, Lag: 45 * time.Second}
+	return s
+}
+
+// AlertingDay3psSmokeV2 is alerting-day-3ps-smoke@v1 with smoothed
+// correlation pacing and a 3-minute maintenance window. Custom: never
+// comparable.
+func AlertingDay3psSmokeV2() Scenario {
+	s := AlertingDay3psSmokeV1()
+	s.Version, s.SmoothCorrelationOffers = "v2", true
+	// After the T+4 and T+7 spikes: setup at T+6, window T+8 to T+11, after
+	// probes until T+12:05 (the drain waits for the lane).
+	s.Maintenance = &MaintenanceSpec{At: 6 * time.Minute, Start: 8 * time.Minute, For: 3 * time.Minute, Every: 10 * time.Second, Lag: 45 * time.Second}
+	return s
+}
+
 // Builtins are the built-in campaign scenarios.
 func Builtins() []Scenario {
-	return []Scenario{AlertingDayV1(), AlertingDayV2(), AlertingDaySmokeV1(), AlertingDaySmokeV2(), DeliveryRetryV1(), ResendOnlyV1(), FunctionalV1(), FunctionalBurstV1(), FunctionalBurstFullV1(), AlertingDayControlV1(), AlertingDayV3(), AlertingDaySmokeV3(), ManagedAlertsSmokeV1(), AlertingDayV4(), AlertingDaySmokeV4(), AlertingDay3psV1(), AlertingDay3psSmokeV1()}
+	return []Scenario{AlertingDayV1(), AlertingDayV2(), AlertingDaySmokeV1(), AlertingDaySmokeV2(), DeliveryRetryV1(), ResendOnlyV1(), FunctionalV1(), FunctionalBurstV1(), FunctionalBurstFullV1(), AlertingDayControlV1(), AlertingDayV3(), AlertingDaySmokeV3(), ManagedAlertsSmokeV1(), AlertingDayV4(), AlertingDaySmokeV4(), AlertingDay3psV1(), AlertingDay3psSmokeV1(), AlertingDay3psV2(), AlertingDay3psSmokeV2()}
 }
 
 // Lookup returns the built-in scenario named "id@version".
@@ -835,7 +882,8 @@ func canon(v reflect.Value) any {
 // "skipped (by option)" rather than passing. The scenario and its hash are
 // unchanged.
 var SkippableLanes = map[string]func(Scenario) bool{
-	"report": func(s Scenario) bool { return s.Report != nil },
+	"report":      func(s Scenario) bool { return s.Report != nil },
+	"maintenance": func(s Scenario) bool { return s.Maintenance != nil },
 }
 
 // ValidateSkipLanes rejects an unknown lane, or one the scenario does not have.
@@ -843,7 +891,7 @@ func ValidateSkipLanes(s Scenario, lanes []string) error {
 	for _, l := range lanes {
 		has, ok := SkippableLanes[l]
 		if !ok {
-			return fmt.Errorf("lane %q cannot be skipped (skippable: report)", l)
+			return fmt.Errorf("lane %q cannot be skipped (skippable: report, maintenance)", l)
 		}
 		if !has(s) {
 			return fmt.Errorf("%s@%s has no %s lane to skip", s.ID, s.Version, l)
