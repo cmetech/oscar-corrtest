@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"slices"
 	"strings"
 	"sync"
@@ -570,11 +571,7 @@ func (r *run) correlate(ctx context.Context, ref scenario.CaseRef, kind string, 
 			kind = setBTicketRun + ref.Pattern
 		}
 		if n := r.s.Correlation.Servers; n > 0 {
-			r.mu.Lock()
-			server := r.s.Baseline.Servers + 1 + r.corrDocs%n
-			r.corrDocs++
-			r.mu.Unlock()
-			serverLabels(&doc, server)
+			serverLabels(&doc, r.s.Baseline.Servers+1+corrServer(r.s.Seed, ref, kind, n))
 		}
 		var res domain.Run
 		r.offer("correlation", false, docAlerts(doc)) // ponytail: counted at the run start, not per injection
@@ -596,6 +593,15 @@ func (r *run) correlate(ctx context.Context, ref scenario.CaseRef, kind string, 
 	r.corrRuns = append(r.corrRuns, cr)
 	r.mu.Unlock()
 	return started
+}
+
+// corrServer is a document's server offset (0..n-1): a function of the
+// seed and the document (pattern, level, set), so every pass of a document
+// uses the same server whatever order parallel starts take.
+func corrServer(seed int64, ref scenario.CaseRef, kind string, n int) int {
+	h := fnv.New32a()
+	_, _ = fmt.Fprintf(h, "%d/%s/%s/%s", seed, ref.Pattern, ref.Level, kind)
+	return int(h.Sum32() % uint32(n)) // #nosec G115 -- n is a small positive server count
 }
 
 // serverLabels (Correlation.Servers, 3ps v3) gives every source alert of the

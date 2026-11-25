@@ -223,7 +223,9 @@ func sourceAnswer(action, value string, body io.Reader) (*SourceResult, error) {
 			}
 		}
 		switch {
-		case len(labels) == 0: // withheld labels (a correlation parent): nothing to derive from
+		case labels["meta_hostname"] == "" && labels["meta_ipaddress"] == "" && labels["instance"] == "" && labels["node"] == "":
+			// no source label shown (a correlation parent whose labels /history withholds
+			// matches on its stored value): nothing to derive from
 			res.Unverifiable++
 		case !score.MatchesSourceFilter(action, value, labels):
 			res.Mismatch++

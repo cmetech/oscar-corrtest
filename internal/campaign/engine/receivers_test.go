@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -52,7 +53,9 @@ func (f *fakeRx) Mapping(_ context.Context, ns, name string) ([]receivers.Mappin
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	els, ok := f.mappings[key(ns, name)]
-	return els, ok, nil
+	out := slices.Clone(els) // OSCAR answers in its index order, not write order (code review F1)
+	slices.Reverse(out)
+	return out, ok, nil
 }
 
 func (f *fakeRx) MappingNames(_ context.Context, ns, prefix string) ([]string, error) {
@@ -294,6 +297,22 @@ func TestPrecheckReceivers(t *testing.T) {
 	r := precheckReceivers(context.Background(), f)
 	if r.Status != precheck.Fail || !strings.Contains(fmt.Sprint(r), "ct-rx-old") || !strings.Contains(fmt.Sprint(r), receivers.TrapEnterpriseOID) {
 		t.Errorf("leftovers: %+v", r)
+	}
+}
+
+// TestCorrServerSeeded (AC-1, code review F2): a document's server depends
+// only on the seed and the document, and the documents spread over servers.
+func TestCorrServerSeeded(t *testing.T) {
+	seen := map[int]bool{}
+	for _, ref := range scenario.AlertingDay3psV3().Correlation.SetA {
+		a, b := corrServer(20261113, ref, "setA", 8), corrServer(20261113, ref, "setA", 8)
+		if a != b || a < 0 || a >= 8 {
+			t.Fatalf("%v: %d %d", ref, a, b)
+		}
+		seen[a] = true
+	}
+	if len(seen) < 5 {
+		t.Errorf("set A uses only %d of 8 servers", len(seen))
 	}
 }
 

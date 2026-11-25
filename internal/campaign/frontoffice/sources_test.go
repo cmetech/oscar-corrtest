@@ -58,7 +58,7 @@ func history(bad bool) http.HandlerFunc {
 			recs = append(recs, map[string]any{"alertname": fmt.Sprint("A", n), "labels": ls})
 		}
 		if bad {
-			recs = append(recs, map[string]any{"alertname": "wrong", "labels": []label{{"meta_hostname", "zz.home.arpa"}}}, map[string]any{"alertname": "nolabels", "labels": []label{}})
+			recs = append(recs, map[string]any{"alertname": "wrong", "labels": []label{{"meta_hostname", "zz.home.arpa"}}}, map[string]any{"alertname": "parent", "labels": []label{{"alertname", "P"}, {"severity", "warning"}}})
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"total_records": len(recs) + 100, "records": recs})
 	}

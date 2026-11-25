@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -209,11 +208,24 @@ func (r *run) rxSetup(ctx context.Context, ops ReceiverOps) ([]int64, error) {
 			return ids, fmt.Errorf("create %s/%s: %w", x.m.Namespace, x.m.Name, err)
 		}
 		els, found, err := ops.Mapping(ctx, x.m.Namespace, x.m.Name)
-		if err != nil || !found || !reflect.DeepEqual(els, x.els) {
-			return ids, fmt.Errorf("read-back %s/%s: found %v, elements equal %v, err %v", x.m.Namespace, x.m.Name, found, reflect.DeepEqual(els, x.els), err)
+		if err != nil || !found || !sameElements(els, x.els) {
+			return ids, fmt.Errorf("read-back %s/%s: found %v, elements equal %v, err %v", x.m.Namespace, x.m.Name, found, sameElements(els, x.els), err)
 		}
 	}
 	return ids, nil
+}
+
+// sameElements compares Mapping elements as a set: OSCAR returns them in
+// its index order (random UUID keys), not the order they were written.
+func sameElements(a, b []receivers.MappingElement) bool {
+	sorted := func(x []receivers.MappingElement) []receivers.MappingElement {
+		x = slices.Clone(x)
+		slices.SortFunc(x, func(p, q receivers.MappingElement) int {
+			return strings.Compare(p.Key+"\x00"+p.Value, q.Key+"\x00"+q.Value)
+		})
+		return x
+	}
+	return slices.Equal(sorted(a), sorted(b))
 }
 
 // rxRemove restores the lane's mutations (newest first); true when all are

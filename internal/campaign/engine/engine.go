@@ -230,8 +230,6 @@ type run struct {
 	maint score.MaintenanceStats // OSC-189 maintenance-mode lane
 	rx    score.ReceiverStats    // OSC-207 receivers lane
 	foSrc []score.SourceSample   // OSC-207 source filter answers
-	// corrDocs counts started correlation documents (server round robin).
-	corrDocs int
 }
 
 type policyState struct {

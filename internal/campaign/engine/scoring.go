@@ -170,7 +170,6 @@ func (r *run) scoreRun(ctx context.Context, end time.Time, incidents []targetops
 	return card, mustJSON(report)
 }
 
-// judge applies a facet's verdict: any failure FAILs, missing evidence keeps a PASS from passing.
 // sourceScore judges the Source / Source IP filter actions (OSC-207).
 func (r *run) sourceScore(card *score.Scorecard, history []oscar.HistoryRecord, historyOK bool, report map[string]any) {
 	if !r.s.FrontOffice.SourceFilters {
@@ -189,6 +188,7 @@ func (r *run) sourceScore(card *score.Scorecard, history []oscar.HistoryRecord, 
 	judge(card, fails, incon)
 }
 
+// judge applies a facet's verdict: any failure FAILs, missing evidence keeps a PASS from passing.
 func judge(card *score.Scorecard, fails, incon []string) {
 	if len(incon) > 0 {
 		card.EvidenceIncomplete = true
