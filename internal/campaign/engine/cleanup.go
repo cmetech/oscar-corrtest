@@ -448,6 +448,8 @@ func (r *run) restore(ctx context.Context, m domain.CampaignMutation) (err error
 		return r.restoreAlertLimits(ctx, m.Prior)
 	case kindFingerprintPolicy:
 		return r.disableFingerprint(ctx)
+	case kindMaintWindow, kindMaintTemplate, kindMaintPattern:
+		return r.restoreMaint(ctx, m)
 	case kindSilence, kindInhibitor:
 		return r.restoreSuppression(ctx, m)
 	case kindManagedOwner:

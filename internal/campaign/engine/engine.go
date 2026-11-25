@@ -156,6 +156,9 @@ type Deps struct {
 	Fingerprint FingerprintPolicies
 	// UserOps runs v4 tasks and reports as a user account; nil leaves those lanes without evidence.
 	UserOps UserOps
+	// Maintenance is OSCAR's maintenance-mode API as the same user; nil leaves
+	// the maintenance lane without evidence.
+	Maintenance MaintOps
 }
 
 // Engine implements runtime.CampaignEngine.
@@ -221,6 +224,8 @@ type run struct {
 	tasks         score.TaskExecStats // v4 on-demand task runs
 	reports       score.ReportStats   // v4 alert reports
 	laneStarts    []time.Time         // when the paced controller lanes reached full load (offered-rate warm-up)
+
+	maint score.MaintenanceStats // OSC-189 maintenance-mode lane
 }
 
 type policyState struct {
@@ -483,7 +488,7 @@ func (r *run) execute(ctx context.Context) error {
 	go func() { defer bg.Done(); r.guards(phaseCtx, func() { stopPhases(); stopFO() }) }()
 
 	var work sync.WaitGroup
-	work.Add(8)
+	work.Add(9)
 	go func() { defer work.Done(); r.managedPhase(phaseCtx) }()
 	go func() { defer work.Done(); r.nativeOrdinaryPhase(phaseCtx) }()
 	go func() { defer work.Done(); r.correlation(phaseCtx) }()
@@ -492,6 +497,7 @@ func (r *run) execute(ctx context.Context) error {
 	go func() { defer work.Done(); r.fingerprintPhase(phaseCtx) }() // facet only
 	go func() { defer work.Done(); r.taskPhase(phaseCtx) }()        // v4 only
 	go func() { defer work.Done(); r.reportPhase(phaseCtx) }()      // v4 only
+	go func() { defer work.Done(); r.maintenancePhase(phaseCtx) }() // facet only
 	work.Wait()
 	// Firings end at the drain phase start (or earlier on a trip/stop).
 	if r.e.clock.SleepUntil(phaseCtx, r.at("drain", false)) {

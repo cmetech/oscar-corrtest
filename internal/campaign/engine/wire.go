@@ -122,6 +122,7 @@ func NewFromConfig(ctx context.Context, cfg campaign.Config, host Host) (*Engine
 	}
 	if len(users) > 0 { // v4 tasks and reports refuse system-owned keys: use the first front-office user
 		d.UserOps = targetops.UserAPI{Root: root, Key: users[0].APIKey, HTTP: targetHTTP}
+		d.Maintenance = targetops.UserAPI{Root: root, Key: users[0].APIKey, HTTP: targetHTTP}
 	}
 	d.TaskRuns = func(ctx context.Context, start, end time.Time) ([]targetops.TaskRun, error) {
 		return targetops.TaskRuns(ctx, oc, precheck.HomelabJobs, start, end)
@@ -167,8 +168,9 @@ func NewFromConfig(ctx context.Context, cfg campaign.Config, host Host) (*Engine
 }
 
 // v4Prechecks are the blocking v4 checks: B12 escalation scheduling, B14
-// fingerprint policies commissioned, B15 one task run succeeds, B13 alert
-// report approved; each only for a scenario with that lane.
+// fingerprint policies commissioned, B15 one task run succeeds, B16
+// maintenance API usable and clean, B13 alert report approved; each only for
+// a scenario with that lane.
 func v4Prechecks(ctx context.Context, d Deps, s scenario.Scenario) []precheck.Result {
 	var out []precheck.Result
 	if precheck.NeedsEscalation(s) {
@@ -199,6 +201,16 @@ func v4Prechecks(ctx context.Context, d Deps, s scenario.Scenario) []precheck.Re
 			status, err = precheckTask(ctx, d.UserOps, t)
 		}
 		out = append(out, precheck.TaskRunnable(t.Job, status, err))
+	}
+	if s.Maintenance != nil {
+		switch {
+		case skipped(ctx, maintLane):
+			out = append(out, precheck.SkippedLane("B16", maintLane))
+		case d.Maintenance == nil:
+			out = append(out, precheck.MaintenanceReady("", nil, errors.New("no front-office user credential (campaign-fo)")))
+		default:
+			out = append(out, precheck.MaintenanceReady(precheckMaint(ctx, d.Maintenance)))
+		}
 	}
 	if r := s.Report; r != nil {
 		if skipped(ctx, "report") {

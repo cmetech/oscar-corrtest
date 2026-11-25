@@ -129,6 +129,7 @@ type Scorecard struct {
 	TaskExec                     *TaskExecStats    `json:",omitempty"` // v4 on-demand task runs
 	HomelabHealth                *HomelabHealth    `json:",omitempty"` // v4 scheduled homelab job gate
 	Reports                      *ReportStats      `json:",omitempty"` // v4 alert reports
+	Maintenance                  *MaintenanceStats `json:",omitempty"` // OSC-189 maintenance-mode lane
 	SkippedLanes                 []string          `json:",omitempty"` // lanes switched off by run option: never a pass
 	Verdict                      domain.Verdict
 	EvidenceIncomplete           bool `json:",omitempty"`
