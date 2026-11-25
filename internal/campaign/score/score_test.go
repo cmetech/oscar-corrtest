@@ -521,6 +521,9 @@ func TestConfiguredComparisonRequiresSavedShareAndSameObserver(t *testing.T) {
 // compare refuses the pair in both modes, whichever hash is requested.
 func TestCompareRefuses3psAgainstV4(t *testing.T) {
 	v4, threePS := scenario.AlertingDayV4(), scenario.AlertingDay3psV1()
+	if v4.Hash() == threePS.Hash() {
+		t.Fatal("3ps must be its own workload")
+	}
 	ref := identifiedScorecard("v4", domain.CampaignConfiguredPolicyReference, v4, 100, t0)
 	candidate := identifiedScorecard("3ps", domain.CampaignConfiguredPolicyCandidate, threePS, 90, t0.Add(4*time.Hour))
 	for _, mode := range []ComparisonMode{ControlBeforeAfter, ConfiguredPolicy} {

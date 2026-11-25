@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -17,19 +18,24 @@ import (
 
 // TestV4OfferedBudgetUsesScenarioTotals (OSC-184 AC-3): the offered-rate
 // check judges against the scenario's own totals, and v4's 5/s when it sets
-// none. The harness offers well over 1/s, so a 1/s total reads over budget.
+// none. The harness offers well over 1/s (and 2/s), so with totals 1/s and
+// 2/s every minute reads over budget: T+1, a burst minute, against 2/s, the
+// others against 1/s.
 func TestV4OfferedBudgetUsesScenarioTotals(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name        string
 		total, peak float64
-		want        string
-	}{{"scenario", 1, 2, "/s, budget 1/s)"}, {"v4-default", 0, 0, " 5/s)"}} {
+		want        []string
+	}{{"scenario", 1, 2, []string{`T\+1 \([0-9.]+/s, budget 2/s\)`, `T\+[02-9] \([0-9.]+/s, budget 1/s\)`}}, {"v4-default", 0, 0, []string{` 5/s\)`}}} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			synctest.Test(t, func(t *testing.T) {
 				h, _ := v4Harness(t)
 				h.s.OfferedRate, h.s.OfferedSpikeRate = tc.total, tc.peak
+				if tc.peak > 0 { // a burst at the baseline rate: only the budget changes in T+1
+					h.s.Baseline.Bursts = []scenario.BurstSpec{{At: time.Minute, For: time.Minute, Rate: h.s.Baseline.Rate}}
+				}
 				h.oscar.s = h.s
 				if err := h.run(context.Background()); err != nil {
 					t.Fatal(err)
@@ -38,17 +44,20 @@ func TestV4OfferedBudgetUsesScenarioTotals(t *testing.T) {
 				if err := json.Unmarshal(h.campaign().Scorecard, &card); err != nil {
 					t.Fatal(err)
 				}
-				found := false
+				var offered []string
 				for _, r := range card.Reasons {
 					if strings.HasPrefix(r, "offered rate") {
-						found = found || strings.Contains(r, tc.want)
-						if tc.total == 0 && strings.Contains(r, " 1/s)") {
-							t.Errorf("v4 default judged against 1/s: %s", r)
+						offered = append(offered, r)
+						if tc.total == 0 && (strings.Contains(r, " 1/s)") || strings.Contains(r, " 2/s)")) {
+							t.Errorf("v4 default judged against the scenario-test totals: %s", r)
 						}
 					}
 				}
-				if !found {
-					t.Errorf("no offered-rate reason containing %q: %v", tc.want, card.Reasons)
+				all := strings.Join(offered, "; ")
+				for _, w := range tc.want {
+					if !regexp.MustCompile(w).MatchString(all) {
+						t.Errorf("no offered-rate reason matching %q: %v", w, card.Reasons)
+					}
 				}
 			})
 		})
