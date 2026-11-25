@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/scenario"
@@ -18,7 +19,7 @@ import (
 // UserOps is the v4 task and report surface, called as a user account
 // (targetops.UserAPI with the first front-office user's key).
 type UserOps interface {
-	RunTask(ctx context.Context, job string) (string, error)
+	RunTask(ctx context.Context, job, idempotencyKey string) (string, error)
 	TaskResult(ctx context.Context, id string) (status string, done bool, err error)
 	Report(ctx context.Context, key string) (targetops.ReportInfo, error)
 	RunReport(ctx context.Context, id, requestID string, start, end time.Time) (runID, state string, err error)
@@ -68,8 +69,9 @@ func firingEvents(doc corr.Scenario) int {
 	return n
 }
 
-// taskPhase runs the homelab task through OSCAR's task API every Every from
-// At, one run at a time, until the drain.
+// taskPhase runs the homelab task through OSCAR's task API on the spec's
+// schedule until the drain: each request starts its runs at once, without
+// waiting for earlier runs, and the phase returns when every run has ended.
 func (r *run) taskPhase(ctx context.Context) {
 	spec := r.s.Tasks
 	if spec == nil {
@@ -80,33 +82,43 @@ func (r *run) taskPhase(ctx context.Context) {
 		r.tasks.NotRun = why
 		r.mu.Unlock()
 	}
+	reqs := spec.Requests(r.s.Phase("drain").Start)
 	r.mu.Lock()
 	r.tasks.Job = spec.Job
+	for _, q := range reqs {
+		r.tasks.Planned += q.Runs
+	}
 	r.mu.Unlock()
 	if r.e.d.UserOps == nil {
 		note("no front-office user credential for the task API")
 		return
 	}
-	stop := r.at("drain", false)
-	for k := 0; ; k++ {
-		at := r.t0.Add(spec.At + time.Duration(k)*spec.Every)
-		if spec.Every <= 0 && k > 0 || !at.Add(spec.Timeout).Before(stop) || !r.e.clock.SleepUntil(ctx, at) {
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	for _, q := range reqs {
+		if !r.e.clock.SleepUntil(ctx, r.t0.Add(q.At)) {
 			return
 		}
-		run := r.execTask(ctx, spec.Job, spec.Timeout)
-		if ctx.Err() != nil && run.Status == "" {
-			return // stopped mid-run: not evidence either way
+		for range q.Runs {
+			wg.Go(func() {
+				run := r.execTask(ctx, spec.Job, spec.Timeout)
+				if ctx.Err() != nil && run.Status == "" {
+					return // stopped mid-run: not evidence either way
+				}
+				r.mu.Lock()
+				r.tasks.Runs = append(r.tasks.Runs, run)
+				r.mu.Unlock()
+			})
 		}
-		r.mu.Lock()
-		r.tasks.Runs = append(r.tasks.Runs, run)
-		r.mu.Unlock()
 	}
 }
 
+// execTask requests one run with its own idempotency key and polls it to a
+// terminal state within timeout.
 func (r *run) execTask(ctx context.Context, job string, timeout time.Duration) score.TaskExecRun {
 	start := r.now()
-	out := score.TaskExecRun{At: start}
-	id, err := r.e.d.UserOps.RunTask(ctx, job)
+	out := score.TaskExecRun{At: start, Key: newUUID()}
+	id, err := r.e.d.UserOps.RunTask(ctx, job, out.Key)
 	if err != nil {
 		out.Status, out.Err = "unknown", err.Error() // transport error: the run may or may not exist
 		var se *targetops.StatusError
@@ -269,6 +281,19 @@ func (r *run) v4Score(card *score.Scorecard, in score.Inputs, report map[string]
 		card.Headlines = append(card.Headlines, h...)
 		card.TaskExec = &tasks
 		report["taskExec"] = tasks
+		judge(card, fails, incon)
+	}
+	if r.s.Limits.HomelabFailRise > 0 {
+		loadEnd := r.at("drain", false)
+		r.mu.Lock()
+		if stop := r.laneStopAt; !stop.IsZero() && stop.Before(loadEnd) { // the run ended early
+			loadEnd = stop
+		}
+		r.mu.Unlock()
+		hh, heads, fails, incon := score.JudgeHomelab(in.PreTasks, in.Tasks, in.TasksCollected, in.TasksNotCollected, r.t0, loadEnd, r.s.Limits.HomelabFailRise)
+		card.Headlines = append(card.Headlines, heads...)
+		card.HomelabHealth = &hh
+		report["homelabHealth"] = hh
 		judge(card, fails, incon)
 	}
 	if slices.Contains(r.opts.SkipLanes, "report") {

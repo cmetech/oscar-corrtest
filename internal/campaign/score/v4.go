@@ -216,19 +216,24 @@ func JudgeEscalation(eps []EscalationEpisode, receipts []targetops.Receipt, targ
 	return r, why
 }
 
-// TaskExecRun is one on-demand task run: requested At, OSCAR's run id, its
-// terminal status (or error/timeout) and request-to-terminal seconds.
+// TaskExecRun is one on-demand task run: requested At with its idempotency
+// Key, OSCAR's run id, its terminal status (or error/timeout) and
+// request-to-terminal seconds.
 type TaskExecRun struct {
 	At      time.Time
+	Key     string `json:",omitempty"`
 	ID      string `json:",omitempty"`
 	Status  string
 	Seconds float64
 	Err     string `json:",omitempty"`
 }
 
-// TaskExecStats is the v4 on-demand task lane.
+// TaskExecStats is the v4 on-demand task lane: Planned runs (a burst
+// request counts each of its runs) and the runs requested. Task requests are
+// not alerts: they never enter the offered rate.
 type TaskExecStats struct {
 	Job                        string
+	Planned                    int `json:",omitempty"`
 	Runs                       []TaskExecRun
 	Succeeded, Failed, Unknown int
 	SuccessRatio, P95          float64
@@ -253,6 +258,9 @@ func (s *TaskExecStats) Judge(minSuccess float64, maxP95 time.Duration) (h []Hea
 	}
 	if s.Unknown > 0 {
 		incon = append(incon, fmt.Sprintf("task executions: %d of %d runs with an unknown outcome", s.Unknown, len(s.Runs)))
+	}
+	if len(s.Runs) < s.Planned {
+		incon = append(incon, fmt.Sprintf("task executions: %d of %d planned runs requested", len(s.Runs), s.Planned))
 	}
 	if s.Succeeded+s.Failed == 0 {
 		why := s.NotRun
@@ -340,4 +348,107 @@ func (s ReportStats) Judge(historyP95 time.Duration) (fails, incon []string) {
 		}
 	}
 	return fails, incon
+}
+
+// HomelabBaseline is the window before T0 the homelab job health is
+// compared with.
+const HomelabBaseline = 30 * time.Minute
+
+// homelabBatch: OSCAR writes one history row per host of a run, all started
+// within seconds; rows this close are one run when measuring cadence.
+const homelabBatch = time.Minute
+
+// HomelabHealth compares the homelab pack's scheduled job runs during load
+// with the HomelabBaseline before T0. A run fails unless it is SUCCESS
+// (EXPIRED, UNKNOWN and runs still unfinished when the history is read
+// count as failures). A job class (the job name) stopped when a gap between
+// its runs during load (from T0, between runs, to the end of load) exceeds
+// twice its largest baseline gap between runs (rows of one run's hosts count
+// once; the whole baseline when it ran once); a
+// class whose threshold exceeds the load window is NotJudged.
+type HomelabHealth struct {
+	BaselineRuns, BaselineFailed   int
+	LoadRuns, LoadFailed           int
+	BaselineFailRate, LoadFailRate float64
+	Stopped, NotJudged             []string `json:",omitempty"`
+}
+
+// JudgeHomelab gates the scheduled homelab jobs: a failure rate during load
+// [t0, loadEnd) more than maxRise above the baseline, or a stopped job class,
+// FAILs; task history not collected, or no scheduled run in the baseline, is
+// INCONCLUSIVE. pre and during are the task history reads before and after T0.
+func JudgeHomelab(pre, during []targetops.TaskRun, collected bool, why string, t0, loadEnd time.Time, maxRise float64) (h HomelabHealth, heads []Headline, fails, incon []string) {
+	if !collected {
+		if why == "" {
+			why = "task history not collected"
+		}
+		return h, nil, nil, []string{"homelab jobs: " + why}
+	}
+	base, load := map[string][]time.Time{}, map[string][]time.Time{}
+	count := func(runs []targetops.TaskRun, from, to time.Time, n, failed *int, by map[string][]time.Time) {
+		for _, r := range runs {
+			if !r.Scheduled || r.StartedAt.Before(from) || !r.StartedAt.Before(to) {
+				continue
+			}
+			*n++
+			if !strings.EqualFold(r.Status, "SUCCESS") {
+				*failed++
+			}
+			by[r.Job] = append(by[r.Job], r.StartedAt)
+		}
+	}
+	count(pre, t0.Add(-HomelabBaseline), t0, &h.BaselineRuns, &h.BaselineFailed, base)
+	count(during, t0, loadEnd, &h.LoadRuns, &h.LoadFailed, load)
+	if h.BaselineRuns == 0 {
+		return h, nil, nil, []string{fmt.Sprintf("homelab jobs: no scheduled run in the %s before T0: baseline missing", HomelabBaseline)}
+	}
+	h.BaselineFailRate = float64(h.BaselineFailed) / float64(h.BaselineRuns)
+	if h.LoadRuns > 0 {
+		h.LoadFailRate = float64(h.LoadFailed) / float64(h.LoadRuns)
+		rise := h.LoadFailRate - h.BaselineFailRate
+		x := limitHeadline("homelab.fail_rise", "ratio", rise, maxRise, false)
+		x.Pass = rise <= maxRise+1e-9 // "more than 5 points": an exact 5 passes despite float rounding
+		heads = append(heads, x)
+		if !x.Pass {
+			fails = append(fails, fmt.Sprintf("homelab.fail_rise %.3g breaches limit %.3g (scheduled job failure rate %.1f%% during load, %.1f%% before T0)",
+				rise, maxRise, 100*h.LoadFailRate, 100*h.BaselineFailRate))
+		}
+	}
+	jobs := make([]string, 0, len(base))
+	for j := range base {
+		jobs = append(jobs, j)
+	}
+	sort.Strings(jobs)
+	for _, j := range jobs {
+		b := base[j]
+		sort.Slice(b, func(x, y int) bool { return b[x].Before(b[y]) })
+		cadence, runs := time.Duration(0), 1
+		for i, last := 1, b[0]; i < len(b); i++ {
+			if b[i].Sub(last) <= homelabBatch {
+				continue // another host's row of the same run
+			}
+			cadence, last, runs = max(cadence, b[i].Sub(last)), b[i], runs+1
+		}
+		if runs == 1 {
+			cadence = HomelabBaseline
+		}
+		limit := 2 * cadence
+		if limit >= loadEnd.Sub(t0) {
+			h.NotJudged = append(h.NotJudged, j)
+			continue
+		}
+		times := append([]time.Time{t0}, load[j]...)
+		sort.Slice(times, func(x, y int) bool { return times[x].Before(times[y]) })
+		times = append(times, loadEnd)
+		gap := time.Duration(0)
+		for i := 1; i < len(times); i++ {
+			gap = max(gap, times[i].Sub(times[i-1]))
+		}
+		if gap > limit {
+			h.Stopped = append(h.Stopped, j)
+			fails = append(fails, fmt.Sprintf("homelab jobs: %s stopped running: no scheduled run for %s during load (limit %s, twice its cadence before T0)",
+				j, gap.Round(time.Second), limit.Round(time.Second)))
+		}
+	}
+	return h, heads, fails, incon
 }

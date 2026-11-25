@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -27,16 +28,40 @@ type fakeUserOps struct {
 	tasks, reports, verifies int
 	polls                    map[string]int
 	taskStatus               string
+	// taskPolls keeps each run pending for that many result polls (the lane
+	// polls every second); keys, pending and maxInFlight record the requests.
+	taskPolls             int
+	keys                  map[string]bool
+	pending               map[string]int
+	inFlight, maxInFlight int
 }
 
-func (f *fakeUserOps) RunTask(context.Context, string) (string, error) {
+func (f *fakeUserOps) RunTask(_ context.Context, _, key string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.tasks++
-	return "celery-" + string(rune('a'+f.tasks)), nil
+	if f.keys == nil {
+		f.keys, f.pending = map[string]bool{}, map[string]int{}
+	}
+	f.keys[key] = true
+	id := fmt.Sprintf("celery-%d", f.tasks)
+	f.pending[id] = f.taskPolls
+	f.inFlight++
+	f.maxInFlight = max(f.maxInFlight, f.inFlight)
+	return id, nil
 }
 
-func (f *fakeUserOps) TaskResult(context.Context, string) (string, bool, error) {
+func (f *fakeUserOps) TaskResult(_ context.Context, id string) (string, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if n, ok := f.pending[id]; ok && n > 0 {
+		f.pending[id]--
+		return "STARTED", false, nil
+	}
+	if _, ok := f.pending[id]; ok {
+		delete(f.pending, id)
+		f.inFlight--
+	}
 	s := f.taskStatus
 	if s == "" {
 		s = "SUCCESS"
@@ -350,4 +375,144 @@ func TestV4SmokeCorrelationHoldsPlanWithSlowRuns(t *testing.T) {
 			})
 		})
 	}
+}
+
+// TestV4TaskLaneOverlapsAndBursts (OSC-156 AC-1, AC-4): a request every
+// Every does not wait for the previous run, every 5th request issues 3
+// concurrent runs, each request carries its own idempotency key, every
+// planned run is counted on the scorecard and none is an offered alert.
+func TestV4TaskLaneOverlapsAndBursts(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, ops := v4Harness(t)
+		s := time.Second
+		h.s.Tasks = &scenario.TaskExecSpec{Job: "monitor:check_connection:homelab", At: 5 * s, Every: 20 * s, Timeout: 40 * s, BurstEvery: 5, Burst: 3}
+		h.s.Limits.TaskP95 = time.Minute
+		h.oscar.s = h.s
+		ops.taskPolls = 30 // about 30 s, longer than Every: runs overlap only if the lane does not wait
+		if err := h.run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		var card score.Scorecard
+		if err := json.Unmarshal(h.campaign().Scorecard, &card); err != nil {
+			t.Fatal(err)
+		}
+		planned := 0
+		for _, r := range h.s.Tasks.Requests(h.s.Phase("drain").Start) {
+			planned += r.Runs
+		}
+		te := card.TaskExec
+		if te == nil || planned < 20 || te.Planned != planned || len(te.Runs) != planned || te.Succeeded != planned || ops.tasks != planned {
+			t.Fatalf("task executions %+v: planned %d, requested %d", te, planned, ops.tasks)
+		}
+		if len(ops.keys) != planned {
+			t.Errorf("%d distinct idempotency keys for %d requests", len(ops.keys), planned)
+		}
+		if ops.maxInFlight < 4 { // a 3-run burst on top of the previous, still pending, run
+			t.Errorf("at most %d runs in flight: the lane waited for runs or did not burst", ops.maxInFlight)
+		}
+		for _, m := range card.Offered.PerMinute {
+			for l := range m.Lanes {
+				if strings.Contains(l, "task") {
+					t.Errorf("task requests counted as offered alerts: minute %d lane %s", m.Minute, l)
+				}
+			}
+		}
+		if hasReason(card.Reasons, "task") {
+			t.Errorf("reasons %v", card.Reasons)
+		}
+	})
+}
+
+// TestV4HomelabHealthGate (OSC-156 AC-2): scheduled homelab job runs during
+// load are judged against the 30 minutes before T0.
+func TestV4HomelabHealthGate(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		during string
+		fail   bool
+	}{{"steady", "SUCCESS", false}, {"failing under load", "FAILURE", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				h, _ := v4Harness(t)
+				h.s.Limits.HomelabFailRise = 0.05
+				h.oscar.s = h.s
+				jobs := []string{"monitor:check_connection:homelab", "monitor:check_filesystem_space:homelab"}
+				h.deps.TaskRuns = func(_ context.Context, start, end time.Time) ([]targetops.TaskRun, error) {
+					var out []targetops.TaskRun
+					for _, j := range jobs {
+						if end.Sub(start) == time.Hour { // before T0
+							out = append(out, targetops.TaskRun{Job: j, Status: "SUCCESS", StartedAt: end.Add(-10 * time.Minute), Scheduled: true},
+								targetops.TaskRun{Job: j, Status: "SUCCESS", StartedAt: end.Add(-5 * time.Minute), Scheduled: true})
+							continue
+						}
+						out = append(out, targetops.TaskRun{Job: j, Status: "SUCCESS", StartedAt: start.Add(time.Minute), Scheduled: true},
+							targetops.TaskRun{Job: j, Status: tc.during, StartedAt: start.Add(5 * time.Minute), Scheduled: true})
+					}
+					return out, nil
+				}
+				if err := h.run(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				var card score.Scorecard
+				if err := json.Unmarshal(h.campaign().Scorecard, &card); err != nil {
+					t.Fatal(err)
+				}
+				hh := card.HomelabHealth
+				if hh == nil || hh.BaselineRuns != 4 || hh.LoadRuns != 4 {
+					t.Fatalf("homelab health %+v", hh)
+				}
+				if got := hasReason(card.Reasons, "homelab"); got != tc.fail || tc.fail && card.Verdict != domain.VerdictFail {
+					t.Fatalf("verdict %s reasons %v", card.Verdict, card.Reasons)
+				}
+			})
+		})
+	}
+}
+
+// TestV4HomelabWindowEndsAtEarlyStop (OSC-156 AC-2): on an operator stop the
+// homelab load window ends where the lane stopped, so job classes are not
+// judged stopped for the minutes the run never reached.
+func TestV4HomelabWindowEndsAtEarlyStop(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) { // fake time: the stop lands right after the first task, however busy the host
+		h, ops := v4Harness(t)
+		h.s.Limits.HomelabFailRise = 0.05
+		h.oscar.s = h.s
+		h.deps.TaskRuns = func(_ context.Context, start, end time.Time) ([]targetops.TaskRun, error) {
+			job := "monitor:check_connection:homelab"
+			if end.Sub(start) == time.Hour { // a 2-minute cadence before T0: 4 minutes without a run stops it
+				return []targetops.TaskRun{{Job: job, Status: "SUCCESS", StartedAt: end.Add(-4 * time.Minute), Scheduled: true},
+					{Job: job, Status: "SUCCESS", StartedAt: end.Add(-2 * time.Minute), Scheduled: true}}, nil
+			}
+			return []targetops.TaskRun{{Job: job, Status: "SUCCESS", StartedAt: start.Add(time.Second), Scheduled: true}}, nil
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- h.run(ctx) }()
+		for {
+			ops.mu.Lock()
+			n := ops.tasks
+			ops.mu.Unlock()
+			if n > 0 {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if err := h.db.TransitionCampaign(context.Background(), h.id, domain.CampaignStopping, h.clock.Now(), "stop requested"); err != nil {
+			t.Fatal(err)
+		}
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		var card score.Scorecard
+		if err := json.Unmarshal(h.campaign().Scorecard, &card); err != nil {
+			t.Fatal(err)
+		}
+		if hh := card.HomelabHealth; hh == nil || len(hh.Stopped) != 0 || len(hh.NotJudged) != 1 || hasReason(card.Reasons, "homelab jobs") {
+			t.Fatalf("homelab health %+v reasons %v", hh, card.Reasons)
+		}
+	})
 }

@@ -33,3 +33,17 @@ func TestTaskRunsMatchesAliasAndFallsBackToTimestamp(t *testing.T) {
 		t.Fatal(runs, err)
 	}
 }
+
+// Only rows the scheduler started are Scheduled: user (the v4 lane's fo-01)
+// and unattributed rows are not (OSC-156 AC-2 counts only scheduled runs).
+func TestTaskRunsMarksScheduledRuns(t *testing.T) {
+	c := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"total_pages":1,"records":[{"alias":"monitor:check_connection:homelab","state":"SUCCESS","timestamp":"2026-11-15T05:00:00+00:00","trigger_source":"scheduled"},` +
+			`{"alias":"monitor:check_connection:homelab","state":"SUCCESS","timestamp":"2026-11-15T05:01:00+00:00","trigger_source":"api","triggered_by_user_id":"5b0c9a5e-1c1d-4c3f-9a3c-0d6f3c0e2a11"},` +
+			`{"alias":"monitor:check_connection:homelab","state":"SUCCESS","timestamp":"2026-11-15T05:02:00+00:00"}]}`))
+	}))
+	runs, err := TaskRuns(context.Background(), c, []string{"monitor:check_connection:homelab"}, time.Now().Add(-time.Hour), time.Now())
+	if err != nil || len(runs) != 3 || !runs[0].Scheduled || runs[1].Scheduled || runs[2].Scheduled {
+		t.Fatal(runs, err)
+	}
+}

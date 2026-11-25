@@ -26,7 +26,7 @@
   scoped policy (15 posts a minute, paced); R1-R4 plus an R5 escalation cohort (critical after 4 minutes, a new episode
   every 15 minutes, posted through native Alertmanager because escalation acts on native
   episodes) are scored, the latter per episode from sink receipts; a homelab task runs
-  through the task API every 5 minutes (gated on success and p95); alert reports at T+60 and
+  through the task API every minute (v4 T+1 to T+145, smoke T+1 to T+7; every 5th request 3 runs at once, each with its own `Idempotency-Key`; gated on success and p95) and the homelab pack's scheduled jobs FAIL the run if their failure rate during load rises more than 5 points over the 30 minutes before T0 or a job stops (OSC-156); alert reports at T+60 and
   T+120 are read back from object storage and gated on History p95 while they run. v4
   paces cohort and fingerprint posts so no minute exceeds the budget, reports offered posts per
   minute by lane and is INCONCLUSIVE when a minute exceeds it by more than 5%. New blocking

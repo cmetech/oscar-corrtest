@@ -95,12 +95,41 @@ type PolicySpec struct {
 
 // TaskExecSpec (v4) runs Job (a homelab pack task, by name) through OSCAR's
 // task API every Every from At until the drain, as the first front-office
-// user. A run must reach a terminal state within Timeout.
+// user, without waiting for earlier runs; every BurstEvery-th request issues
+// Burst concurrent runs. A run must reach a terminal state within Timeout.
 type TaskExecSpec struct {
-	Job     string        `json:"job"`
-	At      time.Duration `json:"at"`
-	Every   time.Duration `json:"every"`
-	Timeout time.Duration `json:"timeout"`
+	Job        string        `json:"job"`
+	At         time.Duration `json:"at"`
+	Every      time.Duration `json:"every"`
+	Timeout    time.Duration `json:"timeout"`
+	BurstEvery int           `json:"burstEvery,omitempty"`
+	Burst      int           `json:"burst,omitempty"`
+}
+
+// TaskRequest is one request of the task lane: its offset from T0 and how
+// many concurrent runs it issues.
+type TaskRequest struct {
+	At   time.Duration
+	Runs int
+}
+
+// Requests is the lane's schedule over a load window ending at loadEnd: a
+// request every Every from At while a run can still reach its Timeout before
+// loadEnd (so every result is load evidence and the drain starts on time).
+func (t TaskExecSpec) Requests(loadEnd time.Duration) []TaskRequest {
+	var out []TaskRequest
+	for k := 0; t.Every > 0 || k == 0; k++ {
+		at := t.At + time.Duration(k)*t.Every
+		if at+t.Timeout >= loadEnd {
+			break
+		}
+		n := 1
+		if t.BurstEvery > 0 && (k+1)%t.BurstEvery == 0 {
+			n = max(t.Burst, 1)
+		}
+		out = append(out, TaskRequest{At: at, Runs: n})
+	}
+	return out
 }
 
 // ReportSpec (v4) requests the alert report Key (alert history from T0 to the
@@ -133,6 +162,9 @@ type Limits struct {
 	// v4 lanes; zero (and absent from the hash) elsewhere.
 	TaskSuccess float64       `json:"taskSuccess,omitempty"` // on-demand task runs that succeed
 	TaskP95     time.Duration `json:"taskP95,omitempty"`     // request to terminal result
+	// HomelabFailRise > 0 gates the homelab pack's scheduled job failure rate
+	// during load against the 30 minutes before T0 (and stopped job classes).
+	HomelabFailRise float64 `json:"homelabFailRise,omitempty"`
 }
 
 type PrecheckLimits struct {
@@ -580,8 +612,14 @@ func (s *Scenario) fillWorker() {
 //     Alertmanager (escalation needs a native episode) and starting a new
 //     episode every 15 minutes;
 //   - the worker lane: the rest, 3.25/s (7.25/s in a spike), v1's mix;
-//   - front-office API users as v1, one homelab task run through the task
-//     API every 5 minutes, and an alert report at T+60 and T+120.
+//   - front-office API users as v1, a homelab task run through the task API
+//     every minute from T+1 to T+145 (each run may take its 4-minute timeout
+//     inside the load window), every 5th request 3 runs at once, and an
+//     alert report at T+60 and T+120. Task requests are not alerts.
+//
+// The homelab pack's scheduled jobs are gated: their failure rate during load
+// may rise at most 5 points over the 30 minutes before T0, and no job class
+// may stop running.
 //
 // No v2 standing pool or forced breaker: the pool repeats are v1's 10%.
 func AlertingDayV4() Scenario {
@@ -602,10 +640,10 @@ func AlertingDayV4() Scenario {
 		Notifier: "CAMPAIGN_SINK", Escalation: &EscalationSpec{After: 4 * min, TargetSeverity: "critical"}, Episode: 15 * min})
 	s.ResendUntil = 146 * min
 	s.Fingerprint = &FingerprintSpec{At: 2 * min, Repeats: 14, Converge: 2 * min, Verify: 55 * time.Second, Every: min}
-	s.Tasks = &TaskExecSpec{Job: "monitor:check_connection:homelab", At: 5 * min, Every: 5 * min, Timeout: 4 * min}
+	s.Tasks = &TaskExecSpec{Job: "monitor:check_connection:homelab", At: min, Every: min, Timeout: 4 * min, BurstEvery: 5, Burst: 3}
 	s.Report = &ReportSpec{Key: "core-alarm-history-dump", At: []time.Duration{60 * min, 120 * min}, Timeout: 20 * min}
 	s.Limits = AlertingDayV3().Limits
-	s.Limits.TaskSuccess, s.Limits.TaskP95 = 1, 2*min
+	s.Limits.TaskSuccess, s.Limits.TaskP95, s.Limits.HomelabFailRise = 1, 2*min, 0.05
 	s.fillWorker()
 	return s
 }
@@ -617,8 +655,9 @@ func AlertingDayV4() Scenario {
 // the spike rate (OSC-155). Both spikes end by T+8, when the cycling
 // documents stop (engine cycleMargin before the drain). R1 and the R5
 // escalation cohort (2 members each, escalating after 2 minutes),
-// fingerprint rounds of 6, two task runs and one report; the worker lane
-// fills the rest. Custom: never comparable.
+// fingerprint rounds of 6, a task every minute from T+1 to T+7 with one
+// 3-run burst at T+5, and one report; the worker lane fills the rest.
+// Custom: never comparable.
 func AlertingDaySmokeV4() Scenario {
 	min := time.Minute
 	n := func(i int) *int { return &i }
@@ -636,7 +675,7 @@ func AlertingDaySmokeV4() Scenario {
 			Escalation: &EscalationSpec{After: 2 * min, TargetSeverity: "critical"}, Episode: 5 * min}}
 	s.ResendUntil = 10*min + 30*time.Second
 	s.Fingerprint = &FingerprintSpec{At: min, Repeats: 5, Converge: 2 * min, Verify: 55 * time.Second, Every: min}
-	s.Tasks = &TaskExecSpec{Job: "monitor:check_connection:homelab", At: 2 * min, Every: 5 * min, Timeout: 4 * min}
+	s.Tasks = &TaskExecSpec{Job: "monitor:check_connection:homelab", At: min, Every: min, Timeout: 4 * min, BurstEvery: 5, Burst: 3}
 	s.Report = &ReportSpec{Key: "core-alarm-history-dump", At: []time.Duration{4 * min}, Timeout: 7 * min}
 	s.fillWorker()
 	return s

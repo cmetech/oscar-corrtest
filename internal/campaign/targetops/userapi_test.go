@@ -31,7 +31,14 @@ func TestUserAPI(t *testing.T) {
 		}
 		switch p := strings.TrimPrefix(r.URL.Path, "/ext/mw/api/v1"); {
 		case r.Method == http.MethodPost && p == "/tasks/run/monitor:check_connection:homelab":
+			if r.Header.Get("Idempotency-Key") != "key-1" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
 			_, _ = w.Write([]byte(`{"celery_task_id":"c-1","status":"PENDING"}`))
+		case r.Method == http.MethodPost && p == "/tasks/run/accepted:job": // the accepted shape OSC-153 is designing
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"status":"accepted","run_id":"r-9","idempotency_key":"` + r.Header.Get("Idempotency-Key") + `"}`))
 		case p == "/tasks/result/c-1":
 			if results++; results == 1 {
 				w.WriteHeader(http.StatusNotFound)
@@ -61,9 +68,12 @@ func TestUserAPI(t *testing.T) {
 	defer srv.Close()
 	ctx := context.Background()
 	u := UserAPI{Root: srv.URL, Key: "user-key", HTTP: srv.Client()}
-	id, err := u.RunTask(ctx, "monitor:check_connection:homelab")
+	id, err := u.RunTask(ctx, "monitor:check_connection:homelab", "key-1")
 	if err != nil || id != "c-1" {
-		t.Fatalf("run task: %q %v", id, err)
+		t.Fatalf("run task (the idempotency key is sent): %q %v", id, err)
+	}
+	if acc, err := u.RunTask(ctx, "accepted:job", "key-2"); err != nil || acc != "r-9" {
+		t.Fatalf("an accepted run answers its run id: %q %v", acc, err)
 	}
 	if _, done, err := u.TaskResult(ctx, id); done || err != nil {
 		t.Fatalf("a 404 result is pending: %v %v", done, err)

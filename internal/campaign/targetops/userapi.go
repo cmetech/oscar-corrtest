@@ -32,6 +32,10 @@ type StatusError struct {
 func (e *StatusError) Error() string { return fmt.Sprintf("HTTP %d: %s", e.Status, e.Body) }
 
 func (u UserAPI) do(ctx context.Context, method, path string, q url.Values, in, out any) error {
+	return u.doWith(ctx, method, path, q, nil, in, out)
+}
+
+func (u UserAPI) doWith(ctx context.Context, method, path string, q url.Values, hdr http.Header, in, out any) error {
 	var body io.Reader
 	if in != nil {
 		b, err := json.Marshal(in)
@@ -47,6 +51,9 @@ func (u UserAPI) do(ctx context.Context, method, path string, q url.Values, in, 
 	req, err := http.NewRequestWithContext(ctx, method, target, body)
 	if err != nil {
 		return err
+	}
+	for k, v := range hdr {
+		req.Header[k] = v
 	}
 	req.Header.Set("X-API-Key", u.Key)
 	req.Header.Set("Accept", "application/json")
@@ -71,17 +78,23 @@ func (u UserAPI) do(ctx context.Context, method, path string, q url.Values, in, 
 	return json.Unmarshal(raw, out)
 }
 
-// RunTask starts the task named (or with UUID) job: POST /tasks/run/{job}. It
-// returns the Celery run id.
-func (u UserAPI) RunTask(ctx context.Context, job string) (string, error) {
+// RunTask starts the task named (or with UUID) job: POST /tasks/run/{job},
+// sending key as Idempotency-Key (OSCAR ignores it until task admission
+// honours it, OSC-153). It returns the Celery run id, or the run_id of an
+// accepted-for-later answer.
+func (u UserAPI) RunTask(ctx context.Context, job, key string) (string, error) {
 	var out struct {
-		ID string `json:"celery_task_id"`
+		ID    string `json:"celery_task_id"`
+		RunID string `json:"run_id"`
 	}
-	if err := u.do(ctx, http.MethodPost, "/tasks/run/"+url.PathEscape(job), nil, map[string]any{}, &out); err != nil {
+	if err := u.doWith(ctx, http.MethodPost, "/tasks/run/"+url.PathEscape(job), nil, http.Header{"Idempotency-Key": {key}}, map[string]any{}, &out); err != nil {
 		return "", err
 	}
 	if out.ID == "" {
-		return "", fmt.Errorf("task run for %s returned no celery_task_id", job)
+		out.ID = out.RunID
+	}
+	if out.ID == "" {
+		return "", fmt.Errorf("task run for %s returned no celery_task_id or run_id", job)
 	}
 	return out.ID, nil
 }
