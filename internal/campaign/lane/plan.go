@@ -109,7 +109,11 @@ func Compile(runID string, seed int64, spec scenario.BaselineSpec, duration time
 				break
 			}
 		}
-		e.Instance = InstanceName(rng.IntN(spec.Instances) + 1)
+		if spec.Servers > 0 { // the same single RNG draw, over the servers
+			e.Instance = ServerInstance(rng.IntN(spec.Servers) + 1)
+		} else {
+			e.Instance = InstanceName(rng.IntN(spec.Instances) + 1)
+		}
 		// Pool identities keep the labels of their first draw (RNG use is unchanged),
 		// so every firing and resolve of one identity is the same Alertmanager alert.
 		if l, ok := poolLabels[e.Identity]; ok {
@@ -174,3 +178,33 @@ func Compile(runID string, seed int64, spec scenario.BaselineSpec, duration time
 
 // InstanceName is the campaign host label for 1-based index i.
 func InstanceName(i int) string { return fmt.Sprintf("campaign-host-%02d", i) }
+
+// ServerName is server n's short name (n >= 1): documentation-only, never a
+// real host.
+func ServerName(n int) string { return fmt.Sprintf("ct-srv-%02d", n) }
+
+// ServerIP is server n's address in TEST-NET-2 (198.51.100.0/24, RFC 5737):
+// 198.51.100.(10+n), so n <= 245.
+func ServerIP(n int) string { return fmt.Sprintf("198.51.100.%d", 10+n) }
+
+// ServerInstance is server n's instance label.
+func ServerInstance(n int) string { return ServerName(n) + ".home.arpa:9100" }
+
+// ServerOf is the server whose instance label this is: the ledger keeps only
+// the instance, so the sender (and a worker resolve rebuilt from the ledger)
+// derives the other source labels from it.
+func ServerOf(instance string) (int, bool) {
+	var n int
+	if _, err := fmt.Sscanf(instance, "ct-srv-%d.home.arpa:9100", &n); err != nil || n < 1 || n > 245 || ServerInstance(n) != instance {
+		return 0, false
+	}
+	return n, true
+}
+
+// ServerLabels are server n's source labels. OSCAR's Alert View derives
+// Source from meta_hostname (before the first dot: ct-srv-NN) and Source IP
+// from meta_ipaddress (alert_source.py derive_source, derive_source_ip).
+func ServerLabels(n int) map[string]string {
+	host := ServerName(n)
+	return map[string]string{"instance": ServerInstance(n), "hostname": host, "meta_hostname": host + ".home.arpa", "meta_ipaddress": ServerIP(n)}
+}

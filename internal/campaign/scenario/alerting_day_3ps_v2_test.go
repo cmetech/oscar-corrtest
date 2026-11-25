@@ -45,13 +45,13 @@ func TestAlertingDay3psV2IsV1Smoothed(t *testing.T) {
 }
 
 // TestAlertingDay3psV2Maintenance (OSC-189 AC-5): only the 3ps v2 scenarios
-// carry the maintenance lane; setup precedes the window, inside probes fit
+// (and v3, which inherits it, OSC-207) carry the maintenance lane; setup precedes the window, inside probes fit
 // before the end, the after probes fit before the drain plus a minute, and
 // neither the setup (its first 30 s) nor the window and probes overlap a spike.
 func TestAlertingDay3psV2Maintenance(t *testing.T) {
 	for _, s := range Builtins() {
 		has := s.Maintenance != nil
-		if want := s.Version == "v2" && (s.ID == "alerting-day-3ps" || s.ID == "alerting-day-3ps-smoke"); has != want {
+		if want := (s.Version == "v2" || s.Version == "v3") && (s.ID == "alerting-day-3ps" || s.ID == "alerting-day-3ps-smoke"); has != want {
 			t.Errorf("%s@%s maintenance lane %v", s.ID, s.Version, has)
 		}
 		if !has {

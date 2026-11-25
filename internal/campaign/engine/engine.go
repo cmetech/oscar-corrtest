@@ -159,6 +159,8 @@ type Deps struct {
 	// Maintenance is OSCAR's maintenance-mode API as the same user; nil leaves
 	// the maintenance lane without evidence.
 	Maintenance MaintOps
+	// Receivers is the receivers lane's surface; nil leaves it without evidence.
+	Receivers ReceiverOps
 }
 
 // Engine implements runtime.CampaignEngine.
@@ -226,6 +228,10 @@ type run struct {
 	laneStarts    []time.Time         // when the paced controller lanes reached full load (offered-rate warm-up)
 
 	maint score.MaintenanceStats // OSC-189 maintenance-mode lane
+	rx    score.ReceiverStats    // OSC-207 receivers lane
+	foSrc []score.SourceSample   // OSC-207 source filter answers
+	// corrDocs counts started correlation documents (server round robin).
+	corrDocs int
 }
 
 type policyState struct {
@@ -488,7 +494,7 @@ func (r *run) execute(ctx context.Context) error {
 	go func() { defer bg.Done(); r.guards(phaseCtx, func() { stopPhases(); stopFO() }) }()
 
 	var work sync.WaitGroup
-	work.Add(9)
+	work.Add(10)
 	go func() { defer work.Done(); r.managedPhase(phaseCtx) }()
 	go func() { defer work.Done(); r.nativeOrdinaryPhase(phaseCtx) }()
 	go func() { defer work.Done(); r.correlation(phaseCtx) }()
@@ -498,6 +504,7 @@ func (r *run) execute(ctx context.Context) error {
 	go func() { defer work.Done(); r.taskPhase(phaseCtx) }()        // v4 only
 	go func() { defer work.Done(); r.reportPhase(phaseCtx) }()      // v4 only
 	go func() { defer work.Done(); r.maintenancePhase(phaseCtx) }() // facet only
+	go func() { defer work.Done(); r.receiversPhase(phaseCtx) }()   // facet only
 	work.Wait()
 	// Firings end at the drain phase start (or earlier on a trip/stop).
 	if r.e.clock.SleepUntil(phaseCtx, r.at("drain", false)) {

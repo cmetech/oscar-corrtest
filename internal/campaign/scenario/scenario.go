@@ -35,6 +35,10 @@ type BaselineSpec struct {
 	Burst *BurstSpec `json:"burst,omitempty"`
 	// Bursts are further spikes (v4 has two); empty keeps the hash unchanged.
 	Bursts []BurstSpec `json:"bursts,omitempty"`
+	// Servers > 0 (3ps v3, OSC-207) gives each worker alert one of servers
+	// 1..Servers and its server-style source labels (lane.ServerLabels)
+	// instead of a campaign-host-NN instance; 0 keeps the plan unchanged.
+	Servers int `json:"servers,omitempty"`
 }
 
 // BurstSpec is a timed spike of the baseline firing rate.
@@ -68,6 +72,9 @@ type CorrelationSpec struct {
 	Rate      float64 `json:"rate,omitempty"`
 	SpikeRate float64 `json:"spikeRate,omitempty"`
 	Parallel  int     `json:"parallel,omitempty"`
+	// Servers > 0 (3ps v3) labels each correlation document's source alerts
+	// with one of the Servers servers after the worker's (round robin).
+	Servers int `json:"servers,omitempty"`
 }
 
 type EscalationSpec struct {
@@ -160,6 +167,20 @@ type FrontOfficeSpec struct {
 	Interval    time.Duration `json:"interval"`
 	Jitter      time.Duration `json:"jitter"`
 	SearchEvery time.Duration `json:"searchEvery"`
+	// SourceFilters (3ps v3) adds the Alert View Source / Source IP filter
+	// actions (OSC-159 uisrc filters) to the rotation, judged for exactness.
+	SourceFilters bool `json:"sourceFilters,omitempty"`
+}
+
+// ReceiversSpec (3ps v3, OSC-207) is the receivers lane: from From to Until,
+// every Every outside the spikes, one probe each through OSCAR's webhook, SNMP
+// trap and SMTP receivers; each must be in History within Bound. Probes are
+// not offered load.
+type ReceiversSpec struct {
+	From  time.Duration `json:"from"`
+	Until time.Duration `json:"until"`
+	Every time.Duration `json:"every"`
+	Bound time.Duration `json:"bound"`
 }
 
 type Limits struct {
@@ -319,6 +340,8 @@ type Scenario struct {
 	SmoothCorrelationOffers bool `json:"smoothCorrelationOffers,omitempty"`
 	// Maintenance is the maintenance-mode lane facet; nil runs no lane.
 	Maintenance *MaintenanceSpec `json:"maintenance,omitempty"`
+	// Receivers is the receivers lane facet; nil runs no lane.
+	Receivers *ReceiversSpec `json:"receivers,omitempty"`
 }
 
 // TransportDedupWindow is OSCAR's JetStream duplicate window for ordinary alerts
@@ -789,9 +812,39 @@ func AlertingDay3psSmokeV2() Scenario {
 	return s
 }
 
+// withSources adds the 3ps v3 facets (OSC-207): 40 servers on TEST-NET-2
+// (32 for the worker lane, 8 for correlation and the receiver probes), the
+// Source / Source IP filter actions and the receivers lane.
+func withSources(s Scenario, rx ReceiversSpec) Scenario {
+	s.Version = "v3"
+	s.Baseline.Servers, s.Correlation.Servers = 32, 8
+	s.FrontOffice.SourceFilters = true
+	s.Receivers = &rx
+	return s
+}
+
+// AlertingDay3psV3 is alerting-day-3ps@v2 for the 26.4.6-rc13 qualification
+// of the Alert View Source / Source IP filters (OSC-159, OSC-179) and the
+// non-Alertmanager receivers: worker and correlation alerts carry
+// server-style source labels, the front-office users also filter by Source
+// and Source IP (exactness judged), and a probe goes through each of the
+// webhook, SNMP trap and SMTP receivers every 30 s from T+2 to T+147, outside
+// the spikes; each must be in History within 60 s (the 40 s History p95 limit
+// of the direct path plus 20 s for the receiver hop).
+func AlertingDay3psV3() Scenario {
+	return withSources(AlertingDay3psV2(), ReceiversSpec{From: 2 * time.Minute, Until: 147 * time.Minute, Every: 30 * time.Second, Bound: time.Minute})
+}
+
+// AlertingDay3psSmokeV3 is alerting-day-3ps-smoke@v2 with the v3 facets; the
+// receivers lane probes every 20 s from T+1 to T+10 (read back by T+11:30,
+// before the T+12 drain). Custom: never comparable.
+func AlertingDay3psSmokeV3() Scenario {
+	return withSources(AlertingDay3psSmokeV2(), ReceiversSpec{From: time.Minute, Until: 10 * time.Minute, Every: 20 * time.Second, Bound: time.Minute})
+}
+
 // Builtins are the built-in campaign scenarios.
 func Builtins() []Scenario {
-	return []Scenario{AlertingDayV1(), AlertingDayV2(), AlertingDaySmokeV1(), AlertingDaySmokeV2(), DeliveryRetryV1(), ResendOnlyV1(), FunctionalV1(), FunctionalBurstV1(), FunctionalBurstFullV1(), AlertingDayControlV1(), AlertingDayV3(), AlertingDaySmokeV3(), ManagedAlertsSmokeV1(), AlertingDayV4(), AlertingDaySmokeV4(), AlertingDay3psV1(), AlertingDay3psSmokeV1(), AlertingDay3psV2(), AlertingDay3psSmokeV2()}
+	return []Scenario{AlertingDayV1(), AlertingDayV2(), AlertingDaySmokeV1(), AlertingDaySmokeV2(), DeliveryRetryV1(), ResendOnlyV1(), FunctionalV1(), FunctionalBurstV1(), FunctionalBurstFullV1(), AlertingDayControlV1(), AlertingDayV3(), AlertingDaySmokeV3(), ManagedAlertsSmokeV1(), AlertingDayV4(), AlertingDaySmokeV4(), AlertingDay3psV1(), AlertingDay3psSmokeV1(), AlertingDay3psV2(), AlertingDay3psSmokeV2(), AlertingDay3psV3(), AlertingDay3psSmokeV3()}
 }
 
 // Lookup returns the built-in scenario named "id@version".
@@ -884,6 +937,7 @@ func canon(v reflect.Value) any {
 var SkippableLanes = map[string]func(Scenario) bool{
 	"report":      func(s Scenario) bool { return s.Report != nil },
 	"maintenance": func(s Scenario) bool { return s.Maintenance != nil },
+	"receivers":   func(s Scenario) bool { return s.Receivers != nil },
 }
 
 // ValidateSkipLanes rejects an unknown lane, or one the scenario does not have.
@@ -891,7 +945,7 @@ func ValidateSkipLanes(s Scenario, lanes []string) error {
 	for _, l := range lanes {
 		has, ok := SkippableLanes[l]
 		if !ok {
-			return fmt.Errorf("lane %q cannot be skipped (skippable: report, maintenance)", l)
+			return fmt.Errorf("lane %q cannot be skipped (skippable: report, maintenance, receivers)", l)
 		}
 		if !has(s) {
 			return fmt.Errorf("%s@%s has no %s lane to skip", s.ID, s.Version, l)

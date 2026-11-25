@@ -1,0 +1,411 @@
+{
+  "_about": "Shared Source / Source IP derivation cases. Checked by oscar-adminui src/lib/alertSource.vectors.test.js (alertSource.js) and by oscar-alertmanager tests/test_alert_source.py (the Python port that fills the AM_AlertHistory Source columns) and tests/test_uisrc_filter_mysql.py (SQL filter). Keep the two copies byte-identical (alertmanager: tests/fixtures/alert-source-vectors.json). Label columns (category, ...) show the label's own value verbatim; the tests derive that from `labels` directly. source / source_ip: what the column shows, and what the Source / Source IP filters match (OSC-159: one rule for the server and the browser fallback).",
+  "vectors": [
+    {
+      "name": "fqdn hostname shortened",
+      "labels": {
+        "meta_hostname": "router1.att.com",
+        "meta_ipaddress": "10.1.1.1"
+      },
+      "source": "router1",
+      "source_ip": "10.1.1.1"
+    },
+    {
+      "name": "ipv4 hostname kept whole",
+      "labels": {
+        "meta_hostname": "10.2.2.2",
+        "meta_ipaddress": "10.1.1.1"
+      },
+      "source": "10.2.2.2",
+      "source_ip": "10.1.1.1"
+    },
+    {
+      "name": "ipv4-shaped hostname without octet check",
+      "labels": {
+        "meta_hostname": "999.1.1.1"
+      },
+      "source": "999.1.1.1",
+      "source_ip": ""
+    },
+    {
+      "name": "leading-dot hostname kept whole",
+      "labels": {
+        "meta_hostname": ".att.com"
+      },
+      "source": ".att.com",
+      "source_ip": ""
+    },
+    {
+      "name": "plain short hostname",
+      "labels": {
+        "meta_hostname": "core-sw-01"
+      },
+      "source": "core-sw-01",
+      "source_ip": ""
+    },
+    {
+      "name": "mixed-case hostname",
+      "labels": {
+        "meta_hostname": "CoreRouter.ATT.com"
+      },
+      "source": "CoreRouter",
+      "source_ip": ""
+    },
+    {
+      "name": "empty hostname falls to ip",
+      "labels": {
+        "meta_hostname": "",
+        "meta_ipaddress": "10.3.3.3"
+      },
+      "source": "10.3.3.3",
+      "source_ip": "10.3.3.3"
+    },
+    {
+      "name": "ip only",
+      "labels": {
+        "meta_ipaddress": "10.15.43.7"
+      },
+      "source": "10.15.43.7",
+      "source_ip": "10.15.43.7"
+    },
+    {
+      "name": "ip prefix sibling 1",
+      "labels": {
+        "meta_ipaddress": "10.15.43.70"
+      },
+      "source": "10.15.43.70",
+      "source_ip": "10.15.43.70"
+    },
+    {
+      "name": "non-ip meta_ipaddress shown as source, not as source ip",
+      "labels": {
+        "meta_ipaddress": "not-an-ip"
+      },
+      "source": "not-an-ip",
+      "source_ip": ""
+    },
+    {
+      "name": "invalid octet ip",
+      "labels": {
+        "meta_ipaddress": "10.1.1.256",
+        "node": "10.9.9.9"
+      },
+      "source": "10.1.1.256",
+      "source_ip": "10.9.9.9"
+    },
+    {
+      "name": "three-octet ip",
+      "labels": {
+        "meta_ipaddress": "10.1.1",
+        "instance": "10.4.4.4:9100"
+      },
+      "source": "10.1.1",
+      "source_ip": "10.4.4.4"
+    },
+    {
+      "name": "leading-zero octets valid",
+      "labels": {
+        "meta_ipaddress": "010.001.002.003"
+      },
+      "source": "010.001.002.003",
+      "source_ip": "010.001.002.003"
+    },
+    {
+      "name": "padded ip trimmed for source ip",
+      "labels": {
+        "meta_ipaddress": " 10.5.5.5\t"
+      },
+      "source": " 10.5.5.5\t",
+      "source_ip": "10.5.5.5"
+    },
+    {
+      "name": "instance host:port",
+      "labels": {
+        "instance": "10.6.6.6:9100"
+      },
+      "source": "10.6.6.6",
+      "source_ip": "10.6.6.6"
+    },
+    {
+      "name": "instance hostname:port",
+      "labels": {
+        "instance": "web01.att.com:443"
+      },
+      "source": "web01.att.com",
+      "source_ip": ""
+    },
+    {
+      "name": "instance plain",
+      "labels": {
+        "instance": "dbhost"
+      },
+      "source": "dbhost",
+      "source_ip": ""
+    },
+    {
+      "name": "instance url with port and path",
+      "labels": {
+        "instance": "http://10.7.7.7:9115/probe?x=1"
+      },
+      "source": "10.7.7.7",
+      "source_ip": "10.7.7.7"
+    },
+    {
+      "name": "instance url with userinfo",
+      "labels": {
+        "instance": "https://user:pw@mon.att.com/x"
+      },
+      "source": "mon.att.com",
+      "source_ip": ""
+    },
+    {
+      "name": "instance url ipv6",
+      "labels": {
+        "instance": "http://[2001:db8::1]:80/"
+      },
+      "source": "[2001:db8::1]",
+      "source_ip": ""
+    },
+    {
+      "name": "instance url empty host",
+      "labels": {
+        "instance": "http:///path"
+      },
+      "source": "",
+      "source_ip": ""
+    },
+    {
+      "name": "instance leading colon",
+      "labels": {
+        "instance": ":9100"
+      },
+      "source": ":9100",
+      "source_ip": ""
+    },
+    {
+      "name": "hostname wins over instance",
+      "labels": {
+        "meta_hostname": "edge9.att.com",
+        "instance": "10.8.8.8:9100"
+      },
+      "source": "edge9",
+      "source_ip": "10.8.8.8"
+    },
+    {
+      "name": "ip wins over instance for source",
+      "labels": {
+        "meta_ipaddress": "10.9.1.1",
+        "instance": "other:1"
+      },
+      "source": "10.9.1.1",
+      "source_ip": "10.9.1.1"
+    },
+    {
+      "name": "node only valid",
+      "labels": {
+        "node": "10.10.10.10"
+      },
+      "source": "",
+      "source_ip": "10.10.10.10"
+    },
+    {
+      "name": "node invalid",
+      "labels": {
+        "node": "nodeA"
+      },
+      "source": "",
+      "source_ip": ""
+    },
+    {
+      "name": "instance invalid ip then node",
+      "labels": {
+        "instance": "host:9100",
+        "node": "10.11.11.11"
+      },
+      "source": "host",
+      "source_ip": "10.11.11.11"
+    },
+    {
+      "name": "valid ip beats node",
+      "labels": {
+        "meta_ipaddress": "10.12.0.1",
+        "node": "10.12.0.2"
+      },
+      "source": "10.12.0.1",
+      "source_ip": "10.12.0.1"
+    },
+    {
+      "name": "ip with trailing newline is not valid",
+      "labels": {
+        "meta_hostname": "1.2.3.4\n"
+      },
+      "source": "1",
+      "source_ip": ""
+    },
+    {
+      "name": "uppercase label name ignored",
+      "labels": {
+        "META_HOSTNAME": "zzz.att.com",
+        "meta_ipaddress": "10.13.0.1"
+      },
+      "source": "10.13.0.1",
+      "source_ip": "10.13.0.1"
+    },
+    {
+      "name": "no labels",
+      "labels": {},
+      "source": "",
+      "source_ip": ""
+    },
+    {
+      "name": "unrelated labels only",
+      "labels": {
+        "alertname": "linkDown",
+        "severity": "critical"
+      },
+      "source": "",
+      "source_ip": ""
+    },
+    {
+      "name": "trailing space hostname is not padded away",
+      "labels": {
+        "meta_hostname": "host1 "
+      },
+      "source": "host1 ",
+      "source_ip": ""
+    },
+    {
+      "name": "trailing space instance host",
+      "labels": {
+        "instance": "host7 :9100"
+      },
+      "source": "host7 ",
+      "source_ip": ""
+    },
+    {
+      "name": "newline inside hostname",
+      "labels": {
+        "meta_hostname": "abc\ndef.att.com"
+      },
+      "source": "abc\ndef",
+      "source_ip": ""
+    },
+    {
+      "name": "ip with trailing CRLF",
+      "labels": {
+        "meta_ipaddress": "10.2.2.8\r\n"
+      },
+      "source": "10.2.2.8\r\n",
+      "source_ip": "10.2.2.8"
+    },
+    {
+      "name": "NEL is not JS whitespace",
+      "labels": {
+        "meta_ipaddress": "10.2.2.4"
+      },
+      "source": "10.2.2.4",
+      "source_ip": ""
+    },
+    {
+      "name": "fullwidth colon is not a URL",
+      "labels": {
+        "instance": "http：//10.7.7.1/x"
+      },
+      "source": "http：//10.7.7.1/x",
+      "source_ip": ""
+    },
+    {
+      "name": "long instance url (stored as anchor)",
+      "labels": {
+        "instance": "http://10.3.3.7:80/probe?target=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "source": "10.3.3.7",
+      "source_ip": "10.3.3.7"
+    },
+    {
+      "name": "long instance url beats node for source ip",
+      "labels": {
+        "node": "10.4.4.2",
+        "instance": "http://10.4.4.98:80/probe?target=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "source": "10.4.4.98",
+      "source_ip": "10.4.4.98"
+    },
+    {
+      "name": "long hostname (stored as anchor)",
+      "labels": {
+        "meta_hostname": "longhost.yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+        "meta_ipaddress": "10.5.6.7"
+      },
+      "source": "longhost",
+      "source_ip": "10.5.6.7"
+    },
+    {
+      "name": "category with trailing space",
+      "labels": {
+        "category": "Billing ",
+        "meta_ipaddress": "10.20.0.1"
+      },
+      "source": "10.20.0.1",
+      "source_ip": "10.20.0.1"
+    },
+    {
+      "name": "wrong-case category label name",
+      "labels": {
+        "Category": "billing",
+        "meta_ipaddress": "10.20.0.2"
+      },
+      "source": "10.20.0.2",
+      "source_ip": "10.20.0.2"
+    },
+    {
+      "name": "category with newline",
+      "labels": {
+        "category": "net\nwork"
+      },
+      "source": "",
+      "source_ip": ""
+    },
+    {
+      "name": "long category (stored as anchor)",
+      "labels": {
+        "category": "billing-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+      },
+      "source": "",
+      "source_ip": ""
+    },
+    {
+      "name": "plain category",
+      "labels": {
+        "category": "billing",
+        "meta_hostname": "pay01.att.com"
+      },
+      "source": "pay01",
+      "source_ip": ""
+    },
+    {
+      "name": "accented category",
+      "labels": {
+        "category": "Café"
+      },
+      "source": "",
+      "source_ip": ""
+    },
+    {
+      "name": "accented hostname",
+      "labels": {
+        "meta_hostname": "Åland-rtr.att.com"
+      },
+      "source": "Åland-rtr",
+      "source_ip": ""
+    },
+    {
+      "name": "endsWith across a line break",
+      "labels": {
+        "category": "line1\nline2"
+      },
+      "source": "",
+      "source_ip": ""
+    }
+  ]
+}

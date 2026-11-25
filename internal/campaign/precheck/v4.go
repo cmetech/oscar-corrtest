@@ -91,3 +91,13 @@ func MaintenanceReady(measured string, problems []string, err error) Result {
 	}
 	return res("B16", Blocking, true, measured, problems)
 }
+
+// ReceiversReady is B17 (OSC-207, blocking): the receivers lane can install
+// its Mappings (mapping API readable, no campaign Mapping left) and the
+// webhook and SMTP receivers answer, with the trap community configured.
+func ReceiversReady(measured string, problems []string, err error) Result {
+	if err != nil {
+		return errRes("B17", Blocking, "mapping API", err)
+	}
+	return res("B17", Blocking, true, measured, problems)
+}

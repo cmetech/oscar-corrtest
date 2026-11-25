@@ -122,15 +122,17 @@ type Scorecard struct {
 	FrontOffice                  map[string]Percentiles // API-level, per action
 	Homelab                      TaskStats
 	Headlines                    []Headline
-	ATT                          *ATT              // v2 only: the AT&T-shape measurements (report-only)
-	Fingerprint                  *FingerprintStats // fingerprint-policy lane facet only
-	Offered                      *OfferedRate      `json:",omitempty"` // every lane's posts per minute
-	Escalation                   *Rate             `json:",omitempty"` // v4 escalation episodes
-	TaskExec                     *TaskExecStats    `json:",omitempty"` // v4 on-demand task runs
-	HomelabHealth                *HomelabHealth    `json:",omitempty"` // v4 scheduled homelab job gate
-	Reports                      *ReportStats      `json:",omitempty"` // v4 alert reports
-	Maintenance                  *MaintenanceStats `json:",omitempty"` // OSC-189 maintenance-mode lane
-	SkippedLanes                 []string          `json:",omitempty"` // lanes switched off by run option: never a pass
+	ATT                          *ATT               // v2 only: the AT&T-shape measurements (report-only)
+	Fingerprint                  *FingerprintStats  // fingerprint-policy lane facet only
+	Offered                      *OfferedRate       `json:",omitempty"` // every lane's posts per minute
+	Escalation                   *Rate              `json:",omitempty"` // v4 escalation episodes
+	TaskExec                     *TaskExecStats     `json:",omitempty"` // v4 on-demand task runs
+	HomelabHealth                *HomelabHealth     `json:",omitempty"` // v4 scheduled homelab job gate
+	Reports                      *ReportStats       `json:",omitempty"` // v4 alert reports
+	Maintenance                  *MaintenanceStats  `json:",omitempty"` // OSC-189 maintenance-mode lane
+	SourceFilters                *SourceFilterStats `json:",omitempty"` // OSC-207 Source / Source IP filters
+	Receivers                    *ReceiverStats     `json:",omitempty"` // OSC-207 receivers lane
+	SkippedLanes                 []string           `json:",omitempty"` // lanes switched off by run option: never a pass
 	Verdict                      domain.Verdict
 	EvidenceIncomplete           bool `json:",omitempty"`
 	Reasons                      []string

@@ -100,6 +100,8 @@ configuration, backup, and uninstall.
 | `alerting-day-3ps-smoke@v1` | `alerting-day-smoke@v4` at 3/s with 6/s 1-minute spikes, non-comparable. |
 | `alerting-day-3ps@v2` | `alerting-day-3ps@v1` with smoothed correlation pacing (each minute within about 2-3 alerts of plan in the engine tests) and a maintenance-mode lane: a campaign pattern, template and 5-minute alerthistory window at T+70; matching probes inside it must be stored suppressed with the window marker and never ticketed, controls and later probes unaffected; the objects are removed and read back. fo-01 needs `manage:maintenance-windows` (pre-check B16). `--skip-lane maintenance` switches the lane off. |
 | `alerting-day-3ps-smoke@v2` | The 3ps v1 smoke with the same pacing and a 3-minute window at T+8, non-comparable. |
+| `alerting-day-3ps@v3` | `alerting-day-3ps@v2` with server-style source labels on documentation-only names and TEST-NET-2 addresses (worker `ct-srv-01..32`, correlation `ct-srv-33..40`), the Alert View Source / Source IP filter actions in the front office (latency and exactness gated), and a receivers lane: a probe every 30 s through OSCAR's webhook, SNMP trap and SMTP receivers, each in History within 60 s with every label (pre-check B17; the controller needs `CORRTEST_SNMP_COMMUNITY`). `--skip-lane receivers` switches the lane off. |
+| `alerting-day-3ps-smoke@v3` | The 3ps v2 smoke with the same facets (probes every 20 s from T+1 to T+10), non-comparable. |
 
 Both smoke selectors are non-comparable. The mixed V3 selectors accept
 `--managed-share 0.10` (10% of baseline plus mixed-rate PDUs during load).
