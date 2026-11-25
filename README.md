@@ -96,6 +96,8 @@ configuration, backup, and uninstall.
 | `managed-alerts-smoke@v1` | Dedicated managed TL1 functional smoke for lifecycle, resend, escalation, acknowledgement and ticket flows. |
 | `alerting-day@v4` | The single-node mixed-load gate: 150 minutes with every lane at once (correlation cycling with up to 64 documents in flight at 20% of the load and ticketed parents, tickets, fingerprint policy rounds, R1-R4 resend plus an escalation cohort, front office, a homelab task run every minute from T+1 to T+145 with every 5th request issuing 3 at once, alert reports at T+60 and T+120; scheduled homelab jobs must not fail more than 5 points more often than in the 30 minutes before T0, or stop). The total offered firing rate over all lanes is 5/s, 10/s in 5-minute spikes at T+45 and T+105; resolves come on top. 30-minute drain. Needs `RESEND_SCHEDULE_ENABLED=true`, commissioned fingerprint policies, an approved `core-alarm-history-dump` report and front-office user fo-01 allowed to run reports and the homelab task. |
 | `alerting-day-smoke@v4` | The v4 lanes in about 15 minutes, non-comparable. |
+| `alerting-day-3ps@v1` | `alerting-day@v4` at a moderate load: a total offered firing rate of 3/s, 6/s in 1-minute spikes at T+45 and T+105, with v4's lane shares (correlation 20%, resend with escalation about 10%, fingerprint 5%, tickets about 5%), task lane, alert reports, homelab job gate, pre-checks and limits. The offered-rate check judges 3/s and 6/s. Not comparable with v4 runs. |
+| `alerting-day-3ps-smoke@v1` | `alerting-day-smoke@v4` at 3/s with 6/s 1-minute spikes, non-comparable. |
 
 Both smoke selectors are non-comparable. The mixed V3 selectors accept
 `--managed-share 0.10` (10% of baseline plus mixed-rate PDUs during load).

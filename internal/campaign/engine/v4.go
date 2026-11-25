@@ -272,7 +272,8 @@ func (r *run) v4Score(card *score.Scorecard, in score.Inputs, report map[string]
 			fullFrom = max(fullFrom, t.Sub(r.t0))
 		}
 		r.mu.Unlock()
-		judge(card, nil, offered.OfferedBudget(r.s.Baseline, scenario.V4TotalRate, scenario.V4SpikeRate, fullFrom))
+		total, spike := r.s.OfferedTotals()
+		judge(card, nil, offered.OfferedBudget(r.s.Baseline, total, spike, fullFrom))
 	}
 
 	r.escalationScore(card, in.Receipts, report)
