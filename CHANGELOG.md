@@ -6,8 +6,9 @@
   - Smoothed correlation pacing (`smoothCorrelationOffers`, off everywhere else): documents start
     so each minute T0-aligned lands on its plan plus the backlog clamped to 2, chosen from the next
     12 by the best fill, the oldest first once it has waited a minute. Engine synctest per minute
-    T+5..T+144: v1 36 -8/+7, v2 36 -2/+2 (totals exact), so a minute totals 177-183 against the
-    offered-rate check's 171-189. The smoke stays within -2/+2 per minute with an even mix
+    T+5..T+144 on fake time: v1 36 -8/+7, v2 36 -2/+2 (totals exact), so a minute totals 177-183
+    against the offered-rate check's 171-189; with every wake 3 ms late, as on a real clock,
+    v2 stays within -3/+3 and 0.1% of plan (each minute is planned from its boundary). Live UNRUN. The smoke stays within -2/+2 per minute with an even mix
     (96 of 108 alerts: documents of 10 and 6 cannot fill 12 a minute evenly). No tolerance changed.
   - Maintenance-mode lane (`maintenance` facet): as fo-01, a campaign pattern (`campaign_maint`
     equals the run token), a template and a scheduled window for the alerthistory handler only

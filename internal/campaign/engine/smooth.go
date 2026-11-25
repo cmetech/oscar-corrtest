@@ -93,7 +93,7 @@ func (r *run) smoothCorrelation(ctx context.Context) {
 	}
 
 	var offered, planned, minuteStart, target float64
-	minute := -1
+	minute, first := -1, true
 	for {
 		now := r.now()
 		if ctx.Err() != nil || !now.Before(drain) {
@@ -116,8 +116,12 @@ func (r *run) smoothCorrelation(ctx context.Context) {
 		if m := int(now.Sub(r.t0) / time.Minute); m != minute {
 			minute = m
 			end := r.t0.Add(time.Duration(m+1) * time.Minute)
+			from := r.t0.Add(time.Duration(m) * time.Minute) // the whole minute: a late first tick must not drop its start
+			if first {                                       // the lane may start mid-minute
+				from, first = now, false
+			}
 			plan := 0.0
-			for t := now; t.Before(end); t = t.Add(time.Second) {
+			for t := from; t.Before(end); t = t.Add(time.Second) {
 				plan += r.correlationRate(t) * min(time.Second, end.Sub(t)).Seconds()
 			}
 			debt := min(max(planned-offered, -smoothDebt), smoothDebt)

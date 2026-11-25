@@ -21,6 +21,21 @@ import (
 // document's name, and returns the run and correlation offers per minute.
 func smoothRun(t *testing.T, s scenario.Scenario, ctx context.Context, runTime func(doc corr.Scenario) time.Duration) (*run, map[int]int, *[]string) {
 	t.Helper()
+	return smoothRunOn(t, s, ctx, runTime, worker.RealClock{}) // under synctest, RealClock runs on the bubble's fake time
+}
+
+// lateClock wakes every SleepUntil 3 ms late, as a real clock does (plan review code F1).
+type lateClock struct{ worker.RealClock }
+
+func (c lateClock) SleepUntil(ctx context.Context, t time.Time) bool {
+	return c.RealClock.SleepUntil(ctx, t.Add(3*time.Millisecond))
+}
+
+func smoothRunOn(t *testing.T, s scenario.Scenario, ctx context.Context, runTime func(doc corr.Scenario) time.Duration, clock interface {
+	Now() time.Time
+	SleepUntil(context.Context, time.Time) bool
+}) (*run, map[int]int, *[]string) {
+	t.Helper()
 	var mu sync.Mutex
 	var started []string
 	r := &run{s: s, t0: time.Now(), e: New(Deps{Store: linkStore{}, Correlate: func(_ context.Context, _ string, doc corr.Scenario, _ string) (domain.Run, error) {
@@ -29,7 +44,7 @@ func smoothRun(t *testing.T, s scenario.Scenario, ctx context.Context, runTime f
 		mu.Unlock()
 		time.Sleep(runTime(doc))
 		return domain.Run{ID: "crt_slow"}, nil
-	}}, worker.RealClock{})} // under synctest, RealClock runs on the bubble's fake time
+	}}, clock)}
 	time.Sleep(s.Phase("correlation").Start)
 	r.correlation(ctx)
 	perMinute := map[int]int{}
@@ -264,4 +279,26 @@ func TestSmoothCorrelationNotRunBookkeeping(t *testing.T) {
 			})
 		})
 	}
+}
+
+// TestAlertingDay3psV2SmoothsOnALateClock (code review F1): with every wake
+// 3 ms late, as on a real clock, no part of any minute goes unplanned: the
+// lane total stays within 0.1% of plan and every minute within -3/+3.
+func TestAlertingDay3psV2SmoothsOnALateClock(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		s := scenario.AlertingDay3psV2()
+		_, perMinute, _ := smoothRunOn(t, s, context.Background(), runFor(time.Minute, time.Minute), lateClock{})
+		offered, planned := 0.0, 0.0
+		for m := 1; m <= 145; m++ {
+			got, plan := float64(perMinute[m]), minutePlan(s, m)
+			offered, planned = offered+got, planned+plan
+			if m >= 5 && m <= 144 && math.Abs(got-plan) > 3 {
+				t.Errorf("minute %d offered %.0f, plan %.0f", m, got, plan)
+			}
+		}
+		if math.Abs(offered-planned) > 0.001*planned {
+			t.Errorf("late clock: total %.0f of %.0f", offered, planned)
+		}
+	})
 }

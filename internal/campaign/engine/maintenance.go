@@ -145,14 +145,24 @@ func (r *run) maintenancePhase(ctx context.Context) {
 	if !active {
 		readActive()
 	}
-	r.maintEdgeRead(ctx, ops, key, "expired", end.Add(maintEdge), end.Add(maintEdge+maintEdge), start, end)
+	expiredAt, expired := end.Add(maintEdge), false
+	readExpired := func() {
+		expired = true
+		r.maintEdgeRead(ctx, ops, key, "expired", expiredAt, expiredAt.Add(maintEdge), start, end)
+	}
 	last := end.Add(5 * time.Second)
 	for i, at := 1, end.Add(5*time.Second); at.Before(end.Add(65 * time.Second)); i, at = i+1, at.Add(spec.Every) {
+		if !expired && at.After(expiredAt) {
+			readExpired()
+		}
 		if !r.e.clock.SleepUntil(ctx, at) {
 			break
 		}
 		post(score.MaintAfter, i, token, "false")
 		last = at
+	}
+	if !expired {
+		readExpired()
 	}
 	rows := r.maintReadBack(ctx, probes, last.Add(maintReadBudget))
 	r.setMaint(func(s *score.MaintenanceStats) {

@@ -35,6 +35,9 @@ type fakeMaint struct {
 	noSuppress  bool // the window's rule never suppresses
 	keepExpired bool // disable answers 200 but leaves the window
 	denied      bool // every call answers 403
+	ledgerLive  bool // status reads no window, but the ledger row's live half is present
+	slowActive  bool // a status read during the window takes 20 s
+	shiftBounds bool // status reports bounds a second off the request
 	calls       []string
 }
 
@@ -174,6 +177,14 @@ func (f *fakeMaint) MaintStatus(_ context.Context, cr string) (targetops.MaintSt
 		return targetops.MaintStatus{}, nil
 	}
 	start, end := w.start, w.end
+	if f.shiftBounds {
+		start = start.Add(time.Second)
+	}
+	if f.slowActive && f.state(w) == "active" {
+		f.mu.Unlock()
+		time.Sleep(20 * time.Second)
+		f.mu.Lock()
+	}
 	return targetops.MaintStatus{Active: f.state(w) == "active", State: f.state(w), SuppressionID: "s-" + cr, Start: &start, End: &end}, nil
 }
 
@@ -192,7 +203,7 @@ func (f *fakeMaint) MaintRecords(_ context.Context, q string) ([]targetops.Maint
 func (f *fakeMaint) MaintLive(_ context.Context, id string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if w := f.windows[strings.TrimPrefix(id, "w-")]; w != nil && w.present {
+	if w := f.windows[strings.TrimPrefix(id, "w-")]; w != nil && (w.present || f.ledgerLive) {
 		return "present", nil
 	}
 	return "absent", nil
@@ -270,6 +281,14 @@ func TestMaintenanceLane(t *testing.T) {
 		if c := h.campaign(); c.Cleanup != domain.CleanupClean {
 			t.Errorf("cleanup %s", c.Cleanup)
 		}
+		for _, p := range mt.Probes { // code review F2: the first after probe goes out at End+5s
+			if p.Kind == score.MaintAfter {
+				if d := p.PostedAt.Sub(mt.End.Add(5 * time.Second)); d < 0 || d > time.Second {
+					t.Errorf("first after probe at End%+v", p.PostedAt.Sub(mt.End))
+				}
+				break
+			}
+		}
 		for _, o := range card.Offered.PerMinute {
 			if o.Lanes[maintLane] > 0 {
 				t.Errorf("maintenance probes counted as offered load: %+v", o)
@@ -305,6 +324,21 @@ func TestMaintenanceLaneFailures(t *testing.T) {
 		{"expired window left", func(m *fakeMaint) { m.keepExpired = true }, func(t *testing.T, h *harness, _ *fakeMaint, card score.Scorecard) {
 			if c := h.campaign(); c.Cleanup == domain.CleanupClean || card.Maintenance.Removed {
 				t.Errorf("cleanup %s removed %v: an expired window still holds its rules", c.Cleanup, card.Maintenance.Removed)
+			}
+		}},
+		{"ledger still live", func(m *fakeMaint) { m.ledgerLive = true }, func(t *testing.T, h *harness, _ *fakeMaint, card score.Scorecard) {
+			if c := h.campaign(); c.Cleanup == domain.CleanupClean || card.Maintenance.Removed {
+				t.Errorf("cleanup %s removed %v with the ledger reporting the window live", c.Cleanup, card.Maintenance.Removed)
+			}
+		}},
+		{"late active read", func(m *fakeMaint) { m.slowActive = true }, func(t *testing.T, h *harness, _ *fakeMaint, card score.Scorecard) {
+			if !hasReason(card.Reasons, "maintenance: active read too late") || card.Verdict == domain.VerdictPass {
+				t.Errorf("verdict %s reasons %v", card.Verdict, card.Reasons)
+			}
+		}},
+		{"bounds differ", func(m *fakeMaint) { m.shiftBounds = true }, func(t *testing.T, h *harness, _ *fakeMaint, card score.Scorecard) {
+			if card.Verdict != domain.VerdictFail || !hasReason(card.Reasons, "maintenance: window bounds") {
+				t.Errorf("verdict %s reasons %v", card.Verdict, card.Reasons)
 			}
 		}},
 		{"denied", func(m *fakeMaint) { m.denied = true }, func(t *testing.T, h *harness, _ *fakeMaint, card score.Scorecard) {
@@ -372,11 +406,19 @@ func TestMaintenancePrecheck(t *testing.T) {
 			m.records = append(m.records, targetops.MaintRecord{ID: "w-ct-maint-old", CR: "ct-maint-old"})
 		}, "leftover campaign maintenance window: window ct-maint-old still present (expired)"},
 		{"leftover pattern", func(m *fakeMaint) { m.patterns["ct-maint-old"] = targetops.MaintPattern{Key: "ct-maint-old"} }, "leftover campaign maintenance pattern ct-maint-old"},
+		{"leftover template", func(m *fakeMaint) { m.templates["ct-maint-old"] = true }, "leftover campaign maintenance template ct-maint-old"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newFakeMaint(clock)
 			tc.set(m)
 			res := precheck.MaintenanceReady(precheckMaint(context.Background(), m))
+			if tc.want != "" && !m.denied { // code review F3: a blocked B16 writes nothing
+				for _, c := range m.calls {
+					if strings.HasPrefix(c, "create ") {
+						t.Errorf("blocked B16 still wrote: %s", c)
+					}
+				}
+			}
 			if tc.want == "" && res.Status != precheck.Pass || tc.want != "" && (res.Status != precheck.Fail || !strings.Contains(res.Detail, tc.want)) {
 				t.Errorf("%+v, want %q", res, tc.want)
 			}

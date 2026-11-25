@@ -62,6 +62,10 @@ func precheckMaint(ctx context.Context, ops MaintOps) (measured string, problems
 			problems = append(problems, "leftover campaign maintenance window: "+err.Error())
 		}
 	}
+	measured = fmt.Sprintf("%d patterns, %d templates, %d campaign windows checked", len(pats), len(tmpls), len(seen))
+	if len(problems) > 0 { // already blocked: write nothing (a first pattern write migrates the legacy MAINT_MODE_RULES list)
+		return measured, problems, nil
+	}
 	var b [4]byte
 	_, _ = rand.Read(b[:])
 	probe := maintPrefix + "pre-" + hex.EncodeToString(b[:])
@@ -69,21 +73,21 @@ func precheckMaint(ctx context.Context, ops MaintOps) (measured string, problems
 		Match: []targetops.MaintMatch{{Label: maintLabel, Operator: "equals", Value: "precheck"}}, Combinator: "and"})
 	switch {
 	case denied(err):
-		return "", append(problems, "fo-01 cannot create maintenance patterns ("+err.Error()+"): its role needs "+maintPermission), nil
+		return measured, []string{"fo-01 cannot create maintenance patterns (" + err.Error() + "): its role needs " + maintPermission}, nil
 	case err != nil:
-		return "", nil, err
+		return measured, []string{"probe pattern " + probe + " not created: " + err.Error()}, nil
 	}
 	if err := ops.DeleteMaintPattern(ctx, probe); err != nil {
-		return "", append(problems, "probe pattern "+probe+" not deleted: "+err.Error()), nil
+		return measured, []string{"probe pattern " + probe + " not deleted: " + err.Error()}, nil
 	}
-	if all, err := ops.MaintPatterns(ctx); err != nil {
-		return "", nil, err
-	} else {
-		for _, p := range all {
-			if p.Key == probe {
-				problems = append(problems, "probe pattern "+probe+" still listed after delete")
-			}
+	all, err := ops.MaintPatterns(ctx)
+	if err != nil {
+		return measured, []string{"probe pattern " + probe + " not verified deleted: " + err.Error()}, nil
+	}
+	for _, p := range all {
+		if p.Key == probe {
+			return measured, []string{"probe pattern " + probe + " still listed after delete"}, nil
 		}
 	}
-	return fmt.Sprintf("%d patterns, %d templates, %d campaign windows checked; probe pattern created and deleted", len(pats), len(tmpls), len(seen)), problems, nil
+	return measured + "; probe pattern created and deleted", nil, nil
 }
