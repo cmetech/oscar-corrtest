@@ -293,6 +293,12 @@ type Scenario struct {
 	Limits         Limits              `json:"limits"`
 	Precheck       PrecheckLimits      `json:"precheck"`
 	Seed           int64               `json:"seed"`
+
+	// OfferedRate and OfferedSpikeRate are the total offered firing rate
+	// over every lane, and inside a burst, of a Paced scenario; zero means
+	// v4's (V4TotalRate, V4SpikeRate), so v4's hash is unchanged.
+	OfferedRate      float64 `json:"offeredRate,omitempty"`
+	OfferedSpikeRate float64 `json:"offeredSpikeRate,omitempty"`
 }
 
 // TransportDedupWindow is OSCAR's JetStream duplicate window for ordinary alerts
@@ -582,12 +588,26 @@ func (s Scenario) controllerRate(spike bool) float64 {
 	return rate
 }
 
+// OfferedTotals is the planned total offered firing rate over every lane, and
+// inside a burst: OfferedRate and OfferedSpikeRate, each defaulting to v4's.
+func (s Scenario) OfferedTotals() (total, spike float64) {
+	total, spike = s.OfferedRate, s.OfferedSpikeRate
+	if total == 0 {
+		total = V4TotalRate
+	}
+	if spike == 0 {
+		spike = V4SpikeRate
+	}
+	return total, spike
+}
+
 // fillWorker sets the worker lane to what the controller lanes leave of the
-// 5/s total and the 10/s spike total, rounded down to 0.01/s.
+// total and the spike total (OfferedTotals), rounded down to 0.01/s.
 func (s *Scenario) fillWorker() {
-	s.Baseline.Rate = math.Floor((V4TotalRate-s.ControllerFiringRate())*100+1e-6) / 100
+	total, spike := s.OfferedTotals()
+	s.Baseline.Rate = math.Floor((total-s.ControllerFiringRate())*100+1e-6) / 100
 	for i := range s.Baseline.Bursts {
-		s.Baseline.Bursts[i].Rate = math.Floor((V4SpikeRate-s.ControllerSpikeRate())*100+1e-6) / 100
+		s.Baseline.Bursts[i].Rate = math.Floor((spike-s.ControllerSpikeRate())*100+1e-6) / 100
 	}
 }
 
@@ -681,9 +701,50 @@ func AlertingDaySmokeV4() Scenario {
 	return s
 }
 
+// AlertingDay3psV1 is alerting-day@v4 at a moderate load for functional
+// qualification (Corey, 2026-11-25, OSCAR 26.4.6-rc13): a total offered
+// firing rate of 3/s, and 6/s in 1-minute spikes at v4's spike starts (T+45,
+// T+105), with v4's shares of the total:
+//   - correlation 20%: 0.6/s (1.2/s in a spike), up to 64 in flight;
+//   - resend about 10%: v4's R1-R5 with 8 members each (40 per 130 s, 0.31/s);
+//   - fingerprint 5%: rounds of 9 a minute (8 variants and one other device);
+//   - tickets about 5%: every 12th new worker alert, as v4;
+//   - the worker lane: the rest, 1.94/s (4.34/s in a spike).
+//
+// Phases, task lane, alert reports, front office, homelab job gate, pre-check
+// limits, limits and seed are v4's; the offered-rate check judges each minute
+// against 3/s and 6/s. Not comparable with v4: every headline differs by load.
+func AlertingDay3psV1() Scenario {
+	s := AlertingDayV4()
+	s.ID, s.Version = "alerting-day-3ps", "v1"
+	s.OfferedRate, s.OfferedSpikeRate = 3, 6
+	s.Baseline.Bursts = []BurstSpec{{At: 45 * time.Minute, For: time.Minute}, {At: 105 * time.Minute, For: time.Minute}}
+	s.Correlation.Rate, s.Correlation.SpikeRate = 0.6, 1.2
+	s.Resend = append([]PolicySpec(nil), s.Resend...)
+	for i := range s.Resend {
+		s.Resend[i].Cohort = 8
+	}
+	fp := *s.Fingerprint
+	fp.Repeats = 8
+	s.Fingerprint = &fp
+	s.fillWorker()
+	return s
+}
+
+// AlertingDay3psSmokeV1 is alerting-day-smoke@v4 at the 3ps totals (3/s, 6/s
+// in its 1-minute spikes at T+4 and T+7): the same path-proving controller
+// lanes, the worker lane 2.66/s (5.46/s in a spike). Custom: never comparable.
+func AlertingDay3psSmokeV1() Scenario {
+	s := AlertingDaySmokeV4()
+	s.ID, s.Version = "alerting-day-3ps-smoke", "v1"
+	s.OfferedRate, s.OfferedSpikeRate = 3, 6
+	s.fillWorker()
+	return s
+}
+
 // Builtins are the built-in campaign scenarios.
 func Builtins() []Scenario {
-	return []Scenario{AlertingDayV1(), AlertingDayV2(), AlertingDaySmokeV1(), AlertingDaySmokeV2(), DeliveryRetryV1(), ResendOnlyV1(), FunctionalV1(), FunctionalBurstV1(), FunctionalBurstFullV1(), AlertingDayControlV1(), AlertingDayV3(), AlertingDaySmokeV3(), ManagedAlertsSmokeV1(), AlertingDayV4(), AlertingDaySmokeV4()}
+	return []Scenario{AlertingDayV1(), AlertingDayV2(), AlertingDaySmokeV1(), AlertingDaySmokeV2(), DeliveryRetryV1(), ResendOnlyV1(), FunctionalV1(), FunctionalBurstV1(), FunctionalBurstFullV1(), AlertingDayControlV1(), AlertingDayV3(), AlertingDaySmokeV3(), ManagedAlertsSmokeV1(), AlertingDayV4(), AlertingDaySmokeV4(), AlertingDay3psV1(), AlertingDay3psSmokeV1()}
 }
 
 // Lookup returns the built-in scenario named "id@version".

@@ -246,7 +246,7 @@ func TestResendOnlyV1IsolatesResendAtFivePerSecond(t *testing.T) {
 // scenario that adds it hashes apart.
 func TestFingerprintFacetIsOptional(t *testing.T) {
 	for _, s := range Builtins() {
-		if s.Fingerprint != nil && !s.Custom && s.Version != "v4" {
+		if s.Fingerprint != nil && !s.Custom && !s.Paced { // v4-family (Paced) gates carry it
 			t.Errorf("%s@%s carries the fingerprint lane", s.ID, s.Version)
 		}
 	}

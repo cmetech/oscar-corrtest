@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- New `alerting-day-3ps@v1` (comparable) and `alerting-day-3ps-smoke@v1` (never comparable), OSC-184:
+  `alerting-day@v4` and its smoke at a total offered firing rate of 3/s, and 6/s in 1-minute spikes
+  (main: T+45 and T+105; smoke: T+4 and T+7). The main run keeps v4's shares: correlation 0.6/s
+  (1.2/s in a spike), R1-R5 cohorts of 8 (0.31/s), fingerprint rounds of 9 a minute (0.15/s), every
+  12th worker alert ticketed; the worker lane is 1.94/s (4.34/s in a spike). The smoke keeps smoke
+  v4's controller lanes; its worker lane is 2.66/s (5.46/s). Phases, task lane, reports, homelab gate,
+  pre-checks, limits and seed are v4's. Scenarios gain `offeredRate`/`offeredSpikeRate` (zero means
+  v4's 5/s and 10/s), used to size the worker lane and by the per-minute offered-rate check; v4 and
+  every older hash are unchanged. `campaign compare` refuses a 3ps run against v4 runs. Correlation
+  offers vary by about one document per minute (36 -8/+7 at 0.6/s), so a 3ps minute can fall just
+  outside the 5% offered-rate tolerance (INCONCLUSIVE, never FAIL). Live runs UNRUN.
+
 - `alerting-day-smoke@v4` allows 8 correlation documents in flight (was 2), so its correlation share
   (0.2/s, 0.4/s in a spike) holds when OSCAR is slow and runs take up to 90 s, or 240 s for a
   ticketed run. Its second 1-minute spike moves from T+8 to T+7: cycling documents stop 4 minutes

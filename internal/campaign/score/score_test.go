@@ -515,3 +515,19 @@ func TestConfiguredComparisonRequiresSavedShareAndSameObserver(t *testing.T) {
 		t.Fatal("forged effective workload hash")
 	}
 }
+
+// TestCompareRefuses3psAgainstV4 (OSC-184 AC-5): a 3/s run is a different
+// workload from v4 (every latency and memory headline differs by design), so
+// compare refuses the pair in both modes, whichever hash is requested.
+func TestCompareRefuses3psAgainstV4(t *testing.T) {
+	v4, threePS := scenario.AlertingDayV4(), scenario.AlertingDay3psV1()
+	ref := identifiedScorecard("v4", domain.CampaignConfiguredPolicyReference, v4, 100, t0)
+	candidate := identifiedScorecard("3ps", domain.CampaignConfiguredPolicyCandidate, threePS, 90, t0.Add(4*time.Hour))
+	for _, mode := range []ComparisonMode{ControlBeforeAfter, ConfiguredPolicy} {
+		for _, hash := range []string{v4.Hash(), threePS.Hash()} {
+			if _, err := CompareCompatible([]IdentifiedScorecard{ref}, []IdentifiedScorecard{candidate}, hash, mode); !errors.Is(err, ErrIncompatibleComparison) {
+				t.Errorf("%s with hash %.8s: %v", mode, hash, err)
+			}
+		}
+	}
+}
