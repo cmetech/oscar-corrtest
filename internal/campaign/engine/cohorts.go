@@ -99,15 +99,14 @@ func (r *run) resendPhase(ctx context.Context) {
 			r.deliver(ctx, m, slot)
 		}
 	}
-	r.endEpisodes(context.WithoutCancel(ctx))
-	// OSCAR's status lists only open episodes, and a scenario may resolve the
-	// cohorts (drain) before scoring: read exhaustion now, after the last
-	// resends had until the phase end to land.
-	if !r.e.clock.SleepUntil(ctx, r.at("resend", true)) {
-		return
-	}
+	r.endEpisodes(stable)
+	// OSCAR's status lists only open episodes, and drain resolves the cohorts
+	// before scoring: read exhaustion here, after the last resends had until the
+	// phase end to land. A guard trip or Stop ends the wait early; read at once
+	// then (stable: the phase context is cancelled), before drain runs.
+	r.e.clock.SleepUntil(ctx, r.at("resend", true))
 	for _, p := range r.policies {
-		if st, err := r.e.d.Target.PolicyStatus(ctx, p.notifierID, p.spec.Action, p.id); err == nil {
+		if st, err := r.e.d.Target.PolicyStatus(stable, p.notifierID, p.spec.Action, p.id); err == nil {
 			r.mu.Lock()
 			p.status = &st
 			r.mu.Unlock()

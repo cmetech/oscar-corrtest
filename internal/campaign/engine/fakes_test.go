@@ -533,7 +533,10 @@ func (f *fakeOSCAR) expected(name string) (scenario.PolicySpec, time.Time, resen
 	return spec, ds[0].at, exp
 }
 
-func (f *fakeOSCAR) PolicyStatus(_ context.Context, nid, action, policyID string) (targetops.PolicyStatus, error) {
+func (f *fakeOSCAR) PolicyStatus(ctx context.Context, nid, action, policyID string) (targetops.PolicyStatus, error) {
+	if err := ctx.Err(); err != nil { // like the real client: a cancelled request fails
+		return targetops.PolicyStatus{}, err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	st := targetops.PolicyStatus{Revision: f.revs[nid+"/"+action], Enrollment: "enrolled"}
