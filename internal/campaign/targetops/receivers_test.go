@@ -3,12 +3,14 @@ package targetops
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cmetech/oscar-corrtest/internal/campaign/receivers"
 )
@@ -87,24 +89,46 @@ func TestReceiverMappingLifecycle(t *testing.T) {
 	}
 }
 
-// TestActiveProbesAndNativeResolve (OSC-210): the active-alert listing pages,
-// keeps only receiver probes (of the run), and a resolve posts the exact
-// labels and startsAt to native Alertmanager's ingest.
+// TestActiveProbesAndNativeResolve (OSC-210): the active-alert read asks
+// the server to filter (lane, and run when given), pages until total_records,
+// refuses a short read, and a resolve posts the exact labels and startsAt with
+// endsAt 30 s back.
 func TestActiveProbesAndNativeResolve(t *testing.T) {
 	var posted []map[string]any
+	short := false
+	rec := func(name, run string) map[string]any {
+		return map[string]any{"alert_labels": []map[string]string{{"name": "alertname", "value": name}, {"name": "campaign_run", "value": run}, {"name": "campaign_lane", "value": "receivers"}, {"name": "timestamp", "value": "t"}},
+			"fingerprint_sample_reference": map[string]string{"starts_at": "2026-11-25T23:46:47.000Z"}, "starts_at": "2026-11-25T23:46:47Z"}
+	}
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/ext/mw/api/v1/alerts/active-alerts":
-			page := r.URL.Query().Get("page")
-			rec := func(name, run, lane string) map[string]any {
-				return map[string]any{"alert_labels": []map[string]string{{"name": "alertname", "value": name}, {"name": "campaign_run", "value": run}, {"name": "campaign_lane", "value": lane}, {"name": "timestamp", "value": "t"}},
-					"fingerprint_sample_reference": map[string]string{"starts_at": "2026-11-25T23:46:47.000Z"}, "starts_at": "2026-11-25T23:46:47Z"}
+			var f struct {
+				Items []struct{ Field, Value string }
 			}
-			recs := []map[string]any{rec("a", "camp_x", "receivers"), rec("w", "camp_x", "baseline")}
-			if page == "2" {
-				recs = []map[string]any{rec("b", "camp_y", "receivers")}
+			_ = json.Unmarshal([]byte(r.URL.Query().Get("filter")), &f)
+			run := ""
+			for _, it := range f.Items {
+				if it.Field == "label:campaign_run" {
+					run = it.Value
+				}
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"records": recs, "total_pages": 2, "source": "alertmanager_native"})
+			all := [][]map[string]any{{rec("a", "camp_x")}, {rec("b", "camp_y")}}
+			if run == "camp_x" {
+				all = [][]map[string]any{{rec("a", "camp_x")}}
+			}
+			page := 1
+			if r.URL.Query().Get("page") == "2" {
+				page = 2
+			}
+			total := 0
+			for _, p := range all {
+				total += len(p)
+			}
+			if short {
+				total++
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"records": all[page-1], "total_records": total, "total_pages": len(all), "source": "alertmanager_native"})
 		case r.URL.Path == "/ext/alertmanager/api/v2/alerts" && r.Method == http.MethodPost:
 			_ = json.NewDecoder(r.Body).Decode(&posted)
 		default:
@@ -119,13 +143,18 @@ func TestActiveProbesAndNativeResolve(t *testing.T) {
 	if err != nil || len(got) != 1 || got[0].Labels["alertname"] != "a" || got[0].Labels["timestamp"] != "t" || got[0].StartsAt.IsZero() {
 		t.Fatalf("run probes %+v %v", got, err)
 	}
-	if all, _ := rx.ActiveProbes(context.Background(), ""); len(all) != 2 {
-		t.Errorf("all probes %+v", all)
+	if all, err := rx.ActiveProbes(context.Background(), ""); err != nil || len(all) != 2 {
+		t.Errorf("all probes %+v %v", all, err)
 	}
-	if err := rx.ResolveNative(context.Background(), got[0]); err != nil {
+	short = true
+	if _, err := rx.ActiveProbes(context.Background(), ""); err == nil {
+		t.Error("a short read was accepted")
+	}
+	if err := rx.ResolveNative(context.Background(), got); err != nil {
 		t.Fatal(err)
 	}
-	if len(posted) != 1 || posted[0]["startsAt"] != "2026-11-25T23:46:47Z" || posted[0]["endsAt"] == nil || posted[0]["labels"].(map[string]any)["timestamp"] != "t" {
+	end, _ := time.Parse(time.RFC3339Nano, fmt.Sprint(posted[0]["endsAt"]))
+	if len(posted) != 1 || posted[0]["startsAt"] != "2026-11-25T23:46:47Z" || time.Since(end) < 29*time.Second || posted[0]["labels"].(map[string]any)["timestamp"] != "t" {
 		t.Errorf("posted %+v", posted)
 	}
 }

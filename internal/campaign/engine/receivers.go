@@ -28,7 +28,7 @@ type ReceiverOps interface {
 	// ActiveProbes and ResolveNative (OSC-210): probes are closed in native
 	// Alertmanager, where the receivers put them, not only in History.
 	ActiveProbes(ctx context.Context, run string) ([]receivers.ActiveAlert, error)
-	ResolveNative(ctx context.Context, a receivers.ActiveAlert) error
+	ResolveNative(ctx context.Context, alerts []receivers.ActiveAlert) error
 }
 
 // kindRxMapping journals a Mapping the receivers lane installs: ObjectID is
@@ -210,11 +210,13 @@ func (r *run) rxResolveSeen(ctx context.Context, ops ReceiverOps, probes []score
 	if err != nil {
 		return
 	}
+	var batch []receivers.ActiveAlert
 	for _, a := range active {
 		if seen[a.Labels["alertname"]] {
-			_ = ops.ResolveNative(ctx, a)
+			batch = append(batch, a)
 		}
 	}
+	_ = ops.ResolveNative(ctx, batch) // one pass, no wait: the next pass re-checks
 }
 
 // rxResolveBudget bounds the resolve-and-confirm loop; rxResolvePoll spaces
@@ -238,13 +240,10 @@ func (r *run) rxResolveAll(ctx context.Context, ops ReceiverOps) ([]string, erro
 			return nil, nil
 		}
 		var names []string
-		var failed error
 		for _, a := range active {
 			names = append(names, a.Labels["alertname"])
-			if err := ops.ResolveNative(ctx, a); err != nil {
-				failed = err
-			}
 		}
+		failed := ops.ResolveNative(ctx, active) // a 429 or refusal is re-posted next pass
 		if !r.now().Before(deadline) {
 			slices.Sort(names)
 			return names, failed
@@ -379,7 +378,7 @@ func precheckReceivers(ctx context.Context, ops ReceiverOps) precheck.Result {
 	}
 	slices.Sort(runs)
 	for _, run := range runs {
-		problems = append(problems, fmt.Sprintf("%d receiver probes of %s still active in Alertmanager (campaign cleanup %s)", left[run], run, run))
+		problems = append(problems, fmt.Sprintf("%d receiver probes of %s still active in Alertmanager (run campaign cleanup %s, or wait until their endsAt, at most 1 h)", left[run], run, run))
 	}
 	problems = append(problems, ops.Reachable(ctx)...)
 	return precheck.ReceiversReady("mapping API readable; webhook route and SMTP answer; trap community set (UDP is not checked without a trap)", problems, nil)

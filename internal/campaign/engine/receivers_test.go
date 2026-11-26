@@ -160,19 +160,21 @@ func (f *fakeRx) ActiveProbes(_ context.Context, run string) ([]receivers.Active
 	return out, nil
 }
 
-func (f *fakeRx) ResolveNative(_ context.Context, a receivers.ActiveAlert) error {
+func (f *fakeRx) ResolveNative(_ context.Context, alerts []receivers.ActiveAlert) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.resolves++
 	if f.refuseResolve {
 		return errors.New("alertmanager ingest HTTP 503")
 	}
-	name := a.Labels["alertname"]
-	if cur, ok := f.native[name]; ok && reflect.DeepEqual(cur.Labels, a.Labels) && cur.StartsAt.Equal(a.StartsAt) {
-		delete(f.native, name)
-		for i := range f.rows { // the native resolve also closes the History row
-			if f.rows[i].AlertName == name {
-				f.rows[i].Status = "resolved"
+	for _, a := range alerts {
+		f.resolves++
+		name := a.Labels["alertname"]
+		if cur, ok := f.native[name]; ok && reflect.DeepEqual(cur.Labels, a.Labels) && cur.StartsAt.Equal(a.StartsAt) {
+			delete(f.native, name)
+			for i := range f.rows { // the native resolve also closes the History row
+				if f.rows[i].AlertName == name {
+					f.rows[i].Status = "resolved"
+				}
 			}
 		}
 	}

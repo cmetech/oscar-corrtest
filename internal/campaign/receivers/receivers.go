@@ -306,12 +306,23 @@ type ActiveAlert struct {
 // (the worker lane's route).
 const IngestPath = "/ext/alertmanager/api/v2/alerts"
 
-// ResolveNative posts a resolve for a: the identical labels and startsAt,
-// endsAt now, so native Alertmanager closes that alert (same fingerprint)
-// and OSCAR closes its History row. Only a 2xx is a send.
-func ResolveNative(ctx context.Context, client *http.Client, url string, a ActiveAlert, now time.Time) error {
-	body, _ := json.Marshal([]any{map[string]any{"labels": a.Labels,
-		"startsAt": a.StartsAt.UTC().Format(time.RFC3339Nano), "endsAt": now.UTC().Format(time.RFC3339Nano)}})
+// ResolveNative posts one resolve array for alerts: each with its identical
+// labels and startsAt, so native Alertmanager closes that alert (same
+// fingerprint) and OSCAR closes its History row. endsAt is 30 s in the past
+// (never before startsAt): a controller clock ahead of the target must not
+// leave it in the future, where Alertmanager would keep the alert active.
+// Only a 2xx is a send.
+func ResolveNative(ctx context.Context, client *http.Client, url string, alerts []ActiveAlert, now time.Time) error {
+	batch := make([]any, 0, len(alerts))
+	for _, a := range alerts {
+		end := now.Add(-30 * time.Second)
+		if !end.After(a.StartsAt) {
+			end = a.StartsAt.Add(time.Millisecond)
+		}
+		batch = append(batch, map[string]any{"labels": a.Labels,
+			"startsAt": a.StartsAt.UTC().Format(time.RFC3339Nano), "endsAt": end.UTC().Format(time.RFC3339Nano)})
+	}
+	body, _ := json.Marshal(batch)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return err

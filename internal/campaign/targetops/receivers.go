@@ -3,6 +3,7 @@ package targetops
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -191,11 +192,21 @@ func smtpHello(ctx context.Context, addr string) error {
 
 // ActiveProbes lists the receivers-lane probes native Alertmanager holds
 // active (OSCAR /api/v1/alerts/active-alerts, source alertmanager_native),
-// for run, or for every campaign when run is "".
+// for run, or for every campaign when run is "". The filter is applied by
+// the server (pages are positional over a changing active set, so a
+// client-side scan of every page could miss a probe); a read that does not
+// return total_records rows is an error, never "none left".
 func (r Receivers) ActiveProbes(ctx context.Context, run string) ([]receivers.ActiveAlert, error) {
+	items := []map[string]string{{"field": "label:campaign_lane", "operator": "equals", "value": receivers.Lane}}
+	if run != "" {
+		items = append(items, map[string]string{"field": "label:campaign_run", "operator": "equals", "value": run})
+	}
+	filter, _ := json.Marshal(map[string]any{"items": items, "logicOperator": "and"})
 	var out []receivers.ActiveAlert
+	seen := 0
 	for page := 1; page <= 200; page++ {
 		var resp struct {
+			Total      int    `json:"total_records"`
 			TotalPages int    `json:"total_pages"`
 			Source     string `json:"source"`
 			Records    []struct {
@@ -206,9 +217,10 @@ func (r Receivers) ActiveProbes(ctx context.Context, run string) ([]receivers.Ac
 				StartsAt time.Time `json:"starts_at"`
 			} `json:"records"`
 		}
-		if err := r.C.DoJSON(ctx, http.MethodGet, "/api/v1/alerts/active-alerts", url.Values{"page": {strconv.Itoa(page)}, "perPage": {"100"}}, nil, &resp); err != nil {
+		if err := r.C.DoJSON(ctx, http.MethodGet, "/api/v1/alerts/active-alerts", url.Values{"page": {strconv.Itoa(page)}, "perPage": {"100"}, "filter": {string(filter)}}, nil, &resp); err != nil {
 			return nil, err
 		}
+		seen += len(resp.Records)
 		if resp.Source != "" && resp.Source != "alertmanager_native" {
 			return nil, fmt.Errorf("active alerts come from %q, not native Alertmanager", resp.Source)
 		}
@@ -226,18 +238,25 @@ func (r Receivers) ActiveProbes(ctx context.Context, run string) ([]receivers.Ac
 			}
 			out = append(out, receivers.ActiveAlert{Labels: labels, StartsAt: start})
 		}
-		if page >= resp.TotalPages {
+		if page >= resp.TotalPages || len(resp.Records) == 0 {
+			if seen != resp.Total {
+				return nil, fmt.Errorf("active alerts read %d of %d rows (the set changed during paging)", seen, resp.Total)
+			}
 			return out, nil
 		}
 	}
 	return nil, fmt.Errorf("active alerts exceeded 200 pages")
 }
 
-// ResolveNative resolves one active probe through native Alertmanager's ingest.
-func (r Receivers) ResolveNative(ctx context.Context, a receivers.ActiveAlert) error {
+// ResolveNative resolves active probes through native Alertmanager's
+// ingest, in one request.
+func (r Receivers) ResolveNative(ctx context.Context, alerts []receivers.ActiveAlert) error {
+	if len(alerts) == 0 {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	return receivers.ResolveNative(ctx, r.HTTP, r.Root+receivers.IngestPath, a, time.Now())
+	return receivers.ResolveNative(ctx, r.HTTP, r.Root+receivers.IngestPath, alerts, time.Now())
 }
 
 // CommunityFromEnv is the trap community the controller's environment holds.
