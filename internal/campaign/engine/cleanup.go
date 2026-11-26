@@ -355,6 +355,7 @@ func (r *run) cleanup(ctx context.Context) domain.CleanupStatus {
 	}
 	r.restoreKinds(ctx) // all kinds; the fingerprint policy resolves its alerts first
 	r.reresolveFingerprint(ctx)
+	r.cleanupReceivers(ctx) // before the History check: a native resolve also closes the row
 	if !r.managedOnly() {
 		r.verifyHistoryResolved(ctx)
 	}

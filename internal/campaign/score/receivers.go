@@ -30,14 +30,18 @@ type ReceiverCounts struct {
 
 // ReceiverStats is the scorecard's Receivers section.
 type ReceiverStats struct {
-	Skipped   string `json:",omitempty"`
-	Setup     string `json:",omitempty"` // mapping install failure: the lane sent nothing
-	Read      string `json:",omitempty"` // History read-back failure
-	Removed   bool   // both mappings removed and read back absent
-	Planned   int
-	Bound     float64 // seconds
-	Receivers map[string]ReceiverCounts
-	Probes    []ReceiverProbe `json:",omitempty"`
+	Skipped string `json:",omitempty"`
+	Setup   string `json:",omitempty"` // mapping install failure: the lane sent nothing
+	Read    string `json:",omitempty"` // History read-back failure
+	Removed bool   // both mappings removed and read back absent
+	// StillActive are probes native Alertmanager still held active after the
+	// lane's resolve-and-confirm (OSC-210); ResolveErr its last failure.
+	StillActive []string `json:",omitempty"`
+	ResolveErr  string   `json:",omitempty"`
+	Planned     int
+	Bound       float64 // seconds
+	Receivers   map[string]ReceiverCounts
+	Probes      []ReceiverProbe `json:",omitempty"`
 }
 
 // ReceiverLabels are the labels a probe of server n carries (and History
@@ -144,6 +148,9 @@ func JudgeReceivers(s *ReceiverStats) (fails, incon []string) {
 	}
 	if !s.Removed {
 		incon = append(incon, "receivers: campaign mappings not removed")
+	}
+	if len(s.StillActive) > 0 || s.ResolveErr != "" && len(s.Probes) > 0 {
+		incon = append(incon, strings.TrimSpace(fmt.Sprintf("receivers: %d probes still active in Alertmanager after the lane %s", len(s.StillActive), s.ResolveErr)))
 	}
 	return fails, incon
 }

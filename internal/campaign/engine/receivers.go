@@ -25,6 +25,10 @@ type ReceiverOps interface {
 	Send(ctx context.Context, receiver, profile string, p receivers.Probe) error
 	ProbeHistory(ctx context.Context, start, end time.Time) ([]oscar.HistoryRecord, error)
 	Reachable(ctx context.Context) []string
+	// ActiveProbes and ResolveNative (OSC-210): probes are closed in native
+	// Alertmanager, where the receivers put them, not only in History.
+	ActiveProbes(ctx context.Context, run string) ([]receivers.ActiveAlert, error)
+	ResolveNative(ctx context.Context, alerts []receivers.ActiveAlert) error
 }
 
 // kindRxMapping journals a Mapping the receivers lane installs: ObjectID is
@@ -129,6 +133,7 @@ func (r *run) receiversPhase(ctx context.Context) {
 		if r.now().Sub(lastRead) >= rxReadEvery {
 			lastRead = r.now()
 			_ = r.rxRead(stable, ops, probes, spec.Bound, false)
+			r.rxResolveSeen(stable, ops, probes)
 		}
 	}
 	if len(probes) > 0 {
@@ -136,6 +141,13 @@ func (r *run) receiversPhase(ctx context.Context) {
 		if err := r.rxRead(stable, ops, probes, spec.Bound, true); err != nil {
 			r.setRx(func(s *score.ReceiverStats) { s.Read = err.Error() })
 		}
+		left, err := r.rxResolveAll(stable, ops)
+		r.setRx(func(s *score.ReceiverStats) {
+			s.StillActive = left
+			if err != nil {
+				s.ResolveErr = err.Error()
+			}
+		})
 	}
 	removed := r.rxRemove(stable, ids)
 	r.setRx(func(s *score.ReceiverStats) { s.Probes, s.Removed = probes, removed })
@@ -181,11 +193,88 @@ func (r *run) rxRead(ctx context.Context, ops ReceiverOps, probes []score.Receiv
 		}
 		probes[i].Found, probes[i].CreatedAt = true, row.CreatedAt
 		probes[i].Problem = score.CheckReceiverRow(r.id, probes[i], row)
-		if req, err := oscar.BuildHistoryResolve(row, r.id); err == nil {
-			_, _ = r.e.d.Target.PostAlertGroup(ctx, req)
-		}
 	}
 	return nil
+}
+
+// rxResolveSeen resolves, in native Alertmanager, the run's active probes
+// already judged (best effort: rxResolveAll confirms at the lane end).
+func (r *run) rxResolveSeen(ctx context.Context, ops ReceiverOps, probes []score.ReceiverProbe) {
+	seen := map[string]bool{}
+	for _, p := range probes {
+		if p.Found {
+			seen[p.Name] = true
+		}
+	}
+	active, err := ops.ActiveProbes(ctx, r.id)
+	if err != nil {
+		return
+	}
+	var batch []receivers.ActiveAlert
+	for _, a := range active {
+		if seen[a.Labels["alertname"]] {
+			batch = append(batch, a)
+		}
+	}
+	_ = ops.ResolveNative(ctx, batch) // one pass, no wait: the next pass re-checks
+}
+
+// rxResolveBudget bounds the resolve-and-confirm loop; rxResolvePoll spaces
+// its reads (native Alertmanager applies a resolve asynchronously).
+const (
+	rxResolveBudget = 2 * time.Minute
+	rxResolvePoll   = 10 * time.Second
+)
+
+// rxResolveAll resolves every probe of the run native Alertmanager still
+// holds active, with its exact labels and startsAt, and re-reads until none
+// is left or the budget ends; it returns the names still active.
+func (r *run) rxResolveAll(ctx context.Context, ops ReceiverOps) ([]string, error) {
+	deadline := r.now().Add(rxResolveBudget)
+	for {
+		active, err := ops.ActiveProbes(ctx, r.id)
+		if err != nil { // a timeout or a set that changed while paging: read again within the budget
+			if !r.now().Before(deadline) {
+				return nil, fmt.Errorf("active alerts: %w", err)
+			}
+			r.e.clock.SleepUntil(ctx, r.now().Add(rxResolvePoll))
+			continue
+		}
+		if len(active) == 0 {
+			return nil, nil
+		}
+		var names []string
+		for _, a := range active {
+			names = append(names, a.Labels["alertname"])
+		}
+		failed := ops.ResolveNative(ctx, active) // a 429 or refusal is re-posted next pass
+		if !r.now().Before(deadline) {
+			slices.Sort(names)
+			return names, failed
+		}
+		r.e.clock.SleepUntil(ctx, r.now().Add(rxResolvePoll))
+	}
+}
+
+// cleanupReceivers is cleanup's safety net (also `campaign cleanup <id>`):
+// any probe of the run still active in native Alertmanager is resolved; one
+// that stays active, or a failed read, makes cleanup DIRTY.
+func (r *run) cleanupReceivers(ctx context.Context) {
+	if r.s.Receivers == nil || r.t0.IsZero() || slices.Contains(r.opts.SkipLanes, receivers.Lane) {
+		return
+	}
+	ops := r.e.d.Receivers
+	if ops == nil {
+		r.addDirty("receivers: no client to check probes still active in Alertmanager")
+		return
+	}
+	left, err := r.rxResolveAll(ctx, ops)
+	switch {
+	case err != nil && len(left) == 0:
+		r.addDirty("receivers: " + err.Error())
+	case len(left) > 0:
+		r.addDirty(fmt.Sprintf("receivers: %d probes still active in Alertmanager (%s)", len(left), strings.Join(left[:min(len(left), 3)], ", ")))
+	}
 }
 
 // rxSetup installs the campaign webhook profile and trap mapping, each
@@ -278,6 +367,22 @@ func precheckReceivers(ctx context.Context, ops ReceiverOps) precheck.Result {
 		} else if found {
 			problems = append(problems, "trap mapping "+oid+" already exists (a leftover, or one that would act on the campaign trap)")
 		}
+	}
+	active, err := ops.ActiveProbes(ctx, "")
+	if err != nil {
+		return precheck.ReceiversReady("", nil, fmt.Errorf("active alerts: %w", err))
+	}
+	left := map[string]int{}
+	for _, a := range active {
+		left[a.Labels["campaign_run"]]++
+	}
+	runs := make([]string, 0, len(left))
+	for run := range left {
+		runs = append(runs, run)
+	}
+	slices.Sort(runs)
+	for _, run := range runs {
+		problems = append(problems, fmt.Sprintf("%d receiver probes of %s still active in Alertmanager (run campaign cleanup %s, or wait until their endsAt, at most 1 h)", left[run], run, run))
 	}
 	problems = append(problems, ops.Reachable(ctx)...)
 	return precheck.ReceiversReady("mapping API readable; webhook route and SMTP answer; trap community set (UDP is not checked without a trap)", problems, nil)
