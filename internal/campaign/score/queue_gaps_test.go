@@ -115,3 +115,12 @@ func TestQueuePointsSortedPerQueue(t *testing.T) {
 		t.Fatalf("reversed points: %+v (verdict %s %v), sorted: %+v", got, c.Verdict, c.Reasons, want)
 	}
 }
+
+// OSC-232 (code review V-2): MaxGapSeconds counts the run's edges.
+func TestQueueMaxGapCountsEdges(t *testing.T) {
+	in := good()
+	in.QueueDepth["q"] = in.QueueDepth["q"][5:] // first sample at T+300 s
+	if q := Compute(in, lim).Queue["q"]; q.MaxGapSeconds != 300 {
+		t.Fatalf("queue %+v, want the 300 s leading gap", q)
+	}
+}

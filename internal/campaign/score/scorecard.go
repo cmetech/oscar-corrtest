@@ -89,8 +89,8 @@ type QueueStats struct {
 	Phases       map[string]PhaseQueueStats
 	DrainSeconds float64
 	Drained      bool
-	// MaxGapSeconds is the longest unsampled stretch of the run, edges
-	// included: the phase peaks are sampled, not continuous. VictoriaMetrics
+	// MaxGapSeconds is the longest unsampled stretch of the depth series over
+	// the run, edges included: the phase peaks are sampled, not continuous. VictoriaMetrics
 	// repeats a raw sample over adjacent steps, so the scrape gap behind it can
 	// be about one step longer.
 	MaxGapSeconds float64

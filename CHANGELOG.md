@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- The queue drain gate judges queues through scrape gaps (OSC-232). Under 100% CPU the taskmanager
+  exporter missed scrapes (camp_dee1740eb5ba2fa2: 75-165 s gaps on all 17 queue series), and the
+  run-long coverage check skipped every queue as "queue series coverage". A queue is now judged
+  when its depth and age series reach the run end; mid-run gaps affect only the sampled peaks, and
+  `Queue.<q>.MaxGapSeconds` reports the longest unsampled stretch, edges included. The drain is
+  timed from the start of the final idle stretch after the last resolve: a non-idle sample, or a
+  sample after a gap over 60 s, restarts it, so an idle reading followed by a backlog is no longer
+  a drain, and after a gap the drain time is an upper bound. No scenario, query-set or hash change.
+
 - A guard trip or Stop no longer fails every capped resend policy (OSC-231). The resend phase read
   policy exhaustion only at its end, so a stop skipped the read, drain closed the cohort episodes,
   and scoring's live read (OSCAR lists only open episodes) said not exhausted
