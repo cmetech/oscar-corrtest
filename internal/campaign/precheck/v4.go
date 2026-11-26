@@ -97,7 +97,7 @@ func MaintenanceReady(measured string, problems []string, err error) Result {
 // webhook and SMTP receivers answer, with the trap community configured.
 func ReceiversReady(measured string, problems []string, err error) Result {
 	if err != nil {
-		return errRes("B17", Blocking, "mapping API", err)
+		return errRes("B17", Blocking, "receivers lane reads", err)
 	}
 	return res("B17", Blocking, true, measured, problems)
 }

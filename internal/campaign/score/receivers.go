@@ -150,7 +150,7 @@ func JudgeReceivers(s *ReceiverStats) (fails, incon []string) {
 		incon = append(incon, "receivers: campaign mappings not removed")
 	}
 	if len(s.StillActive) > 0 || s.ResolveErr != "" && len(s.Probes) > 0 {
-		incon = append(incon, fmt.Sprintf("receivers: %d probes still active in Alertmanager after the lane %s", len(s.StillActive), s.ResolveErr))
+		incon = append(incon, strings.TrimSpace(fmt.Sprintf("receivers: %d probes still active in Alertmanager after the lane %s", len(s.StillActive), s.ResolveErr)))
 	}
 	return fails, incon
 }

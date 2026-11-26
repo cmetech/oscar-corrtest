@@ -233,8 +233,12 @@ func (r *run) rxResolveAll(ctx context.Context, ops ReceiverOps) ([]string, erro
 	deadline := r.now().Add(rxResolveBudget)
 	for {
 		active, err := ops.ActiveProbes(ctx, r.id)
-		if err != nil {
-			return nil, fmt.Errorf("active alerts: %w", err)
+		if err != nil { // a timeout or a set that changed while paging: read again within the budget
+			if !r.now().Before(deadline) {
+				return nil, fmt.Errorf("active alerts: %w", err)
+			}
+			r.e.clock.SleepUntil(ctx, r.now().Add(rxResolvePoll))
+			continue
 		}
 		if len(active) == 0 {
 			return nil, nil
@@ -256,7 +260,7 @@ func (r *run) rxResolveAll(ctx context.Context, ops ReceiverOps) ([]string, erro
 // any probe of the run still active in native Alertmanager is resolved; one
 // that stays active, or a failed read, makes cleanup DIRTY.
 func (r *run) cleanupReceivers(ctx context.Context) {
-	if r.s.Receivers == nil || r.t0.IsZero() {
+	if r.s.Receivers == nil || r.t0.IsZero() || slices.Contains(r.opts.SkipLanes, receivers.Lane) {
 		return
 	}
 	ops := r.e.d.Receivers
@@ -366,7 +370,7 @@ func precheckReceivers(ctx context.Context, ops ReceiverOps) precheck.Result {
 	}
 	active, err := ops.ActiveProbes(ctx, "")
 	if err != nil {
-		return precheck.ReceiversReady("", nil, err)
+		return precheck.ReceiversReady("", nil, fmt.Errorf("active alerts: %w", err))
 	}
 	left := map[string]int{}
 	for _, a := range active {

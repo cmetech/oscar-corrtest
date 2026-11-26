@@ -421,3 +421,33 @@ func TestServerLabelsOnCorrelationDocs(t *testing.T) {
 		}
 	}
 }
+
+// flakyRx fails the first active-alert reads (a timeout, a set that changed
+// while paging): the resolve loop reads again within its budget (code
+// review F2).
+type flakyRx struct {
+	*fakeRx
+	fails int
+}
+
+func (f *flakyRx) ActiveProbes(ctx context.Context, run string) ([]receivers.ActiveAlert, error) {
+	if f.fails > 0 {
+		f.fails--
+		return nil, errors.New("active alerts read 3 of 4 rows")
+	}
+	return f.fakeRx.ActiveProbes(ctx, run)
+}
+
+func TestResolveAllRetriesReads(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, f := rxHarness(t)
+		f.native["a"] = receivers.ActiveAlert{Labels: map[string]string{"alertname": "a", "campaign_run": h.id, "campaign_lane": "receivers"}}
+		h.deps.Receivers = &flakyRx{fakeRx: f, fails: 3}
+		r := &run{e: New(h.deps, h.clock), id: h.id}
+		left, err := r.rxResolveAll(context.Background(), h.deps.Receivers)
+		if err != nil || len(left) != 0 || len(f.native) != 0 {
+			t.Fatalf("left %v err %v native %d", left, err, len(f.native))
+		}
+	})
+}
