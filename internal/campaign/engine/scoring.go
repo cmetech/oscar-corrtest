@@ -377,7 +377,7 @@ func (r *run) resendCases(ctx context.Context, receipts []targetops.Receipt, inc
 		r.mu.Lock()
 		st := p.status
 		r.mu.Unlock()
-		if st == nil { // no phase-end snapshot (stopped early): read what is left
+		if st == nil { // the snapshot read failed: read what is left. After drain OSCAR lists no open episodes, so this cannot show exhaustion
 			if live, err := r.e.d.Target.PolicyStatus(ctx, p.notifierID, p.spec.Action, p.id); err == nil {
 				st = &live
 			}

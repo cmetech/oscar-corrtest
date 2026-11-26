@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A guard trip or Stop no longer fails every capped resend policy (OSC-231). The resend phase read
+  policy exhaustion only at its end, so a stop skipped the read, drain closed the cohort episodes,
+  and scoring's live read (OSCAR lists only open episodes) said not exhausted
+  (camp_dee1740eb5ba2fa2: R1, R3, R4, 24 cases). The status is now read on every path into drain,
+  at once on a trip or stop. No scenario or hash change.
+
 - Receivers lane probes are resolved in native Alertmanager (OSC-210). 7fccab6 closed them through
   OSCAR's alert endpoint, which resolves History but leaves native Alertmanager holding each probe
   active for its one-hour validity (camp_4c4bfcb45906a4a9: 48 active after a PASS and CLEAN
