@@ -89,6 +89,11 @@ type QueueStats struct {
 	Phases       map[string]PhaseQueueStats
 	DrainSeconds float64
 	Drained      bool
+	// MaxGapSeconds is the longest unsampled stretch of the run, edges
+	// included: the phase peaks are sampled, not continuous. VictoriaMetrics
+	// repeats a raw sample over adjacent steps, so the scrape gap behind it can
+	// be about one step longer.
+	MaxGapSeconds float64
 }
 
 type LatencyStats struct {
@@ -215,6 +220,32 @@ func CoveredSeries(pts []Point, from, to time.Time) bool {
 	}
 	return covered(pts, float64(from.Unix()), float64(to.Unix()))
 }
+
+// byTime returns pts sorted by time: series() appends every series that
+// shares a queue_name.
+func byTime(pts []Point) []Point {
+	out := append([]Point(nil), pts...)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Time < out[j].Time })
+	return out
+}
+
+// reachesEnd: the series has a sample within maxGap of the run end. Gaps
+// before then (a starved exporter misses scrapes) leave the phase peaks
+// sampled; the drain is judged only where it was sampled (queueStats).
+func reachesEnd(pts []Point, from, to float64) bool {
+	w := window(pts, from, to)
+	return len(w) > 0 && to-w[len(w)-1].Time <= maxGap.Seconds()
+}
+
+// largestGap is the longest unsampled stretch of [from, to], edges included.
+func largestGap(pts []Point, from, to float64) float64 {
+	g, prev := 0.0, from
+	for _, p := range window(pts, from, to) {
+		g, prev = max(g, p.Time-prev), p.Time
+	}
+	return max(g, to-prev)
+}
+
 func queueStats(in Inputs, incon *[]string) map[string]QueueStats {
 	out := map[string]QueueStats{}
 	if len(in.QueueDepth) == 0 {
@@ -227,19 +258,21 @@ func queueStats(in Inputs, incon *[]string) map[string]QueueStats {
 			lastResolve = float64(r.SentAt.Unix())
 		}
 	}
-	for q, depth := range in.QueueDepth {
-		if !covered(depth, runFrom, runTo) || !covered(in.QueueAge[q], runFrom, runTo) {
+	g := maxGap.Seconds()
+	for q, raw := range in.QueueDepth {
+		depth, age := byTime(raw), byTime(in.QueueAge[q])
+		if !reachesEnd(depth, runFrom, runTo) || !reachesEnd(age, runFrom, runTo) {
 			*incon = append(*incon, "queue series coverage for "+q)
 			continue
 		}
-		qs := QueueStats{Phases: map[string]PhaseQueueStats{}}
+		qs := QueueStats{Phases: map[string]PhaseQueueStats{}, MaxGapSeconds: largestGap(depth, runFrom, runTo)}
 		for _, ph := range in.Phases {
 			from, to := float64(in.Start.Add(ph.Start).Unix()), float64(in.Start.Add(ph.End).Unix())
 			var ds, as []float64
 			for _, p := range window(depth, from, to) {
 				ds = append(ds, p.Value)
 			}
-			for _, p := range window(in.QueueAge[q], from, to) {
+			for _, p := range window(age, from, to) {
 				as = append(as, p.Value)
 			}
 			qs.Phases[ph.Name] = PhaseQueueStats{PeakDepth: Percentile(ds, 100), P95Depth: Percentile(ds, 95), PeakAge: Percentile(as, 100)}
@@ -248,13 +281,29 @@ func queueStats(in Inputs, incon *[]string) map[string]QueueStats {
 			*incon = append(*incon, "no accepted resolve to time the drain from")
 			continue
 		}
-		// the series is covered to the end of drain, so never idle means undrained
-		qs.DrainSeconds = depth[len(depth)-1].Time - lastResolve
-		for _, p := range depth {
-			if p.Time >= lastResolve && in.Precheck.QueueIdle(p.Value) {
-				qs.Drained, qs.DrainSeconds = true, p.Time-lastResolve
-				break
+		after := window(depth, lastResolve, runTo)
+		if len(after) == 0 {
+			*incon = append(*incon, "queue series coverage for "+q)
+			continue
+		}
+		// The drain ends where the final idle stretch starts (ruling C37: at or
+		// below the idle depth). A non-idle sample restarts the stretch, and so
+		// does a sample after a gap over maxGap: a backlog can rise and fall
+		// unseen inside a gap. A gap therefore only makes the drain read later.
+		idleFrom, prev := -1.0, lastResolve
+		for _, p := range after {
+			switch {
+			case !in.Precheck.QueueIdle(p.Value):
+				idleFrom = -1
+			case idleFrom < 0 || p.Time-prev > g:
+				idleFrom = p.Time
 			}
+			prev = p.Time
+		}
+		// the series reaches the end, so never idle means undrained
+		qs.DrainSeconds = after[len(after)-1].Time - lastResolve
+		if idleFrom >= 0 {
+			qs.Drained, qs.DrainSeconds = true, idleFrom-lastResolve
 		}
 		out[q] = qs
 	}
