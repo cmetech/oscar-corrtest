@@ -263,7 +263,7 @@ func (r *run) resolveFiring(ctx context.Context, includeLane bool) ([]oscar.Hist
 			continue
 		}
 		firing = append(firing, row)
-		if strings.HasPrefix(row.Labels["campaign_lane"], "native-") || row.Labels["integration"] == "tl1_probe" {
+		if strings.HasPrefix(row.Labels["campaign_lane"], "native-") || row.Labels["integration"] == "tl1_probe" || row.Labels["campaign_lane"] == "receivers" { // receivers: cleanupReceivers closes them in native Alertmanager
 			continue
 		} // only the actual source owns these clears
 		req, err := oscar.BuildHistoryResolve(row, r.id)

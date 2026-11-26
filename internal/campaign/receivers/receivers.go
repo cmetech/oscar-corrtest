@@ -291,3 +291,40 @@ func SendSMTP(ctx context.Context, addr string, p Probe) error {
 	}
 	return c.Quit()
 }
+
+// --- Alertmanager resolve (OSC-210) ----------------------------------------
+
+// ActiveAlert is a probe as OSCAR's native Alertmanager holds it: the exact
+// labels the receiver posted (receivers add their own, e.g. the trap's
+// alert_type, SMTP's timestamp) and its startsAt.
+type ActiveAlert struct {
+	Labels   map[string]string
+	StartsAt time.Time
+}
+
+// IngestPath is native Alertmanager's v2 ingest behind OSCAR's reverse proxy
+// (the worker lane's route).
+const IngestPath = "/ext/alertmanager/api/v2/alerts"
+
+// ResolveNative posts a resolve for a: the identical labels and startsAt,
+// endsAt now, so native Alertmanager closes that alert (same fingerprint)
+// and OSCAR closes its History row. Only a 2xx is a send.
+func ResolveNative(ctx context.Context, client *http.Client, url string, a ActiveAlert, now time.Time) error {
+	body, _ := json.Marshal([]any{map[string]any{"labels": a.Labels,
+		"startsAt": a.StartsAt.UTC().Format(time.RFC3339Nano), "endsAt": now.UTC().Format(time.RFC3339Nano)}})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("alertmanager ingest HTTP %d", resp.StatusCode)
+	}
+	return nil
+}

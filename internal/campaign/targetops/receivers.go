@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -186,6 +187,57 @@ func smtpHello(ctx context.Context, addr string) error {
 		}
 	}
 	return nil
+}
+
+// ActiveProbes lists the receivers-lane probes native Alertmanager holds
+// active (OSCAR /api/v1/alerts/active-alerts, source alertmanager_native),
+// for run, or for every campaign when run is "".
+func (r Receivers) ActiveProbes(ctx context.Context, run string) ([]receivers.ActiveAlert, error) {
+	var out []receivers.ActiveAlert
+	for page := 1; page <= 200; page++ {
+		var resp struct {
+			TotalPages int    `json:"total_pages"`
+			Source     string `json:"source"`
+			Records    []struct {
+				Labels []struct{ Name, Value string } `json:"alert_labels"`
+				Ref    struct {
+					StartsAt time.Time `json:"starts_at"`
+				} `json:"fingerprint_sample_reference"`
+				StartsAt time.Time `json:"starts_at"`
+			} `json:"records"`
+		}
+		if err := r.C.DoJSON(ctx, http.MethodGet, "/api/v1/alerts/active-alerts", url.Values{"page": {strconv.Itoa(page)}, "perPage": {"100"}}, nil, &resp); err != nil {
+			return nil, err
+		}
+		if resp.Source != "" && resp.Source != "alertmanager_native" {
+			return nil, fmt.Errorf("active alerts come from %q, not native Alertmanager", resp.Source)
+		}
+		for _, rec := range resp.Records {
+			labels := map[string]string{}
+			for _, l := range rec.Labels {
+				labels[l.Name] = l.Value
+			}
+			if labels["campaign_lane"] != receivers.Lane || run != "" && labels["campaign_run"] != run {
+				continue
+			}
+			start := rec.Ref.StartsAt
+			if start.IsZero() {
+				start = rec.StartsAt
+			}
+			out = append(out, receivers.ActiveAlert{Labels: labels, StartsAt: start})
+		}
+		if page >= resp.TotalPages {
+			return out, nil
+		}
+	}
+	return nil, fmt.Errorf("active alerts exceeded 200 pages")
+}
+
+// ResolveNative resolves one active probe through native Alertmanager's ingest.
+func (r Receivers) ResolveNative(ctx context.Context, a receivers.ActiveAlert) error {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	return receivers.ResolveNative(ctx, r.HTTP, r.Root+receivers.IngestPath, a, time.Now())
 }
 
 // CommunityFromEnv is the trap community the controller's environment holds.

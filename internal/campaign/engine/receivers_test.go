@@ -41,10 +41,15 @@ type fakeRx struct {
 	webhookErr error
 	reads      int
 	creates    int
+	// native is native Alertmanager's active probes by alertname: only a
+	// resolve with the exact labels and startsAt clears one (OSC-210).
+	native        map[string]receivers.ActiveAlert
+	refuseResolve bool // the ingest answers 503 to every resolve
+	resolves      int
 }
 
 func newFakeRx(clock interface{ Now() time.Time }) *fakeRx {
-	return &fakeRx{clock: clock, mappings: map[string][]receivers.MappingElement{}, sends: map[string]int{}}
+	return &fakeRx{clock: clock, mappings: map[string][]receivers.MappingElement{}, sends: map[string]int{}, native: map[string]receivers.ActiveAlert{}}
 }
 
 func key(ns, name string) string { return strings.ToLower(ns) + "/" + name }
@@ -116,6 +121,11 @@ func (f *fakeRx) Send(_ context.Context, rx, profile string, p receivers.Probe) 
 			return nil
 		}
 	}
+	native := map[string]string{"receiver_added": rx} // receivers add labels of their own
+	for k, v := range labels {
+		native[k] = v
+	}
+	f.native[labels["alertname"]] = receivers.ActiveAlert{Labels: native, StartsAt: p.StartsAt}
 	sev := labels["severity"]
 	delete(labels, "severity") // History promotes severity
 	f.rows = append(f.rows, oscar.HistoryRecord{AlertName: labels["alertname"], Fingerprint: "fp-" + labels["alertname"], Status: "firing",
@@ -137,6 +147,37 @@ func (f *fakeRx) ProbeHistory(_ context.Context, start, end time.Time) ([]oscar.
 }
 
 func (f *fakeRx) Reachable(context.Context) []string { return nil }
+
+func (f *fakeRx) ActiveProbes(_ context.Context, run string) ([]receivers.ActiveAlert, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []receivers.ActiveAlert
+	for _, a := range f.native {
+		if run == "" || a.Labels["campaign_run"] == run {
+			out = append(out, a)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeRx) ResolveNative(_ context.Context, a receivers.ActiveAlert) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resolves++
+	if f.refuseResolve {
+		return errors.New("alertmanager ingest HTTP 503")
+	}
+	name := a.Labels["alertname"]
+	if cur, ok := f.native[name]; ok && reflect.DeepEqual(cur.Labels, a.Labels) && cur.StartsAt.Equal(a.StartsAt) {
+		delete(f.native, name)
+		for i := range f.rows { // the native resolve also closes the History row
+			if f.rows[i].AlertName == name {
+				f.rows[i].Status = "resolved"
+			}
+		}
+	}
+	return nil
+}
 
 // rxHarness is the v4 harness with a receivers lane: probes every 10 s from
 // T+20s to T+300s (a spike at T+100s skips T+70s to T+130s), 60 s bound.
@@ -200,6 +241,9 @@ func TestReceiversLane(t *testing.T) {
 		if f.reads < 3 {
 			t.Errorf("only %d History reads: not rolling", f.reads)
 		}
+		if len(f.native) != 0 || len(rx.StillActive) != 0 || f.resolves < len(rx.Probes) { // OSC-210 AC-1
+			t.Errorf("probes still active in Alertmanager: %d (resolves %d)", len(f.native), f.resolves)
+		}
 		open, _ := h.db.OpenMutations(context.Background(), h.id)
 		if len(open) != 0 || f.creates != 2 { // "mapping stays" proves they are journaled
 			t.Errorf("open %v, creates %d", open, f.creates)
@@ -249,6 +293,15 @@ func TestReceiversLaneFailures(t *testing.T) {
 				t.Errorf("cleanup %s removed %v", hc.Cleanup, c.Receivers.Removed)
 			}
 		}},
+		{"resolve refused", func(_ *harness, f *fakeRx) { f.refuseResolve = true }, false, func(t *testing.T, h *harness, f *fakeRx, c score.Scorecard) {
+			// OSC-210 AC-1, AC-2: probes left active are INCONCLUSIVE and cleanup is DIRTY
+			if c.Verdict == domain.VerdictPass || !hasReason(c.Reasons, "receivers: ") || len(c.Receivers.StillActive) == 0 {
+				t.Errorf("verdict %s reasons %v still %d", c.Verdict, c.Reasons, len(c.Receivers.StillActive))
+			}
+			if hc := h.campaign(); hc.Cleanup == domain.CleanupClean || len(f.native) == 0 {
+				t.Errorf("cleanup %s with %d probes active", hc.Cleanup, len(f.native))
+			}
+		}},
 		{"skipped", func(*harness, *fakeRx) {}, true, func(t *testing.T, h *harness, f *fakeRx, c score.Scorecard) {
 			if c.Receivers.Skipped == "" || len(f.sends) != 0 || hasReason(c.Reasons, "receivers") || h.campaign().Comparable {
 				t.Errorf("skipped lane: %+v sends %v reasons %v", c.Receivers, f.sends, c.Reasons)
@@ -271,6 +324,38 @@ func TestReceiversLaneFailures(t *testing.T) {
 			})
 		})
 	}
+}
+
+// TestCleanupResolvesStragglers (OSC-210 AC-2): a completed run whose probes
+// are still active in Alertmanager (left by an older build) is cleaned by
+// `campaign cleanup`: every probe resolved with its exact labels, CLEAN.
+func TestCleanupResolvesStragglers(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		h, f := rxHarness(t)
+		if err := h.run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		f.mu.Lock()
+		for i := 0; i < 5; i++ { // what the 7fccab6 lane left behind
+			name := fmt.Sprintf("Campaign-%s-rx-smtp-%d", h.id, 900+i)
+			labels := score.ReceiverLabels(h.id, 35)
+			labels["alertname"], labels["severity"], labels["timestamp"] = name, "warning", "2026-11-25 23:46:47+00:00"
+			f.native[name] = receivers.ActiveAlert{Labels: labels, StartsAt: h.clock.Now().Add(-time.Hour)}
+		}
+		f.mu.Unlock()
+		st, err := New(h.deps, h.clock).Cleanup(context.Background(), h.id)
+		if err != nil || st != domain.CleanupClean || len(f.native) != 0 {
+			t.Fatalf("cleanup %s err %v, %d still active", st, err, len(f.native))
+		}
+		f.mu.Lock()
+		f.refuseResolve = true
+		f.native["x"] = receivers.ActiveAlert{Labels: map[string]string{"alertname": "x", "campaign_run": h.id, "campaign_lane": "receivers"}}
+		f.mu.Unlock()
+		if st, _ := New(h.deps, h.clock).Cleanup(context.Background(), h.id); st != domain.CleanupDirty {
+			t.Errorf("cleanup %s with a probe it cannot resolve", st)
+		}
+	})
 }
 
 // TestTrapWithoutMappingIsWrong: the row an unmapped trap leaves is judged
@@ -297,6 +382,11 @@ func TestPrecheckReceivers(t *testing.T) {
 	r := precheckReceivers(context.Background(), f)
 	if r.Status != precheck.Fail || !strings.Contains(fmt.Sprint(r), "ct-rx-old") || !strings.Contains(fmt.Sprint(r), receivers.TrapEnterpriseOID) {
 		t.Errorf("leftovers: %+v", r)
+	}
+	g := newFakeRx(fixedClock{}) // OSC-210 AC-3: probes of an earlier campaign still active
+	g.native["p"] = receivers.ActiveAlert{Labels: map[string]string{"alertname": "p", "campaign_run": "camp_old", "campaign_lane": "receivers"}}
+	if r := precheckReceivers(context.Background(), g); r.Status != precheck.Fail || !strings.Contains(fmt.Sprint(r), "camp_old") {
+		t.Errorf("active probes: %+v", r)
 	}
 }
 

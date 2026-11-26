@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Receivers lane probes are resolved in native Alertmanager (OSC-210). 7fccab6 closed them through
+  OSCAR's alert endpoint, which resolves History but leaves native Alertmanager holding each probe
+  active for its one-hour validity (camp_4c4bfcb45906a4a9: 48 active after a PASS and CLEAN
+  cleanup). Each judged probe, and every probe of the run at the lane end, is now resolved through
+  `/ext/alertmanager/api/v2/alerts` with the exact labels and startsAt OSCAR's
+  `/api/v1/alerts/active-alerts` (source `alertmanager_native`) reports, re-read until none is left
+  (2 minutes); probes left active make the Receivers section INCONCLUSIVE. Cleanup (and
+  `campaign cleanup <id>` on a completed run) does the same and reports DIRTY when a probe stays
+  active or the read fails. Pre-check B17 blocks while probes of an earlier campaign are active.
+  No scenario or schema change: alerting-day-3ps@v3 and its smoke keep their hashes.
+
 - New `alerting-day-3ps@v3` and `alerting-day-3ps-smoke@v3` (OSC-207): v2 plus three facets; every
   earlier scenario hash is pinned unchanged.
   - Server labels: worker alerts on `ct-srv-01..32`, correlation documents and receiver probes on
