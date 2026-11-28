@@ -711,7 +711,7 @@ and filter DSL) were closed at `dbe4864` (`re-review-resolution.md:22-26`).
 - Mutation campaign stands at **16 KILLED / 14 SURVIVED** (`re-review.md:192`);
   survivors are declared coverage gaps with no false-PASS consequence.
 - ⚠️ **Security-posture reversal:** the 08-19 review hardened a loopback-only
-  default, but oscar-plans `archive/oscar-corrtest/docs/superpowers/specs/2026-08-20-…-distribution-and-open-listener-design.md`
+  default, but oscar-plans `archive/oscar-corrtest/docs/superpowers/specs/2026-08-20-oscar-corrtest-distribution-and-open-listener-design.md`
   explicitly supersedes it with an unauthenticated `0.0.0.0:8787` default. The
   earlier DNS-rebinding and session findings were reviewed against the old
   default.
@@ -723,14 +723,14 @@ and filter DSL) were closed at `dbe4864` (`re-review-resolution.md:22-26`).
   target's Redis eviction policy — anything but `noeviction` can evict
   trigger-once flags and make *any* correlation test flaky.
 
-### `.planning/` and `.superpowers/`
+### Sketches and plans (archived in oscar-plans)
 oscar-plans `archive/oscar-corrtest/.planning/sketches/MANIFEST.md` records three UI sketches and their chosen
 winners (documentation drawer, three-pane scenario workbench, unified
-operations). oscar-plans `archive/oscar-corrtest/.superpowers/sdd/2026-08-20-…-scenario-authoring-guide/final-fix-report.md`
+operations). oscar-plans `archive/oscar-corrtest/.superpowers/sdd/2026-08-20-oscar-corrtest-scenario-authoring-guide/final-fix-report.md`
 is complete (all five findings fixed, full `release-gate` green), with one
 residual: previously deferred UX-only minors were left unchanged (line 238).
 
-`docs/superpowers/` holds 4 specs and 18 plans: the original 7-plan harness
+oscar-plans `archive/oscar-corrtest/docs/superpowers/` holds 4 specs and 26 plans, including: the original 7-plan harness
 series (repository-foundation → durable-ledger → flood-vertical-slice →
 window-order-patterns → timer-patterns → parent-child-notifier →
 custom-operational-hardening), the `trust-remediation` plan, the 8-plan
