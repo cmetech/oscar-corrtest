@@ -15,3 +15,9 @@ sweep*/
 scen2/
 scen3/
 neg1/
+
+# Plans live in cmetech/oscar-plans (OSC-358)
+docs/superpowers/*
+!docs/superpowers/README.md
+.superpowers/
+.planning/

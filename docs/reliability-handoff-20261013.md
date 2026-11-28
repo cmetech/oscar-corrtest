@@ -57,7 +57,7 @@ The subsequent [resolved History severity correction](qualification/20261014/res
 
 ## Repeating ordinary receiver qualification
 
-The [managed CLI plan](superpowers/plans/2026-10-14-ordinary-cli-managed-cohort.md) records the completed real CorrTest CLI qualification of `corrtest_ordinary_v1`. CorrTest's `ordinary-webhook` route still supports only that fixed lab profile. Changing its receiver URL or scenario YAML does not add a Splunk or middleware adapter.
+The managed CLI plan (oscar-plans `archive/oscar-corrtest/docs/superpowers/plans/2026-10-14-ordinary-cli-managed-cohort.md`) records the completed real CorrTest CLI qualification of `corrtest_ordinary_v1`. CorrTest's `ordinary-webhook` route still supports only that fixed lab profile. Changing its receiver URL or scenario YAML does not add a Splunk or middleware adapter.
 
 The backend [existing-feed qualification](../../oscar/docs/qualification/20261014/existing-webhook-window/README.md) uses the same owned managed-cohort infrastructure to exercise the shipped `splunk` and `middleware_custom_alert` profiles with their existing payload shapes. It runs the backend test harness, not the CorrTest CLI. **Finite qualification passed on MySQL 8 and 5.7**; consult that evidence record for exact fixture boundaries, retained failures and cleanup results.
 
