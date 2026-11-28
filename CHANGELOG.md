@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Plans moved to `cmetech/oscar-plans` (OSC-358). `docs/superpowers/`, `.superpowers/` and `.planning/` are removed and archived at `archive/oscar-corrtest/`; `docs/superpowers/README.md` points there. Docs only; no build, runtime or deployment change.
+
 - The queue drain gate judges queues through scrape gaps (OSC-232). Under 100% CPU the taskmanager
   exporter missed scrapes (camp_dee1740eb5ba2fa2: 75-165 s gaps on all 17 queue series), and the
   run-long coverage check skipped every queue as "queue series coverage". A queue is now judged
